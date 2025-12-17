@@ -46,25 +46,6 @@ import ReviewOnPhoneDialog from "../components/projects/ReviewOnPhoneDialog";
 import LoadingOverlay from "../components/projects/LoadingOverlay";
 import ProjectMembersDialog from "../components/projects/ProjectMembersDialog";
 import PermissionGate, { useProjectPermissions } from "../components/rbac/PermissionGate";
-import { requiresAuth } from "@/api/base44Client";
-
-// Local storage helpers for auth-less dev mode
-const LOCAL_PROJECTS_KEY = "saturnos_projects";
-const loadLocalProjects = () => {
-  try {
-    const stored = localStorage.getItem(LOCAL_PROJECTS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (_) {
-    return [];
-  }
-};
-const saveLocalProjects = (projects) => {
-  try {
-    localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(projects));
-  } catch (_) {
-    // ignore write errors in dev
-  }
-};
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
@@ -134,12 +115,8 @@ export default function ProjectsPage() {
   const loadProjects = async () => {
     setIsLoading(true);
     try {
-      if (!requiresAuth) {
-        setProjects(loadLocalProjects());
-      } else {
-        const data = await Project.list();
-        setProjects(data);
-      }
+      const data = await Project.list();
+      setProjects(data);
     } catch (error) {
       console.error("Error loading projects:", error);
     }
@@ -190,27 +167,13 @@ export default function ProjectsPage() {
 
   const handleCreateProject = async (projectData) => {
     try {
-      if (!requiresAuth) {
-        const newProject = {
-          ...projectData,
-          id: `proj_${Date.now()}`,
-          created_date: new Date().toISOString(),
-          status: projectData.status || "created"
-        };
-        const updated = [...projects, newProject];
-        saveLocalProjects(updated);
-        setProjects(updated);
-        setShowCreateDialog(false);
+      const newProject = await Project.create(projectData);
+      setShowCreateDialog(false);
+      if (newProject?.id) {
+        // Send users straight into setup for the new project
         navigate(`${createPageUrl("ProjectSetup")}?id=${newProject.id}`);
       } else {
-        const newProject = await Project.create(projectData);
-        setShowCreateDialog(false);
-        if (newProject?.id) {
-          // Send users straight into setup for the new project
-          navigate(`${createPageUrl("ProjectSetup")}?id=${newProject.id}`);
-        } else {
-          loadProjects();
-        }
+        loadProjects();
       }
     } catch (error) {
       console.error("Error creating project:", error);
@@ -218,16 +181,9 @@ export default function ProjectsPage() {
   };
 
   const handleUpdateProject = async (projectId, projectData) => {
-    if (!requiresAuth) {
-      const updated = projects.map(p => p.id === projectId ? { ...p, ...projectData } : p);
-      saveLocalProjects(updated);
-      setProjects(updated);
-      setEditingProject(null);
-    } else {
-      await Project.update(projectId, projectData);
-      setEditingProject(null);
-      loadProjects();
-    }
+    await Project.update(projectId, projectData);
+    setEditingProject(null);
+    loadProjects();
   };
 
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -235,19 +191,6 @@ export default function ProjectsPage() {
   const handleDeleteProject = async (projectId) => {
     setIsDeleting(true);
     try {
-      // In local/dev without auth, just update local state and skip API calls
-      if (!requiresAuth) {
-        const remaining = projects.filter(p => p.id !== projectId);
-        setProjects(remaining);
-        setFilteredProjects(prev => prev.filter(p => p.id !== projectId));
-        setDeletingProject(null);
-        const newSelected = new Set(selectedProjects);
-        newSelected.delete(projectId);
-        setSelectedProjects(newSelected);
-        saveLocalProjects(remaining);
-        return;
-      }
-
       const steps = await SOPStep.filter({ project_id: projectId });
 
       for (let i = 0; i < steps.length; i++) {
@@ -299,17 +242,6 @@ export default function ProjectsPage() {
     setIsDeleting(true);
     setShowBulkDeleteAlert(false);
     try {
-      // In local/dev without auth, remove locally and skip API calls
-      if (!requiresAuth) {
-        const projectsToDelete = Array.from(selectedProjects);
-        const remaining = projects.filter(p => !projectsToDelete.includes(p.id));
-        setProjects(remaining);
-        setFilteredProjects(prev => prev.filter(p => !projectsToDelete.includes(p.id)));
-        setSelectedProjects(new Set());
-        saveLocalProjects(remaining);
-        return;
-      }
-
       const projectsToDelete = Array.from(selectedProjects);
 
       for (let i = 0; i < projectsToDelete.length; i++) {

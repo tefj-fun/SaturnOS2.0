@@ -4,7 +4,6 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { User } from "@/api/entities";
-import { requiresAuth } from "@/api/base44Client";
 import {
   FolderPlus,
   Spline,
@@ -73,15 +72,6 @@ export default function Layout({ children, currentPageName }) {
 
   useEffect(() => {
     const fetchUser = async () => {
-      if (!requiresAuth) {
-        setUser({
-          full_name: "Local User",
-          role: "admin",
-          email: "local@example.com"
-        });
-        return;
-      }
-
       try {
         const currentUser = await User.me();
         setUser(currentUser);
