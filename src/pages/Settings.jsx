@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '@/api/entities';
+import { requiresAuth } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -130,6 +131,12 @@ export default function SettingsPage() {
   }, []);
 
   const loadCurrentUser = async () => {
+    if (!requiresAuth) {
+      setCurrentUser(MOCK_CURRENT_USER);
+      setUserSettings(MOCK_CURRENT_USER.preferences);
+      return;
+    }
+
     try {
       const user = await User.me();
       setCurrentUser(user);

@@ -1,6 +1,7 @@
 
 
-
 export function createPageUrl(pageName: string) {
-    return '/' + pageName.toLowerCase().replace(/ /g, '-');
+    const [path, query] = pageName.split('?');
+    const normalizedPath = '/' + path.toLowerCase().replace(/ /g, '-');
+    return query ? `${normalizedPath}?${query}` : normalizedPath;
 }

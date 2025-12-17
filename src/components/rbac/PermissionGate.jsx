@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '@/api/entities';
 import { ProjectMember } from '@/api/entities';
+import { requiresAuth } from '@/api/base44Client';
 
 /**
  * PermissionGate - Component that conditionally renders children based on user permissions
@@ -25,6 +26,13 @@ export default function PermissionGate({
   }, [projectId, permission]);
 
   const checkPermission = async () => {
+    // In local/dev when auth is disabled, allow everything to avoid 401 spam
+    if (!requiresAuth) {
+      setHasPermission(true);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const currentUser = await User.me();
       
@@ -103,6 +111,18 @@ export function useProjectPermissions(projectId) {
   }, [projectId]);
 
   const loadUserPermissions = async () => {
+    // In local/dev when auth is disabled, return full permissions as admin
+    if (!requiresAuth) {
+      setUserRole('admin');
+      setPermissions([
+        'view_project', 'edit_project', 'delete_project', 'manage_steps',
+        'upload_datasets', 'annotate', 'train_models', 'view_results',
+        'manage_members', 'export_data'
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const currentUser = await User.me();
       setUserRole(currentUser.role);

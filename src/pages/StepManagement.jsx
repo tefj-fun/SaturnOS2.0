@@ -765,9 +765,10 @@ function StepCard({
                   autoFocus
                 />
               ) : (
-                <p className="text-xs text-gray-500 mt-1">
-                  Product: <Badge variant="outline" className="text-xs">{step.product}</Badge>
-                </p>
+                <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                  <span>Product:</span>
+                  <Badge variant="outline" className="text-xs">{step.product}</Badge>
+                </div>
               )}
             </div>
           </div>

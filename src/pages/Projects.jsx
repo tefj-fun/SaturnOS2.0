@@ -45,7 +45,26 @@ import DeleteProjectDialog from "../components/projects/DeleteProjectDialog";
 import ReviewOnPhoneDialog from "../components/projects/ReviewOnPhoneDialog";
 import LoadingOverlay from "../components/projects/LoadingOverlay";
 import ProjectMembersDialog from "../components/projects/ProjectMembersDialog";
-import PermissionGate from "../components/rbac/PermissionGate";
+import PermissionGate, { useProjectPermissions } from "../components/rbac/PermissionGate";
+import { requiresAuth } from "@/api/base44Client";
+
+// Local storage helpers for auth-less dev mode
+const LOCAL_PROJECTS_KEY = "saturnos_projects";
+const loadLocalProjects = () => {
+  try {
+    const stored = localStorage.getItem(LOCAL_PROJECTS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (_) {
+    return [];
+  }
+};
+const saveLocalProjects = (projects) => {
+  try {
+    localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(projects));
+  } catch (_) {
+    // ignore write errors in dev
+  }
+};
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
@@ -115,8 +134,12 @@ export default function ProjectsPage() {
   const loadProjects = async () => {
     setIsLoading(true);
     try {
-      const data = await Project.list();
-      setProjects(data);
+      if (!requiresAuth) {
+        setProjects(loadLocalProjects());
+      } else {
+        const data = await Project.list();
+        setProjects(data);
+      }
     } catch (error) {
       console.error("Error loading projects:", error);
     }
@@ -166,15 +189,45 @@ export default function ProjectsPage() {
   };
 
   const handleCreateProject = async (projectData) => {
-    await Project.create(projectData);
-    setShowCreateDialog(false);
-    loadProjects();
+    try {
+      if (!requiresAuth) {
+        const newProject = {
+          ...projectData,
+          id: `proj_${Date.now()}`,
+          created_date: new Date().toISOString(),
+          status: projectData.status || "created"
+        };
+        const updated = [...projects, newProject];
+        saveLocalProjects(updated);
+        setProjects(updated);
+        setShowCreateDialog(false);
+        navigate(`${createPageUrl("ProjectSetup")}?id=${newProject.id}`);
+      } else {
+        const newProject = await Project.create(projectData);
+        setShowCreateDialog(false);
+        if (newProject?.id) {
+          // Send users straight into setup for the new project
+          navigate(`${createPageUrl("ProjectSetup")}?id=${newProject.id}`);
+        } else {
+          loadProjects();
+        }
+      }
+    } catch (error) {
+      console.error("Error creating project:", error);
+    }
   };
 
   const handleUpdateProject = async (projectId, projectData) => {
-    await Project.update(projectId, projectData);
-    setEditingProject(null);
-    loadProjects();
+    if (!requiresAuth) {
+      const updated = projects.map(p => p.id === projectId ? { ...p, ...projectData } : p);
+      saveLocalProjects(updated);
+      setProjects(updated);
+      setEditingProject(null);
+    } else {
+      await Project.update(projectId, projectData);
+      setEditingProject(null);
+      loadProjects();
+    }
   };
 
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -182,6 +235,19 @@ export default function ProjectsPage() {
   const handleDeleteProject = async (projectId) => {
     setIsDeleting(true);
     try {
+      // In local/dev without auth, just update local state and skip API calls
+      if (!requiresAuth) {
+        const remaining = projects.filter(p => p.id !== projectId);
+        setProjects(remaining);
+        setFilteredProjects(prev => prev.filter(p => p.id !== projectId));
+        setDeletingProject(null);
+        const newSelected = new Set(selectedProjects);
+        newSelected.delete(projectId);
+        setSelectedProjects(newSelected);
+        saveLocalProjects(remaining);
+        return;
+      }
+
       const steps = await SOPStep.filter({ project_id: projectId });
 
       for (let i = 0; i < steps.length; i++) {
@@ -233,6 +299,17 @@ export default function ProjectsPage() {
     setIsDeleting(true);
     setShowBulkDeleteAlert(false);
     try {
+      // In local/dev without auth, remove locally and skip API calls
+      if (!requiresAuth) {
+        const projectsToDelete = Array.from(selectedProjects);
+        const remaining = projects.filter(p => !projectsToDelete.includes(p.id));
+        setProjects(remaining);
+        setFilteredProjects(prev => prev.filter(p => !projectsToDelete.includes(p.id)));
+        setSelectedProjects(new Set());
+        saveLocalProjects(remaining);
+        return;
+      }
+
       const projectsToDelete = Array.from(selectedProjects);
 
       for (let i = 0; i < projectsToDelete.length; i++) {
@@ -667,15 +744,15 @@ function ProjectCard({
         isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''
       } ${isDeleting ? 'opacity-50 pointer-events-none' : ''} group-hover:scale-[1.02] border-0`}>
         <CardHeader className="pb-4">
-          <div className="flex justify-between items-start mb-2">
-            <div className="flex items-start gap-3 flex-1">
+          <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+            <div className="flex items-start gap-3 flex-1 min-w-0">
               <Checkbox
                 checked={isSelected}
                 onCheckedChange={(checked) => onSelect(project.id, checked)}
                 className="mt-1"
                 disabled={isDeleting}
               />
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <CardTitle className="text-xl font-bold text-gray-900 truncate">
                   {project.name}
                 </CardTitle>
@@ -686,7 +763,7 @@ function ProjectCard({
                 )}
               </div>
             </div>
-            <Badge className={`${statusConfig.color} border-0 font-medium ml-2`}>
+            <Badge className={`${statusConfig.color} border-0 font-medium ml-2 flex-shrink-0 whitespace-nowrap self-start`}>
               <StatusIcon className="w-3 h-3 mr-1" />
               {statusConfig.label}
             </Badge>
@@ -779,6 +856,13 @@ function ProjectCard({
 
 // Project actions dropdown component
 function ProjectActionsDropdown({ project, onEdit, onDelete, isDeleting }) {
+  const { hasPermission, isLoading } = useProjectPermissions(project.id);
+  // In local/dev (auth disabled), show actions by default so the menu isn't empty.
+  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_BASE44_REQUIRE_AUTH !== 'true';
+  const canEdit = bypassPermissions || hasPermission("edit_project");
+  const canDelete = bypassPermissions || hasPermission("delete_project");
+  const noActions = !canEdit && !canDelete && !isLoading;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -788,16 +872,25 @@ function ProjectActionsDropdown({ project, onEdit, onDelete, isDeleting }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <PermissionGate projectId={project.id} permission="edit_project">
-          <DropdownMenuItem onClick={() => onEdit(project)} disabled={isDeleting}>
+        {canEdit && (
+          <DropdownMenuItem onClick={() => onEdit(project)} disabled={isDeleting || isLoading}>
             Edit
           </DropdownMenuItem>
-        </PermissionGate>
-        <PermissionGate projectId={project.id} permission="delete_project">
-          <DropdownMenuItem onClick={() => onDelete(project)} className="text-red-600 focus:text-red-700" disabled={isDeleting}>
+        )}
+        {canDelete && (
+          <DropdownMenuItem
+            onClick={() => onDelete(project)}
+            className="text-red-600 focus:text-red-700"
+            disabled={isDeleting || isLoading}
+          >
             Delete
           </DropdownMenuItem>
-        </PermissionGate>
+        )}
+        {noActions && (
+          <DropdownMenuItem disabled className="text-gray-500">
+            No actions available
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

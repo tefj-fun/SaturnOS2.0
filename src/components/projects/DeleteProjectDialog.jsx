@@ -18,7 +18,10 @@ export default function DeleteProjectDialog({ open, project, onOpenChange, onDel
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md glass-effect border-0 shadow-2xl">
+      <DialogContent 
+        className="sm:max-w-md glass-effect border-0 shadow-2xl"
+        aria-describedby="delete-project-description"
+      >
         <DialogHeader className="text-center">
           <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center">
             <Trash2 className="w-6 h-6 text-white" />
@@ -26,6 +29,9 @@ export default function DeleteProjectDialog({ open, project, onOpenChange, onDel
           <DialogTitle className="text-2xl font-bold text-gray-900">
             Delete Project
           </DialogTitle>
+          <p id="delete-project-description" className="sr-only">
+            Confirm project deletion
+          </p>
           <p className="text-gray-600">
             This action cannot be undone
           </p>

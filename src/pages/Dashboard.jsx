@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { User } from "@/api/entities";
+import { requiresAuth } from "@/api/base44Client";
 import { Project } from "@/api/entities";
 import { SOPStep } from "@/api/entities";
 import { TrainingRun } from "@/api/entities";
@@ -59,6 +60,15 @@ export default function DashboardPage() {
   }, []);
 
   const loadDashboardData = async () => {
+    if (!requiresAuth) {
+      setUser({
+        full_name: "Local User",
+        role: "admin"
+      });
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const [currentUser, projectsData, stepsData, runsData] = await Promise.all([
       User.me(),
@@ -375,7 +385,7 @@ export default function DashboardPage() {
                   Quick Actions
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-6">
                 <Link to={createPageUrl('Projects')}>
                   <Button className="w-full bg-blue-600 hover:bg-blue-700 justify-start" size="lg">
                     <Plus className="w-5 h-5 mr-3" />
