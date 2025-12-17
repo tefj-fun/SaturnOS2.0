@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User } from '@/api/entities';
+import { supabase } from '@/api/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -131,9 +131,17 @@ export default function SettingsPage() {
 
   const loadCurrentUser = async () => {
     try {
-      const user = await User.me();
-      setCurrentUser(user);
-      setUserSettings(user.preferences || MOCK_CURRENT_USER.preferences);
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
+      if (user) {
+        setCurrentUser({
+          full_name: user.email,
+          email: user.email,
+          role: 'admin',
+          preferences: MOCK_CURRENT_USER.preferences
+        });
+        setUserSettings(MOCK_CURRENT_USER.preferences);
+      }
     } catch (error) {
       console.error('Error loading user:', error);
     }
@@ -142,11 +150,7 @@ export default function SettingsPage() {
   const handleSaveProfile = async () => {
     setIsLoading(true);
     try {
-      await User.updateMyUserData({
-        full_name: currentUser.full_name,
-        preferences: userSettings
-      });
-      // Show success message
+      setCurrentUser(prev => ({ ...prev, preferences: userSettings }));
     } catch (error) {
       console.error('Error saving profile:', error);
     }

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { User } from "@/api/entities";
+import { supabase } from "@/api/supabaseClient";
 import {
   FolderPlus,
   Spline,
@@ -69,21 +69,93 @@ const navigationItems = [
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const currentUser = await User.me();
-        setUser(currentUser);
-      } catch (error) {
-        console.error("Failed to fetch user:", error);
-      }
+    const init = async () => {
+      const { data } = await supabase.auth.getUser();
+      setUser(data?.user || null);
+      setAuthChecked(true);
     };
-    fetchUser();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      setAuthChecked(true);
+    });
+
+    init();
+    return () => listener?.subscription?.unsubscribe();
   }, []);
+
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      setAuthError(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   // Hide sidebar for Annotation Studio page
   const isAnnotationStudio = currentPageName === "AnnotationStudio" || location.pathname.includes("AnnotationStudio") || currentPageName === "AnnotationReview";
+
+  if (!authChecked || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-white">
+        <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md border border-blue-100">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg bg-white border border-blue-100">
+              <img 
+                src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/067a9f53a_Android.png" 
+                alt="SaturnOS Logo"
+                className="w-8 h-8 object-contain"
+              />
+            </div>
+            <div>
+              <h2 className="font-bold text-gray-900 text-lg">SaturnOS 2.0</h2>
+              <p className="text-xs text-gray-500 font-medium">Admin Sign In</p>
+            </div>
+          </div>
+          <form className="space-y-4" onSubmit={handleSignIn}>
+            <div>
+              <label className="text-sm font-medium text-gray-700">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="mt-1 w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-1 w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            {authError && <p className="text-sm text-red-600">{authError}</p>}
+            <button
+              type="submit"
+              className="w-full bg-blue-600 text-white py-2 rounded-md font-semibold hover:bg-blue-700"
+            >
+              Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   if (isAnnotationStudio) {
     return (
@@ -174,18 +246,25 @@ export default function Layout({ children, currentPageName }) {
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
                     <span className="text-blue-600 font-semibold text-sm">
-                      {user ? user.full_name?.charAt(0).toUpperCase() : 'U'}
+                      {user ? (user.email?.charAt(0).toUpperCase() || 'U') : 'U'}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-gray-900 text-sm truncate">
-                      {user ? user.full_name : 'Loading...'}
+                      {user ? user.email : 'Loading...'}
                     </p>
                     <p className="text-xs text-gray-500 truncate capitalize">
-                      {user ? user.role : 'User'}
+                      Admin
                     </p>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="text-xs text-red-600 mt-2"
+                >
+                  Log out
+                </button>
             </Link>
           </SidebarFooter>
         </Sidebar>
