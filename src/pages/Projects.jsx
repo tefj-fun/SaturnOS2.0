@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from "react";
-import { Project } from "@/api/entities";
-import { SOPStep } from "@/api/entities";
+import { listProjects, createProject, updateProject, deleteProject } from "@/api/db";
+import { listStepsByProject, deleteStepsByProject } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -115,7 +115,7 @@ export default function ProjectsPage() {
   const loadProjects = async () => {
     setIsLoading(true);
     try {
-      const data = await Project.list();
+      const data = await listProjects();
       setProjects(data);
     } catch (error) {
       console.error("Error loading projects:", error);
@@ -125,7 +125,7 @@ export default function ProjectsPage() {
 
   const getProjectProgress = async (projectId) => {
     try {
-      const steps = await SOPStep.filter({ project_id: projectId });
+      const steps = await listStepsByProject(projectId);
       if (steps.length === 0) return 0;
       const annotatedSteps = steps.filter(step => step.is_annotated).length;
       return Math.round((annotatedSteps / steps.length) * 100);
@@ -167,7 +167,10 @@ export default function ProjectsPage() {
 
   const handleCreateProject = async (projectData) => {
     try {
-      const newProject = await Project.create(projectData);
+      const newProject = await createProject({
+        ...projectData,
+        created_at: new Date().toISOString()
+      });
       setShowCreateDialog(false);
       if (newProject?.id) {
         // Send users straight into setup for the new project
@@ -181,7 +184,7 @@ export default function ProjectsPage() {
   };
 
   const handleUpdateProject = async (projectId, projectData) => {
-    await Project.update(projectId, projectData);
+    await updateProject(projectId, projectData);
     setEditingProject(null);
     loadProjects();
   };
@@ -192,19 +195,12 @@ export default function ProjectsPage() {
     setIsDeleting(true);
     try {
       const steps = await SOPStep.filter({ project_id: projectId });
-
-      for (let i = 0; i < steps.length; i++) {
-        await SOPStep.delete(steps[i].id);
-        if ((i + 1) % 3 === 0 && i < steps.length - 1) {
-          await delay(500);
-        }
-      }
-
       if (steps.length > 0) {
+        await deleteStepsByProject(projectId);
         await delay(300);
       }
 
-      await Project.delete(projectId);
+      await deleteProject(projectId);
       setDeletingProject(null);
 
       const newSelected = new Set(selectedProjects);
@@ -247,20 +243,14 @@ export default function ProjectsPage() {
       for (let i = 0; i < projectsToDelete.length; i++) {
         const projectId = projectsToDelete[i];
 
-        const steps = await SOPStep.filter({ project_id: projectId });
-
-        for (let j = 0; j < steps.length; j++) {
-          await SOPStep.delete(steps[j].id);
-          if ((j + 1) % 2 === 0 && j < steps.length - 1) {
-            await delay(400);
-          }
-        }
+        const steps = await listStepsByProject(projectId);
 
         if (steps.length > 0) {
+          await deleteStepsByProject(projectId);
           await delay(300);
         }
 
-        await Project.delete(projectId);
+        await deleteProject(projectId);
 
         if (i < projectsToDelete.length - 1) {
           await delay(600);
