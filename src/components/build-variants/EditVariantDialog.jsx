@@ -1,5 +1,4 @@
-
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,28 +9,35 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Sparkles } from "lucide-react";
+import { Edit3 } from "lucide-react";
 
-export default function CreateProjectDialog({ open, onOpenChange, onCreateProject }) {
+export default function EditVariantDialog({ open, variant, onOpenChange, onUpdateVariant }) {
   const [formData, setFormData] = useState({
     name: "",
-    description: ""
+    description: "",
+    attributes: {}
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (variant) {
+      setFormData({
+        name: variant.name || "",
+        description: variant.description || "",
+        attributes: variant.attributes || {}
+      });
+    }
+  }, [variant]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) return;
+    if (!formData.name.trim() || !variant) return;
 
     setIsSubmitting(true);
     try {
-      await onCreateProject({
-        ...formData,
-        status: "created"
-      });
-      setFormData({ name: "", description: "" });
+      await onUpdateVariant(variant.id, formData);
     } catch (error) {
-      console.error("Error creating project:", error);
+      console.error("Error updating variant:", error);
     }
     setIsSubmitting(false);
   };
@@ -45,26 +51,26 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
       <DialogContent className="sm:max-w-md glass-effect border-0 shadow-2xl">
         <DialogHeader className="text-center">
           <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
-            <Sparkles className="w-6 h-6 text-white" />
+            <Edit3 className="w-6 h-6 text-white" />
           </div>
           <DialogTitle className="text-2xl font-bold text-gray-900">
-            Create New Project
+            Edit Build Variant
           </DialogTitle>
           <p className="text-gray-600">
-            Start your guided annotation journey
+            Update variant details
           </p>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-6 mt-6">
           <div className="space-y-2">
             <Label htmlFor="name" className="text-sm font-semibold text-gray-700">
-              Project Name *
+              Variant Name *
             </Label>
             <Input
               id="name"
               value={formData.name}
               onChange={(e) => handleInputChange("name", e.target.value)}
-              placeholder="Enter project name"
+              placeholder="e.g., Model X - Premium - Blue"
               className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
               required
             />
@@ -78,7 +84,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
               id="description"
               value={formData.description}
               onChange={(e) => handleInputChange("description", e.target.value)}
-              placeholder="Describe your annotation project"
+              placeholder="Describe this variant's characteristics"
               className="border-gray-200 focus:border-blue-500 focus:ring-blue-500 h-24 resize-none"
             />
           </div>
@@ -98,7 +104,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
               className="flex-1 bg-blue-600 hover:bg-blue-700 shadow-lg"
               disabled={isSubmitting || !formData.name.trim()}
             >
-              {isSubmitting ? "Creating..." : "Create Project"}
+              {isSubmitting ? "Updating..." : "Update Variant"}
             </Button>
           </div>
         </form>

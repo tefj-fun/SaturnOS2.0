@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox"; // Added Checkbox import
 import { ArrowRight, PenTool, Edit3, Save, X, AlertTriangle, CheckCircle } from "lucide-react";
 
 export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
@@ -41,6 +42,16 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
   };
 
   const getClarityIndicator = (step) => {
+    // Check if needs_clarification is explicitly set to true
+    if (step.needs_clarification === true) {
+      return {
+        icon: AlertTriangle,
+        color: "text-red-600",
+        bgColor: "bg-red-100",
+        label: "Needs Clarification"
+      };
+    }
+    // Fallback to clarity score if needs_clarification is false or undefined
     if (step.clarity_score >= 8) {
       return {
         icon: CheckCircle,
@@ -82,7 +93,11 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
       classes: initialClasses,
       // Explicitly set the old 'class' property to undefined to ensure consistency
       // during editing, as we're now using 'classes'.
-      class: undefined
+      class: undefined,
+      // Ensure clarity_score is a number for the input field
+      clarity_score: typeof step.clarity_score === 'number' ? step.clarity_score : 0,
+      // Ensure needs_clarification is a boolean
+      needs_clarification: typeof step.needs_clarification === 'boolean' ? step.needs_clarification : false
     });
   };
 
@@ -104,9 +119,35 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
   const handleEditChange = (field, value) => {
     if (field === 'classes') {
       setEditedStep(prev => ({ ...prev, [field]: value.split(',').map(s => s.trim()).filter(Boolean) }));
+    } else if (field === 'clarity_score') {
+      // When clarity score changes, also update needs_clarification
+      const score = parseFloat(value);
+      setEditedStep(prev => ({ 
+        ...prev, 
+        [field]: score,
+        // If clarity_score drops below 6, set needs_clarification to true.
+        // If it reaches 6 or above, set needs_clarification to false unless explicitly overridden.
+        // We use 6 here to align with the "Needs Review" threshold, ensuring that "Needs Clarification" implies a critical issue.
+        needs_clarification: score < 6 
+      }));
+    } else if (field === 'needs_clarification') {
+      setEditedStep(prev => ({ ...prev, [field]: value }));
     } else {
       setEditedStep(prev => ({ ...prev, [field]: value }));
     }
+  };
+
+  // New function to mark step as clarified
+  const markAsClarified = (index) => {
+    const updatedSteps = [...steps];
+    updatedSteps[index] = {
+      ...updatedSteps[index],
+      needs_clarification: false,
+      // Ensure clarity_score is at least 7 when marked as clarified, implying it's "Clear" or "Needs Review"
+      clarity_score: Math.max(updatedSteps[index].clarity_score || 0, 7), 
+      clarification_questions: [] // Clear any outstanding questions
+    };
+    onUpdateSteps(updatedSteps);
   };
 
   return (
@@ -186,6 +227,28 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Clarity Score (0-10)</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="10"
+                          step="0.1"
+                          value={editedStep.clarity_score}
+                          onChange={(e) => handleEditChange('clarity_score', e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 mt-4">
+                        <Checkbox
+                          id={`needs-clarification-${index}`}
+                          checked={editedStep.needs_clarification}
+                          onCheckedChange={(checked) => handleEditChange('needs_clarification', checked)}
+                        />
+                        <label htmlFor={`needs-clarification-${index}`} className="text-sm font-medium text-gray-700 cursor-pointer">
+                          Needs Clarification
+                        </label>
+                      </div>
                     </div>
 
                     <div>
@@ -238,16 +301,48 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
                       </div>
                       <p className="text-gray-600 text-sm mb-3">{step.description}</p>
                       
+                      {/* Display clarification questions with Mark as Clarified button */}
                       {step.clarification_questions && step.clarification_questions.length > 0 && (
                         <div className="mb-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
-                          <p className="text-xs font-medium text-amber-800 mb-2">
-                            ⚠️ This step may need clarification:
-                          </p>
+                          <div className="flex items-start justify-between mb-2">
+                            <p className="text-xs font-medium text-amber-800">
+                              ⚠️ This step may need clarification:
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => markAsClarified(index)}
+                              className="h-6 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-2"
+                            >
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Mark as Clarified
+                            </Button>
+                          </div>
                           <ul className="text-xs text-amber-700 space-y-1">
                             {step.clarification_questions.map((question, qIndex) => (
                               <li key={qIndex}>• {question}</li>
                             ))}
                           </ul>
+                        </div>
+                      )}
+
+                      {/* Display needs_clarification flag without questions with Mark as Clarified button */}
+                      {step.needs_clarification && (!step.clarification_questions || step.clarification_questions.length === 0) && (
+                        <div className="mb-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-amber-800">
+                              ⚠️ This step has been flagged as needing clarification
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => markAsClarified(index)}
+                              className="h-6 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-2"
+                            >
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Mark as Clarified
+                            </Button>
+                          </div>
                         </div>
                       )}
                       

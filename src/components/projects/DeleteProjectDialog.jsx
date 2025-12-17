@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+
+import React from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,19 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Trash2, AlertTriangle } from "lucide-react";
 
-export default function DeleteProjectDialog({ open, project, onOpenChange, onDeleteProject }) {
-  const [isDeleting, setIsDeleting] = useState(false);
-
+export default function DeleteProjectDialog({ open, project, onOpenChange, onDeleteProject, isDeleting }) {
   const handleDelete = async () => {
     if (!project) return;
-
-    setIsDeleting(true);
-    try {
-      await onDeleteProject(project.id);
-    } catch (error) {
-      console.error("Error deleting project:", error);
-    }
-    setIsDeleting(false);
+    await onDeleteProject(project.id);
   };
 
   return (

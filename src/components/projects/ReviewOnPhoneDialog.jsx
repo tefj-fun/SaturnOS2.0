@@ -1,3 +1,4 @@
+
 import React from "react";
 import {
   Dialog,
@@ -18,7 +19,7 @@ export default function ReviewOnPhoneDialog({ open, project, onOpenChange }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md glass-effect border-0 shadow-2xl">
         <DialogHeader className="text-center">
-          <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl flex items-center justify-center">
+          <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
             <Smartphone className="w-6 h-6 text-white" />
           </div>
           <DialogTitle className="text-2xl font-bold text-gray-900">

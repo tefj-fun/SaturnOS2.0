@@ -8,6 +8,24 @@ import AnnotationStudio from "./AnnotationStudio";
 
 import AnnotationReview from "./AnnotationReview";
 
+import StepManagement from "./StepManagement";
+
+import TrainingConfiguration from "./TrainingConfiguration";
+
+import TrainingStatus from "./TrainingStatus";
+
+import LabelLibrary from "./LabelLibrary";
+
+import Results from "./Results";
+
+import ResultsAndAnalysis from "./ResultsAndAnalysis";
+
+import Settings from "./Settings";
+
+import Dashboard from "./Dashboard";
+
+import BuildVariants from "./BuildVariants";
+
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
@@ -19,6 +37,24 @@ const PAGES = {
     AnnotationStudio: AnnotationStudio,
     
     AnnotationReview: AnnotationReview,
+    
+    StepManagement: StepManagement,
+    
+    TrainingConfiguration: TrainingConfiguration,
+    
+    TrainingStatus: TrainingStatus,
+    
+    LabelLibrary: LabelLibrary,
+    
+    Results: Results,
+    
+    ResultsAndAnalysis: ResultsAndAnalysis,
+    
+    Settings: Settings,
+    
+    Dashboard: Dashboard,
+    
+    BuildVariants: BuildVariants,
     
 }
 
@@ -54,6 +90,24 @@ function PagesContent() {
                 <Route path="/AnnotationStudio" element={<AnnotationStudio />} />
                 
                 <Route path="/AnnotationReview" element={<AnnotationReview />} />
+                
+                <Route path="/StepManagement" element={<StepManagement />} />
+                
+                <Route path="/TrainingConfiguration" element={<TrainingConfiguration />} />
+                
+                <Route path="/TrainingStatus" element={<TrainingStatus />} />
+                
+                <Route path="/LabelLibrary" element={<LabelLibrary />} />
+                
+                <Route path="/Results" element={<Results />} />
+                
+                <Route path="/ResultsAndAnalysis" element={<ResultsAndAnalysis />} />
+                
+                <Route path="/Settings" element={<Settings />} />
+                
+                <Route path="/Dashboard" element={<Dashboard />} />
+                
+                <Route path="/BuildVariants" element={<BuildVariants />} />
                 
             </Routes>
         </Layout>

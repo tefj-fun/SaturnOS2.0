@@ -1,4 +1,3 @@
-
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +12,7 @@ export default function StepNavigation({ steps, currentStepIndex, onStepSelect }
   };
 
   return (
-    <div className="space-y-2 max-h-96 overflow-y-auto">
+    <div className="space-y-2">
       {steps.map((step, index) => (
         <Button
           key={step.id}
@@ -41,18 +40,10 @@ export default function StepNavigation({ steps, currentStepIndex, onStepSelect }
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium text-sm truncate">
-                  {step.title}
+                  Step {step.step_number}: {step.title}
                 </span>
                 <div className="flex items-center gap-1 ml-2">
                   {getClarityIndicator(step)}
-                  <Badge 
-                    variant="outline" 
-                    className={`text-xs ${
-                      index === currentStepIndex ? "border-white text-white" : ""
-                    }`}
-                  >
-                    {step.product}
-                  </Badge>
                 </div>
               </div>
               <p className={`text-xs opacity-80 line-clamp-2 ${

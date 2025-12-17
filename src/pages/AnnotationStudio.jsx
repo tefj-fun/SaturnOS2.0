@@ -1,16 +1,32 @@
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Project } from "@/api/entities";
 import { SOPStep } from "@/api/entities";
 import { LogicRule } from "@/api/entities";
 import { StepImage } from "@/api/entities";
+import { BuildVariant } from "@/api/entities";
+import { StepVariantConfig } from "@/api/entities";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowLeft,
   PenTool,
   Bot,
@@ -21,18 +37,23 @@ import {
   Target,
   Cog,
   Image as ImageIcon,
-  Layers3
+  Layers3,
+  List,
+  BarChart3,
+  Spline,
+  Package
 } from "lucide-react";
 import { createPageUrl } from "@/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
-import { InvokeLLM } from "@/api/integrations"; 
+import { InvokeLLM } from "@/api/integrations";
 
 import AnnotationCanvas from "../components/annotation/AnnotationCanvas";
 import StepNavigation from "../components/annotation/StepNavigation";
 import AnnotationChat from "../components/annotation/AnnotationChat";
 import LogicBuilder from "../components/annotation/LogicBuilder";
 import ImagePortal from "../components/annotation/ImagePortal";
+import AnnotationInsights from "../components/annotation/AnnotationInsights";
 
 export default function AnnotationStudioPage() {
   const navigate = useNavigate();
@@ -50,43 +71,55 @@ export default function AnnotationStudioPage() {
   const [logicRules, setLogicRules] = useState([]);
   const [stepImages, setStepImages] = useState([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showStepsPopup, setShowStepsPopup] = useState(false);
+  const [brushSize, setBrushSize] = useState(10);
+  const canvasRef = useRef(null);
 
+  const [selectedBuildVariant, setSelectedBuildVariant] = useState(null);
+  const [buildVariants, setBuildVariants] = useState([]);
+  const [currentStepConfig, setCurrentStepConfig] = useState(null);
+
+  // This effect will run when the component mounts and unmounts
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const id = urlParams.get('projectId');
-    if (id) {
-      setProjectId(id);
-      loadProjectData(id);
-    } else {
-      navigate(createPageUrl('Projects'));
-    }
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = 'auto';
+    };
   }, []);
 
-  useEffect(() => {
-    if (currentStep) {
-      initializeAIGuidance();
-      loadLogicRules();
-      loadStepImages();
-      // Set the active class when the current step changes
-      if (currentStep.classes && currentStep.classes.length > 0) {
-        setActiveClass(currentStep.classes[0]);
-      } else {
-        setActiveClass(null);
-      }
-    }
-  }, [currentStepIndex, steps]);
+  const currentStep = steps[currentStepIndex];
 
-  const loadProjectData = async (id) => {
+  // Get effective step configuration (with build variant overrides applied)
+  const effectiveStepConfig = useMemo(() => {
+    if (!currentStep) return null;
+    
+    const baseConfig = {
+      ...currentStep,
+      classes: currentStep.classes || [],
+      status: currentStep.status || "Pass,Fail"
+    };
+    
+    if (!currentStepConfig) return baseConfig;
+    
+    return {
+      ...baseConfig,
+      classes: currentStepConfig.active_classes?.length > 0 ? currentStepConfig.active_classes : baseConfig.classes,
+      status: currentStepConfig.status_options || baseConfig.status
+    };
+  }, [currentStep, currentStepConfig]);
+
+
+  const loadProjectData = useCallback(async (id) => {
     try {
       const [projectData, stepsData] = await Promise.all([
         Project.filter({ id }),
         SOPStep.filter({ project_id: id }, 'step_number')
       ]);
-      
+
       if (projectData.length > 0) {
         setProject(projectData[0]);
         setSteps(stepsData);
-        
+
         const firstIncompleteIndex = stepsData.findIndex(step => !step.is_annotated);
         if (firstIncompleteIndex !== -1) {
           setCurrentStepIndex(firstIncompleteIndex);
@@ -96,9 +129,40 @@ export default function AnnotationStudioPage() {
       console.error("Error loading project data:", error);
     }
     setIsLoading(false);
-  };
+  }, []);
 
-  const loadLogicRules = async () => {
+  const loadBuildVariants = useCallback(async () => {
+    try {
+      const variants = await BuildVariant.list();
+      setBuildVariants(variants);
+      if (variants.length > 0 && !selectedBuildVariant) {
+        setSelectedBuildVariant(variants[0]);
+      }
+    } catch (error) {
+      console.error("Error loading build variants:", error);
+    }
+  }, [selectedBuildVariant]);
+
+  const loadStepVariantConfig = useCallback(async () => {
+    if (!currentStep || !selectedBuildVariant) {
+      setCurrentStepConfig(null); // Ensure currentStepConfig is reset if conditions are not met
+      return;
+    }
+    
+    try {
+      const configs = await StepVariantConfig.filter({
+        build_variant_id: selectedBuildVariant.id,
+        sop_step_id: currentStep.id,
+        is_active: true
+      });
+      
+      setCurrentStepConfig(configs.length > 0 ? configs[0] : null);
+    } catch (error) {
+      console.error("Error loading step variant config:", error);
+    }
+  }, [currentStep, selectedBuildVariant]);
+
+  const loadLogicRules = useCallback(async () => {
     if (!currentStep) return;
     try {
       const rules = await LogicRule.filter({ step_id: currentStep.id }, 'priority');
@@ -106,9 +170,9 @@ export default function AnnotationStudioPage() {
     } catch (error) {
       console.error("Error loading logic rules:", error);
     }
-  };
+  }, [currentStep]);
 
-  const loadStepImages = async () => {
+  const loadStepImages = useCallback(async () => {
     if (!currentStep) return;
     try {
       const images = await StepImage.filter({ step_id: currentStep.id }, '-created_date');
@@ -117,19 +181,26 @@ export default function AnnotationStudioPage() {
     } catch (error) {
       console.error("Error loading step images:", error);
     }
-  };
+  }, [currentStep]);
 
-  const initializeAIGuidance = async () => {
-    if (!currentStep || !currentStep.classes) return;
-    
+  const initializeAIGuidance = useCallback(async () => {
+    if (!effectiveStepConfig || !effectiveStepConfig.classes) return;
+
     setIsAIThinking(true);
     try {
       const guidancePrompt = `
-        You are an annotation assistant.
-        The user is on step: "${currentStep.title}".
-        Your goal is to help them annotate one of the following classes: ${currentStep.classes.join(', ')}.
-        
-        Generate a very short, friendly, and direct instruction, like "Please draw a box around the [class name] on the image."
+        You are an annotation assistant. Your goal is to provide a clear, friendly, and direct starting instruction for the user.
+
+        Here is the context for the current step:
+        - Step Title: "${effectiveStepConfig.title}"
+        - Description: "${effectiveStepConfig.description || "No description provided."}"
+        - Classes to Annotate: "${(effectiveStepConfig.classes || []).join(', ')}"
+        - Business Logic: "${effectiveStepConfig.business_logic || effectiveStepConfig.condition || "No specific business logic or condition provided."}"
+        - First class to annotate: "${(effectiveStepConfig.classes && effectiveStepConfig.classes.length > 0) ? effectiveStepConfig.classes[0] : "a class"}"
+
+        Generate a very short (1-2 sentences), friendly, and direct instruction to get the user started.
+        For example: "Let's start by finding all the '${(effectiveStepConfig.classes && effectiveStepConfig.classes.length > 0) ? effectiveStepConfig.classes[0] : "class"}' elements. Please draw a box around each one."
+        You can also add a small hint from the business logic if it's simple.
       `;
 
       const response = await InvokeLLM({
@@ -155,7 +226,51 @@ export default function AnnotationStudioPage() {
       setChatMessages([fallbackMessage]);
     }
     setIsAIThinking(false);
-  };
+  }, [effectiveStepConfig]);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('projectId');
+    if (id) {
+      setProjectId(id);
+      loadProjectData(id);
+    } else {
+      navigate(createPageUrl('Projects'));
+    }
+  }, [navigate, loadProjectData]);
+
+  // New: Load build variants on mount
+  useEffect(() => {
+    loadBuildVariants();
+  }, [loadBuildVariants]);
+
+  // Existing useEffect for currentStep changes to load base data (rules, images)
+  useEffect(() => {
+    if (currentStep) {
+      loadLogicRules();
+      loadStepImages();
+    }
+  }, [currentStep, loadLogicRules, loadStepImages]);
+
+  // New: Load step variant config when currentStep or selectedBuildVariant changes
+  useEffect(() => {
+    // This effect now relies on `loadStepVariantConfig` which handles the `currentStepConfig(null)` logic internally.
+    loadStepVariantConfig();
+  }, [currentStep, selectedBuildVariant, loadStepVariantConfig]);
+
+  // When effectiveStepConfig is computed (due to currentStep, selectedBuildVariant, or currentStepConfig changing)
+  // then initialize AI guidance and set the active class.
+  useEffect(() => {
+    if (effectiveStepConfig) {
+      initializeAIGuidance();
+      if (effectiveStepConfig.classes && effectiveStepConfig.classes.length > 0) {
+        setActiveClass(effectiveStepConfig.classes[0]);
+      } else {
+        setActiveClass(null);
+      }
+    }
+  }, [effectiveStepConfig, initializeAIGuidance]);
+
 
   const handleChatMessage = async (message) => {
     const userMessage = {
@@ -164,18 +279,26 @@ export default function AnnotationStudioPage() {
       content: message,
       timestamp: new Date()
     };
-    
+
     setChatMessages(prev => [...prev, userMessage]);
     setIsAIThinking(true);
 
     try {
+      // Use effectiveStepConfig instead of currentStep
       const contextPrompt = `
-        You are a helpful but very concise annotation assistant.
-        The user is working on step "${currentStep.title}" and is asking for help with the class "${activeClass}".
-        
-        Here is their question: "${message}"
-        
-        Provide a very short, direct, and helpful tip. Maximum 2 sentences.
+        You are a helpful and concise annotation assistant. Your goal is to answer the user's questions based on the full context of the current annotation step.
+
+        Here is the step summary:
+        - Step Title: "${effectiveStepConfig.title}"
+        - Description: "${effectiveStepConfig.description || "No description provided."}"
+        - Classes to Annotate: "${(effectiveStepConfig.classes || []).join(', ')}"
+        - Active Class: "${activeClass || "None selected"}"
+        - Condition / Business Logic: "${effectiveStepConfig.business_logic || effectiveStepConfig.condition || "No specific business logic or condition provided."}"
+        - Expected Label/Status: "${effectiveStepConfig.status || "Not specified"}"
+
+        Here is the user's question: "${message}"
+
+        Based ONLY on the step summary provided above, provide a short, direct, and helpful tip. Maximum 3 sentences. If the user asks about something not in the summary, gently guide them back to the task or suggest consulting the full step details.
       `;
 
       const response = await InvokeLLM({
@@ -200,37 +323,30 @@ export default function AnnotationStudioPage() {
       };
       setChatMessages(prev => [...prev, errorMessage]);
     }
-    
+
     setIsAIThinking(false);
   };
 
-  const handleStepComplete = async (stepId, annotationData) => {
+  // Simplified: The canvas now saves its own data. This just marks the step as done.
+  const handleStepComplete = async (stepId) => {
     try {
       await SOPStep.update(stepId, {
         is_annotated: true,
-        annotation_data: annotationData
       });
-      
+
       const updatedSteps = await SOPStep.filter({ project_id: projectId }, 'step_number');
       setSteps(updatedSteps);
-      
+
       const allComplete = updatedSteps.every(step => step.is_annotated);
       if (allComplete) {
         await Project.update(projectId, { status: "completed" });
-        
-        const completionMessage = {
-          id: Date.now(),
-          type: 'ai',
-          content: "🎉 Excellent work! You've completed this annotation step. Let's move on to the next one!",
-          timestamp: new Date()
-        };
-        setChatMessages(prev => [...prev, completionMessage]);
       } else {
         await Project.update(projectId, { status: "annotation_in_progress" });
       }
-      
+
+      // Navigate to the next step if available
       if (currentStepIndex < steps.length - 1) {
-        setCurrentStepIndex(currentStepIndex + 1);
+        await goToNextStep();
       }
     } catch (error) {
       console.error("Error completing step:", error);
@@ -245,6 +361,37 @@ export default function AnnotationStudioPage() {
   const handleImagesUpdate = async () => {
     await loadStepImages();
   };
+  
+  const saveAndRun = async (action) => {
+    if (canvasRef.current?.saveCurrentAnnotations) {
+      await canvasRef.current.saveCurrentAnnotations();
+    }
+    action();
+  };
+
+  const handleStepSelectInPopup = (index) => {
+    saveAndRun(() => {
+      setCurrentStepIndex(index);
+      setShowStepsPopup(false);
+    });
+  };
+
+  const goToNextStep = () => {
+    if (currentStepIndex < steps.length - 1) {
+      saveAndRun(() => setCurrentStepIndex(currentStepIndex + 1));
+    }
+  };
+
+  const goToPrevStep = () => {
+    if (currentStepIndex > 0) {
+      saveAndRun(() => setCurrentStepIndex(currentStepIndex - 1));
+    }
+  };
+  
+  const handleImageIndexChange = (index) => {
+    saveAndRun(() => setCurrentImageIndex(index));
+  };
+
 
   const getProgress = () => {
     if (steps.length === 0) return 0;
@@ -252,26 +399,24 @@ export default function AnnotationStudioPage() {
     return Math.round((completedSteps / steps.length) * 100);
   };
 
-  const currentStep = steps[currentStepIndex];
   const currentImage = stepImages[currentImageIndex];
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 mx-auto mb-4 animate-spin">
-            <Target className="w-12 h-12 text-teal-600" />
-          </div>
-          <p className="text-gray-600">Loading annotation studio...</p>
+        <div className="w-12 h-12 mx-auto mb-4 animate-spin">
+          <Target className="w-12 h-12 text-blue-600" />
         </div>
+        <p className="text-gray-600">Loading annotation studio...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+    <>
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="h-screen w-full flex flex-col bg-gray-50">
+      {/* Full-width Header */}
+      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 w-full">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button
@@ -287,188 +432,212 @@ export default function AnnotationStudioPage() {
                 {project?.name} - Annotation Studio
               </h1>
               <div className="flex items-center gap-4 mt-1">
-                <p className="text-sm text-gray-600">
-                  Step {currentStepIndex + 1} of {steps.length}
-                </p>
-                <Progress value={getProgress()} className="w-32 h-2" />
+                 {/* Build Variant Selector */}
+                 {buildVariants.length > 0 && (
+                    <Select 
+                      value={selectedBuildVariant?.id || ""} 
+                      onValueChange={(variantId) => {
+                        const variant = buildVariants.find(v => v.id === variantId);
+                        setSelectedBuildVariant(variant);
+                      }}
+                    >
+                      <SelectTrigger className="w-48 h-7">
+                        <SelectValue placeholder="Select build variant" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {buildVariants.map(variant => (
+                          <SelectItem key={variant.id} value={variant.id}>
+                            {variant.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                 )}
+                 
+                 <div className="flex items-center gap-2">
+                    <Button variant="outline" size="icon" className="h-7 w-7" onClick={goToPrevStep} disabled={currentStepIndex === 0}>
+                        <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setShowStepsPopup(true)}
+                      className="p-1 h-auto text-sm text-gray-600 hover:text-blue-600 hover:bg-gray-100"
+                    >
+                      <List className="w-3 h-3 mr-1.5" />
+                      Step {currentStepIndex + 1} of {steps.length}
+                    </Button>
+                    <Button variant="outline" size="icon" className="h-7 w-7" onClick={goToNextStep} disabled={currentStepIndex >= steps.length - 1}>
+                        <ChevronRight className="w-4 h-4" />
+                    </Button>
+                 </div>
+
+                <Progress value={getProgress()} className="w-32 h-2 [&>div]:bg-blue-600" />
                 <span className="text-sm font-medium text-gray-700">
                   {getProgress()}%
                 </span>
+                
+                {/* Show active configuration info */}
+                {currentStepConfig && (
+                  <Badge className="bg-green-100 text-green-800 text-xs">
+                    <Package className="w-3 h-3 mr-1" />
+                    Variant Config Active
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
-          
-          <div className="flex items-center gap-3">
-            <Button
-              variant={showCopilot ? "default" : "outline"}
-              onClick={() => setShowCopilot(!showCopilot)}
-              className={showCopilot ? "bg-teal-600 hover:bg-teal-700" : ""}
-            >
-              <Bot className="w-4 h-4 mr-2" />
-              AI Copilot
-            </Button>
-          </div>
-        </div>
-      </div>
 
-      <div className="flex h-[calc(100vh-80px)]">
-        {/* Left Sidebar - Steps */}
-        <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="font-semibold text-gray-900 mb-4">Annotation Steps</h2>
-            <StepNavigation
-              steps={steps}
-              currentStepIndex={currentStepIndex}
-              onStepSelect={setCurrentStepIndex}
-            />
-          </div>
-          
-          {currentStep && (
-            <div className="p-6 flex-1 overflow-y-auto">
-              <Card className="glass-effect border-0">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">Current Step</CardTitle>
-                    <Badge className={`${
-                      currentStep.is_annotated 
-                        ? "bg-green-100 text-green-800" 
-                        : "bg-orange-100 text-orange-800"
-                    } border-0`}>
-                      {currentStep.is_annotated ? (
-                        <>
-                          <CheckCircle className="w-3 h-3 mr-1" />
-                          Complete
-                        </>
-                      ) : (
-                        <>
-                          <Circle className="w-3 h-3 mr-1" />
-                          Pending
-                        </>
-                      )}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <h3 className="font-semibold text-gray-900 mb-2">
-                      {currentStep.title}
-                    </h3>
-                    <p className="text-gray-600 text-sm mb-3">
-                      {currentStep.description}
-                    </p>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-500">PRODUCT:</span>
-                      <Badge variant="outline" className="text-xs">
-                        {currentStep.product}
-                      </Badge>
-                    </div>
-                    <div>
-                      <span className="text-xs font-medium text-gray-500">CONDITION:</span>
-                      <p className="text-sm text-gray-600 mt-1">{currentStep.condition}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs font-medium text-gray-500">CLASSES:</span>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {(currentStep.classes || []).map(cls => (
-                           <code key={cls} className="text-sm bg-gray-100 px-2 py-1 rounded">
-                             {cls}
-                           </code>
-                        ))}
-                      </div>
-                    </div>
-                     <div>
-                      <span className="text-xs font-medium text-gray-500">STATUS:</span>
-                      <code className="text-sm bg-gray-100 px-2 py-1 rounded ml-2">
-                        {currentStep.status}
-                      </code>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </div>
+          <div className="flex items-center gap-8">
+             <TabsList className="grid grid-cols-4 max-w-xl">
+                <TabsTrigger value="canvas" className="flex items-center gap-2">
+                  <PenTool className="w-4 h-4" />
+                  Canvas
+                </TabsTrigger>
+                <TabsTrigger value="logic" className="flex items-center gap-2">
+                  <Cog className="w-4 h-4" />
+                  Logic
+                </TabsTrigger>
+                <TabsTrigger value="images" className="flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4" />
+                  Images
+                </TabsTrigger>
+                <TabsTrigger value="insights" className="flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4" />
+                  Insights
+                </TabsTrigger>
+              </TabsList>
+            <div className="flex items-center gap-3">
+              <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(createPageUrl(`StepManagement?projectId=${projectId}`))}
+                  className="text-xs"
+              >
+                  <Layers3 className="w-3 h-3 mr-1.5" />
+                  Manage Steps
+              </Button>
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex">
-          <div className="flex-1 relative bg-white">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-              <div className="px-6 pt-4 border-b border-gray-200">
-                <TabsList className="grid w-full grid-cols-3 max-w-md">
-                  <TabsTrigger value="canvas" className="flex items-center gap-2">
-                    <PenTool className="w-4 h-4" />
-                    Canvas
-                  </TabsTrigger>
-                  <TabsTrigger value="logic" className="flex items-center gap-2">
-                    <Cog className="w-4 h-4" />
-                    Logic
-                  </TabsTrigger>
-                  <TabsTrigger value="images" className="flex items-center gap-2">
-                    <ImageIcon className="w-4 h-4" />
-                    Images
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+              <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => navigate(createPageUrl(`TrainingConfiguration?projectId=${projectId}`))}
+                  className="text-xs bg-green-600 hover:bg-green-700"
+              >
+                  <Spline className="w-3 h-3 mr-1.5" />
+                  Train Model
+              </Button>
               
-              <div className="flex-1">
-                <TabsContent value="canvas" className="h-full m-0">
-                  <AnnotationCanvas
-                    currentStep={currentStep}
-                    currentImage={currentImage}
-                    annotationMode={annotationMode}
-                    activeClass={activeClass}
-                    onStepComplete={handleStepComplete}
-                    projectId={projectId}
-                  />
-                </TabsContent>
-                
-                <TabsContent value="logic" className="h-full m-0">
-                  <LogicBuilder
-                    currentStep={currentStep}
-                    logicRules={logicRules}
-                    onRulesUpdate={handleLogicRulesUpdate}
-                  />
-                </TabsContent>
-                
-                <TabsContent value="images" className="h-full m-0">
-                  <ImagePortal
-                    currentStep={currentStep}
-                    stepImages={stepImages}
-                    currentImageIndex={currentImageIndex}
-                    onImageIndexChange={setCurrentImageIndex}
-                    onImagesUpdate={handleImagesUpdate}
-                  />
-                </TabsContent>
-              </div>
-            </Tabs>
+              <Button
+                variant={showCopilot ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowCopilot(!showCopilot)}
+                className={showCopilot ? "bg-blue-600 hover:bg-blue-700" : ""}
+              >
+                <Bot className="w-4 h-4 mr-2" />
+                AI Copilot
+              </Button>
+            </div>
           </div>
-
-          {/* Right Sidebar - AI Chat & Copilot */}
-          {showCopilot && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 400, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="w-96 border-l border-gray-200 bg-white overflow-hidden flex flex-col"
-            >
-              <AnnotationChat
-                messages={chatMessages}
-                onSendMessage={handleChatMessage}
-                isAIThinking={isAIThinking}
-                currentStep={currentStep}
-                onAnnotationModeChange={setAnnotationMode}
-                annotationMode={annotationMode}
-                activeClass={activeClass}
-                onActiveClassChange={setActiveClass}
-              />
-            </motion.div>
-          )}
         </div>
+      </header>
+
+      {/* Full-width Content Area */}
+      <div className="flex-1 flex w-full" style={{ overflow: 'hidden' }}>
+        {/* Main Content Area */}
+        <main className="flex-1 flex" style={{ overflow: 'hidden' }}>
+            <div className="flex-1 relative bg-white" style={{ overflow: 'hidden' }}>
+                <TabsContent value="canvas" className="h-full m-0">
+                    <AnnotationCanvas
+                        ref={canvasRef}
+                        currentStep={effectiveStepConfig} // Used effective config
+                        currentImage={currentImage}
+                        annotationMode={annotationMode}
+                        activeClass={activeClass}
+                        onStepComplete={handleStepComplete}
+                        projectId={projectId}
+                        onNextImage={() => handleImageIndexChange(Math.min(currentImageIndex + 1, stepImages.length - 1))}
+                        onPrevImage={() => handleImageIndexChange(Math.max(currentImageIndex - 1, 0))}
+                        currentImageIndex={currentImageIndex}
+                        totalImages={stepImages.length}
+                        brushSize={brushSize}
+                        stepImages={stepImages}
+                        onImageIndexChange={handleImageIndexChange}
+                    />
+                </TabsContent>
+                <TabsContent value="logic" className="h-full m-0">
+                    <LogicBuilder
+                        currentStep={effectiveStepConfig} // Used effective config
+                        logicRules={logicRules}
+                        onRulesUpdate={handleLogicRulesUpdate}
+                        buildVariantConfig={currentStepConfig} // Passed build variant config
+                    />
+                </TabsContent>
+                <TabsContent value="images" className="h-full m-0">
+                    <ImagePortal
+                        projectId={projectId}
+                        currentStep={effectiveStepConfig} // Used effective config
+                        stepImages={stepImages}
+                        currentImageIndex={currentImageIndex}
+                        onImageIndexChange={handleImageIndexChange}
+                        onImagesUpdate={handleImagesUpdate}
+                    />
+                </TabsContent>
+                <TabsContent value="insights" className="h-full m-0">
+                    <AnnotationInsights
+                        project={project}
+                        steps={steps}
+                        logicRules={logicRules}
+                        stepImages={stepImages}
+                    />
+                </TabsContent>
+            </div>
+          {/* Right Sidebar - AI Chat & Copilot */}
+          <AnimatePresence>
+            {showCopilot && (
+              <motion.aside
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 400, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="w-96 border-l border-gray-200 bg-white overflow-hidden flex flex-col"
+              >
+                <AnnotationChat
+                  messages={chatMessages}
+                  onSendMessage={handleChatMessage}
+                  isAIThinking={isAIThinking}
+                  currentStep={effectiveStepConfig} // Used effective config
+                  onAnnotationModeChange={setAnnotationMode}
+                  annotationMode={annotationMode}
+                  activeClass={activeClass}
+                  onActiveClassChange={setActiveClass}
+                  brushSize={brushSize}
+                  onBrushSizeChange={setBrushSize}
+                  projectId={projectId}
+                />
+              </motion.aside>
+            )}
+          </AnimatePresence>
+        </main>
       </div>
-    </div>
+    </Tabs>
+
+    <Dialog open={showStepsPopup} onOpenChange={setShowStepsPopup}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Annotation Steps</DialogTitle>
+          <DialogDescription>
+            Select a step to view its details and begin annotating. Completed steps are marked with a green check.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4 max-h-[60vh] overflow-y-auto">
+          <StepNavigation
+            steps={steps}
+            currentStepIndex={currentStepIndex}
+            onStepSelect={handleStepSelectInPopup}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

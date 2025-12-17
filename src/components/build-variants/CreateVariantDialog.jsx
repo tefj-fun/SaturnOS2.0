@@ -1,4 +1,3 @@
-
 import React, { useState } from "react";
 import {
   Dialog,
@@ -10,12 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Sparkles } from "lucide-react";
+import { Package } from "lucide-react";
 
-export default function CreateProjectDialog({ open, onOpenChange, onCreateProject }) {
+export default function CreateVariantDialog({ open, onOpenChange, onCreateVariant }) {
   const [formData, setFormData] = useState({
     name: "",
-    description: ""
+    description: "",
+    attributes: {}
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -25,13 +25,10 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
 
     setIsSubmitting(true);
     try {
-      await onCreateProject({
-        ...formData,
-        status: "created"
-      });
-      setFormData({ name: "", description: "" });
+      await onCreateVariant(formData);
+      setFormData({ name: "", description: "", attributes: {} });
     } catch (error) {
-      console.error("Error creating project:", error);
+      console.error("Error creating variant:", error);
     }
     setIsSubmitting(false);
   };
@@ -45,26 +42,26 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
       <DialogContent className="sm:max-w-md glass-effect border-0 shadow-2xl">
         <DialogHeader className="text-center">
           <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
-            <Sparkles className="w-6 h-6 text-white" />
+            <Package className="w-6 h-6 text-white" />
           </div>
           <DialogTitle className="text-2xl font-bold text-gray-900">
-            Create New Project
+            Create Build Variant
           </DialogTitle>
           <p className="text-gray-600">
-            Start your guided annotation journey
+            Define a new product variant configuration
           </p>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-6 mt-6">
           <div className="space-y-2">
             <Label htmlFor="name" className="text-sm font-semibold text-gray-700">
-              Project Name *
+              Variant Name *
             </Label>
             <Input
               id="name"
               value={formData.name}
               onChange={(e) => handleInputChange("name", e.target.value)}
-              placeholder="Enter project name"
+              placeholder="e.g., Model X - Premium - Blue"
               className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
               required
             />
@@ -78,7 +75,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
               id="description"
               value={formData.description}
               onChange={(e) => handleInputChange("description", e.target.value)}
-              placeholder="Describe your annotation project"
+              placeholder="Describe this variant's characteristics"
               className="border-gray-200 focus:border-blue-500 focus:ring-blue-500 h-24 resize-none"
             />
           </div>
@@ -98,7 +95,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
               className="flex-1 bg-blue-600 hover:bg-blue-700 shadow-lg"
               disabled={isSubmitting || !formData.name.trim()}
             >
-              {isSubmitting ? "Creating..." : "Create Project"}
+              {isSubmitting ? "Creating..." : "Create Variant"}
             </Button>
           </div>
         </form>

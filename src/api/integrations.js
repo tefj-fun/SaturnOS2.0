@@ -15,6 +15,10 @@ export const GenerateImage = base44.integrations.Core.GenerateImage;
 
 export const ExtractDataFromUploadedFile = base44.integrations.Core.ExtractDataFromUploadedFile;
 
+export const CreateFileSignedUrl = base44.integrations.Core.CreateFileSignedUrl;
+
+export const UploadPrivateFile = base44.integrations.Core.UploadPrivateFile;
+
 
 
 

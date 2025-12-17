@@ -1,38 +1,54 @@
-import React from "react";
-import { Button } from "@/components/ui/button";
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { MoreVertical, Edit3, Trash2, Copy } from "lucide-react";
+} from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+import { MoreHorizontal, Edit, Trash2, Layers, Copy, PlayCircle, Spline } from 'lucide-react';
+import { createPageUrl } from '@/utils';
 
-export default function ProjectActionsDropdown({ project, onEdit, onDelete }) {
+export default function ProjectActionsDropdown({ project, onEdit, onDelete, onDuplicate }) {
+  const navigate = useNavigate();
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-          <MoreVertical className="w-4 h-4" />
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <MoreHorizontal className="w-4 h-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onEdit(project)}>
-          <Edit3 className="w-4 h-4 mr-2" />
-          Edit Project
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => navigate(createPageUrl(`StepManagement?projectId=${project.id}`))}>
+          <Layers className="w-4 h-4 mr-2" />
+          <span>Manage Steps</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigator.clipboard.writeText(project.id)}>
+        
+        {project.status === 'completed' && (
+           <DropdownMenuItem onSelect={() => navigate(createPageUrl(`TrainingConfiguration?projectId=${project.id}`))}>
+              <Spline className="w-4 h-4 mr-2" />
+              <span>Train Model</span>
+          </DropdownMenuItem>
+        )}
+
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onEdit}>
+          <Edit className="w-4 h-4 mr-2" />
+          <span>Edit Project</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onDuplicate}>
           <Copy className="w-4 h-4 mr-2" />
-          Copy ID
+          <span>Duplicate</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem 
-          onClick={() => onDelete(project)}
-          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-        >
+        <DropdownMenuItem onSelect={onDelete} className="text-red-600 focus:text-red-600 focus:bg-red-50">
           <Trash2 className="w-4 h-4 mr-2" />
-          Delete Project
+          <span>Delete Project</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
