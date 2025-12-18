@@ -28,41 +28,59 @@ import {
   SidebarTrigger } from
 "@/components/ui/sidebar";
 
+// Default feature visibility per page; admin sees all.
+const defaultFeatureVisibility = {
+  dashboard: true,
+  projects: true,
+  buildVariants: false,
+  training: true,
+  labelLibrary: true,
+  results: false,
+  settings: true,
+};
+
 const navigationItems = [
 {
   title: "Dashboard",
   url: createPageUrl("Dashboard"),
-  icon: BarChart3
+  icon: BarChart3,
+  featureKey: "dashboard",
 },
 {
   title: "Projects",
   url: createPageUrl("Projects"),
-  icon: FolderPlus
+  icon: FolderPlus,
+  featureKey: "projects",
 },
 {
   title: "Build Variants", // New navigation item
   url: createPageUrl("BuildVariants"),
-  icon: Package
+  icon: Package,
+  featureKey: "buildVariants",
 },
 {
   title: "Model Training",
   url: createPageUrl("TrainingConfiguration"),
-  icon: Spline
+  icon: Spline,
+  featureKey: "training",
 },
 {
   title: "Label Library",
   url: createPageUrl("LabelLibrary"),
-  icon: Database
+  icon: Database,
+  featureKey: "labelLibrary",
 },
 {
   title: "Results & Analysis",
   url: createPageUrl("ResultsAndAnalysis"),
-  icon: BarChart3
+  icon: BarChart3,
+  featureKey: "results",
 },
 {
   title: "Settings",
   url: createPageUrl("Settings"),
-  icon: Settings
+  icon: Settings,
+  featureKey: "settings",
 }];
 
 
@@ -70,6 +88,7 @@ export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authError, setAuthError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
@@ -96,6 +115,7 @@ export default function Layout({ children, currentPageName }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
+      setProfile(null);
       setAuthChecked(true);
       if (!session && location.pathname !== "/") {
         navigate("/", { replace: true });
@@ -111,6 +131,24 @@ export default function Layout({ children, currentPageName }) {
     init();
     return () => listener?.subscription?.unsubscribe();
   }, [location.pathname, navigate]);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user?.id) {
+        setProfile(null);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role, preferences")
+        .eq("id", user.id)
+        .single();
+      if (!error) {
+        setProfile(data);
+      }
+    };
+    loadProfile();
+  }, [user]);
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -159,7 +197,17 @@ export default function Layout({ children, currentPageName }) {
     setFirstName("");
     setLastName("");
     setAuthMode("signin");
+    setProfile(null);
   };
+
+  const isAdmin = profile?.role === "admin";
+  const featureFlags = {
+    ...defaultFeatureVisibility,
+    ...(profile?.preferences?.features || {}),
+  };
+  const filteredNavigation = isAdmin
+    ? navigationItems
+    : navigationItems.filter((item) => featureFlags[item.featureKey]);
 
   // Hide sidebar for Annotation Studio page
   const isAnnotationStudio = currentPageName === "AnnotationStudio" || location.pathname.includes("AnnotationStudio") || currentPageName === "AnnotationReview";
@@ -407,7 +455,7 @@ export default function Layout({ children, currentPageName }) {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu className="space-y-1">
-                  {navigationItems.map((item) =>
+                  {filteredNavigation.map((item) =>
                   <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton
                       asChild
@@ -442,7 +490,7 @@ export default function Layout({ children, currentPageName }) {
                       {user ? user.email : 'Loading...'}
                     </p>
                     <p className="text-xs text-gray-500 truncate capitalize">
-                      Admin
+                      {profile?.role || "member"}
                     </p>
                   </div>
                 </div>

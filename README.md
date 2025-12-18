@@ -61,3 +61,4 @@ npm run build
 ## Notes
 - Annotation state is stored in `step_images.annotations` (JSONB).
 - The annotation studio keeps `projectId`, `stepId`, and `imageId` in the URL so refresh restores context.
+- Workspace menu visibility is controlled by feature flags: admins see all items; other users see pages enabled in `profiles.preferences.features` (merged with defaults in `Layout.jsx`). Update the `features` object per user to hide unfinished pages.
