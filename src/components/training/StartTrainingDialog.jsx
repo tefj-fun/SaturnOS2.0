@@ -48,6 +48,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     
     const [config, setConfig] = useState({
         runName: "",
+        dataYaml: "",
         baseModel: 'YOLOv8s',
         epochs: 100,
         batchSize: 16,
@@ -122,6 +123,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 step_id: stepId,
                 run_name: config.runName,
                 base_model: config.baseModel,
+                data_yaml: config.dataYaml,
                 status: 'queued',
                 configuration: config,
             });
@@ -155,6 +157,16 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         <div>
                             <TooltipLabel tooltipText="Give your model version a unique, descriptive name so you can easily identify it later.">Model Version Name</TooltipLabel>
                             <Input id="runName" value={config.runName} onChange={e => handleConfigChange('runName', e.target.value)} placeholder="e.g., Button_Detection_v1"/>
+                        </div>
+
+                        <div>
+                            <TooltipLabel tooltipText="Path on the training server to your dataset YAML file (YOLO format).">Dataset YAML Path (Server)</TooltipLabel>
+                            <Input
+                                id="dataYaml"
+                                value={config.dataYaml}
+                                onChange={e => handleConfigChange('dataYaml', e.target.value)}
+                                placeholder="/mnt/d/datasets/your_dataset/data.yaml"
+                            />
                         </div>
                         
                         <div>

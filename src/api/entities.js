@@ -1,4 +1,5 @@
 import { base44 } from './base44Client';
+import { TrainingRun } from './trainingRuns';
 
 
 export const Project = base44.entities.Project;
@@ -11,7 +12,7 @@ export const StepImage = base44.entities.StepImage;
 
 export const PredictedAnnotation = base44.entities.PredictedAnnotation;
 
-export const TrainingRun = base44.entities.TrainingRun;
+export { TrainingRun };
 
 export const LabelLibrary = base44.entities.LabelLibrary;
 

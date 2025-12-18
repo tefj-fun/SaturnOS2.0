@@ -26,20 +26,22 @@ npm install
 ```bash
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_OPENAI_API_KEY=your_openai_api_key
+VITE_OPENAI_PROXY_URL=http://localhost:8888/.netlify/functions/openai
 ```
 
-Note: `VITE_OPENAI_API_KEY` is used in the browser. For production, consider proxying via a backend.
+3. Configure the OpenAI server-side key:
+   - For Netlify: set `OPENAI_API_KEY` in Site settings -> Environment variables.
+   - For local dev: run `netlify dev` so the function reads `OPENAI_API_KEY` from your shell.
 
-3. Apply database migrations:
+4. Apply database migrations:
    - Use Supabase SQL editor to run the files in `supabase/migrations/`, or
    - Use the Supabase CLI and run `supabase db push`.
 
-4. Create storage buckets (private):
+5. Create storage buckets (private):
    - `sops`
    - `step-images`
 
-5. Run the app:
+6. Run the app:
 
 ```bash
 npm run dev

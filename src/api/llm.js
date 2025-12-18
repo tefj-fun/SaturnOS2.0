@@ -1,18 +1,11 @@
 /**
  * Lightweight OpenAI chat wrappers used by the UI.
- * Expects VITE_OPENAI_API_KEY to be set.
+ * Uses a server-side proxy (Netlify function) to avoid exposing API keys.
  */
 
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-4o-mini";
-
-const getApiKey = () => {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Set VITE_OPENAI_API_KEY in your environment.");
-  }
-  return apiKey;
-};
+const OPENAI_PROXY_URL =
+  import.meta.env.VITE_OPENAI_PROXY_URL || "/.netlify/functions/openai";
 
 const callOpenAI = async ({
   messages,
@@ -21,36 +14,27 @@ const callOpenAI = async ({
   responseFormat,
   model = DEFAULT_MODEL,
 }) => {
-  const apiKey = getApiKey();
-  const body = {
-    model,
-    messages,
-    temperature,
-    max_tokens: maxTokens,
-  };
-
-  if (responseFormat) {
-    body.response_format = responseFormat;
-  }
-
-  const response = await fetch(OPENAI_URL, {
+  const response = await fetch(OPENAI_PROXY_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages,
+      temperature,
+      maxTokens,
+      responseFormat,
+      model,
+    }),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`OpenAI error ${response.status}: ${text}`);
+    throw new Error(`LLM proxy error ${response.status}: ${text}`);
   }
 
   const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const content = data?.content;
   if (!content) {
-    throw new Error("OpenAI response missing content");
+    throw new Error("LLM proxy response missing content");
   }
 
   return content;
