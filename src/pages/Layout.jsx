@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
 import {
@@ -68,6 +68,7 @@ const navigationItems = [
 
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authError, setAuthError] = useState(null);
@@ -81,19 +82,28 @@ export default function Layout({ children, currentPageName }) {
 
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase.auth.getUser();
-      setUser(data?.user || null);
-      setAuthChecked(true);
+      try {
+        const { data } = await supabase.auth.getUser();
+        setUser(data?.user || null);
+      } catch (err) {
+        // If there is no session, keep user null and continue to the auth screen
+        setUser(null);
+      } finally {
+        setAuthChecked(true);
+      }
     };
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
       setAuthChecked(true);
+      if (!session && location.pathname !== "/") {
+        navigate("/", { replace: true });
+      }
     });
 
     init();
     return () => listener?.subscription?.unsubscribe();
-  }, []);
+  }, [location.pathname, navigate]);
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -130,6 +140,7 @@ export default function Layout({ children, currentPageName }) {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    navigate("/", { replace: true });
   };
 
   // Hide sidebar for Annotation Studio page
@@ -245,7 +256,9 @@ export default function Layout({ children, currentPageName }) {
                     className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
-                  <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
+                  {authMode === "signup" && (
+                    <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
+                  )}
                 </div>
                 {authError && <p className="text-sm text-red-600">{authError}</p>}
                 {authNotice && <p className="text-sm text-emerald-600">{authNotice}</p>}
