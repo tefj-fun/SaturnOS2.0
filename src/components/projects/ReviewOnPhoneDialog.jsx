@@ -5,6 +5,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { createPageUrl } from "@/utils";
 import { Smartphone, QrCode } from "lucide-react";
@@ -25,9 +26,9 @@ export default function ReviewOnPhoneDialog({ open, project, onOpenChange }) {
           <DialogTitle className="text-2xl font-bold text-gray-900">
             Review on Your Phone
           </DialogTitle>
-          <p className="text-gray-600">
+          <DialogDescription className="text-gray-600">
             Scan the QR code to start reviewing annotations.
-          </p>
+          </DialogDescription>
         </DialogHeader>
         
         <div className="mt-6 flex flex-col items-center justify-center gap-6">

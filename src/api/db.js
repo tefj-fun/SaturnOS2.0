@@ -22,14 +22,18 @@ export async function getProjectById(id) {
 }
 
 export async function createProject(projectData) {
+  const { data: authData } = await supabase.auth.getUser();
+  const currentUser = authData?.user;
+  const payload = {
+    ...projectData,
+    created_by: currentUser?.id || null,
+  };
   const { data, error } = await supabase
     .from("projects")
-    .insert(projectData)
+    .insert(payload)
     .select()
     .single();
   if (error) throw error;
-  const { data: authData } = await supabase.auth.getUser();
-  const currentUser = authData?.user;
   if (currentUser) {
     const ownerPermissions = getPermissionsForProjectRole("owner");
     const memberPayload = {

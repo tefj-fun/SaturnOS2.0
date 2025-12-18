@@ -5,6 +5,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,9 +51,9 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
           <DialogTitle className="text-2xl font-bold text-gray-900">
             Create New Project
           </DialogTitle>
-          <p className="text-gray-600">
+          <DialogDescription className="text-gray-600">
             Start your guided annotation journey
-          </p>
+          </DialogDescription>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-6 mt-6">
