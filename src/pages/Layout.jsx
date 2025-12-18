@@ -77,6 +77,7 @@ export default function Layout({ children, currentPageName }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
 
@@ -103,6 +104,7 @@ export default function Layout({ children, currentPageName }) {
         setFirstName("");
         setLastName("");
         setAuthMode("signin");
+        setConfirmPassword("");
       }
     });
 
@@ -117,6 +119,11 @@ export default function Layout({ children, currentPageName }) {
     setIsSubmitting(true);
 
     if (authMode === "signup") {
+      if (password !== confirmPassword) {
+        setAuthError("Passwords do not match.");
+        setIsSubmitting(false);
+        return;
+      }
       const userData = {};
       if (firstName.trim()) userData.first_name = firstName.trim();
       if (lastName.trim()) userData.last_name = lastName.trim();
@@ -148,6 +155,7 @@ export default function Layout({ children, currentPageName }) {
     navigate("/", { replace: true });
     setEmail("");
     setPassword("");
+    setConfirmPassword("");
     setFirstName("");
     setLastName("");
     setAuthMode("signin");
@@ -267,7 +275,19 @@ export default function Layout({ children, currentPageName }) {
                     required
                   />
                   {authMode === "signup" && (
-                    <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
+                    <>
+                      <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
+                      <div className="mt-3">
+                        <label className="text-sm font-medium text-gray-700">Confirm password</label>
+                        <input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          required
+                        />
+                      </div>
+                    </>
                   )}
                 </div>
                 {authError && <p className="text-sm text-red-600">{authError}</p>}
