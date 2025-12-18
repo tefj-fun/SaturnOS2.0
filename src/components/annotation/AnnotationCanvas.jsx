@@ -1765,12 +1765,17 @@ export default forwardRef(function AnnotationCanvas({
     if (className === UNLABELED_CLASS_KEY) {
       return '#9ca3af'; // Gray for unlabeled
     }
-    // Find index based on currentStep.classes if available, otherwise fallback to generic index
     const classIdx = currentStep?.classes?.indexOf(className);
-    if (classIdx !== -1 && classIdx !== undefined) {
+    if (Number.isInteger(classIdx) && classIdx >= 0) {
       return colors[classIdx % colors.length];
     }
-    return colors[index % colors.length];
+    if (Number.isInteger(index) && index >= 0) {
+      return colors[index % colors.length];
+    }
+    const seed = String(className || '').split('').reduce((acc, char) => {
+      return (acc * 31 + char.charCodeAt(0)) >>> 0;
+    }, 7);
+    return colors[seed % colors.length];
   };
 
   // Update getStatusColor function to handle dynamic status values
@@ -1785,6 +1790,27 @@ export default forwardRef(function AnnotationCanvas({
     } else {
       return '#3b82f6'; // blue-500 for other custom statuses
     }
+  };
+
+  const getResolvedClassColor = (className) => {
+    const stepIndex = currentStep?.classes?.indexOf(className);
+    return classColors[className] || getClassColor(className, stepIndex);
+  };
+
+  const hexToRgba = (hexColor, alpha) => {
+    if (!hexColor) return `rgba(0, 0, 0, ${alpha})`;
+    const normalized = hexColor.replace('#', '');
+    if (normalized.length === 3) {
+      const r = parseInt(normalized[0] + normalized[0], 16);
+      const g = parseInt(normalized[1] + normalized[1], 16);
+      const b = parseInt(normalized[2] + normalized[2], 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    const value = normalized.slice(0, 6);
+    const r = parseInt(value.slice(0, 2), 16);
+    const g = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   };
 
   const getResizeHandles = (annotation) => {
@@ -1818,14 +1844,13 @@ export default forwardRef(function AnnotationCanvas({
     // Only return if visible or specifically selected (for pulse effect)
     if (!isVisible && !isSelected && key !== -1) return null; // Only render current drawing annotation if not visible/selected
 
-    const classIndex = (currentStep?.classes || []).indexOf(annotationClassName);
     // Use classColors as primary source, fallback to default getClassColor
-    const baseColor = classColors[annotationClassName] || getClassColor(annotationClassName, classIndex);
+    const baseColor = getResolvedClassColor(annotationClassName);
     const statusColor = getStatusColor(annotation.status);
     
     const borderColor = statusColor || (isSelected ? '#f59e0b' : baseColor);
 
-    const hexOpacity = Math.round(annotationOpacity * 255).toString(16).padStart(2, '0');
+    const fillOpacity = isUnlabeled ? 0.4 : annotationOpacity;
 
     if (annotation.type === 'bbox') {
       const normalized = (() => {
@@ -1847,7 +1872,7 @@ export default forwardRef(function AnnotationCanvas({
         width: normalized.width,
         height: normalized.height,
         border: `2px ${isUnlabeled ? 'dashed' : 'solid'} ${borderColor}`,
-        backgroundColor: `${baseColor}${isUnlabeled ? '66' : hexOpacity}`, // Less opaque for unlabeled
+        backgroundColor: hexToRgba(baseColor, fillOpacity), // Less opaque for unlabeled
         zIndex: isPrimarySelected ? 20 : isSelected ? 15 : 10,
         opacity: (isVisible || isDrawing) ? 1 : 0.3 // Dim non-selected/non-drawing if annotations hidden
       };
@@ -1981,7 +2006,8 @@ export default forwardRef(function AnnotationCanvas({
             {annotation.type === 'polygon' ? (
               <polygon
                 points={pointsString}
-                fill={isDrawing ? 'none' : `${baseColor}${isUnlabeled ? '66' : hexOpacity}`}
+                fill={isDrawing ? 'none' : baseColor}
+                fillOpacity={isDrawing ? undefined : fillOpacity}
                 stroke={borderColor}
                 strokeWidth={2 / zoom}
                 strokeDasharray={isUnlabeled ? `${4/zoom} ${4/zoom}` : 'none'}
@@ -1989,7 +2015,8 @@ export default forwardRef(function AnnotationCanvas({
             ) : ( // Brush
               <path
                 d={`M ${annotation.points.map(p => `${p.x - minX} ${p.y - minY}`).join(' L ')} ${isBrushCompleted ? ' Z' : ''}`}
-                fill={isBrushCompleted ? `${baseColor}${isUnlabeled ? '66' : hexOpacity}` : 'none'}
+                fill={isBrushCompleted ? baseColor : 'none'}
+                fillOpacity={isBrushCompleted ? fillOpacity : undefined}
                 stroke={borderColor}
                 strokeWidth={annotation.brushSize / zoom} // Use brushSize prop, scaled by zoom
                 strokeLinejoin="round"
@@ -2139,9 +2166,9 @@ export default forwardRef(function AnnotationCanvas({
                   onClick={() => toggleClassFilter(className)}
                   className="text-xs h-6 px-2"
                   style={{
-                    backgroundColor: classFilters.has(className) ? (classColors[className] || getClassColor(className, index)) : 'transparent',
-                    borderColor: classColors[className] || getClassColor(className, index),
-                    color: classFilters.has(className) ? 'white' : (classColors[className] || getClassColor(className, index))
+                    backgroundColor: classFilters.has(className) ? getResolvedClassColor(className) : 'transparent',
+                    borderColor: getResolvedClassColor(className),
+                    color: classFilters.has(className) ? 'white' : getResolvedClassColor(className)
                   }}
                 >
                   {className} ({currentImageCount}/{totalStepCount})
@@ -2204,7 +2231,7 @@ export default forwardRef(function AnnotationCanvas({
                   <div className="flex items-center gap-2 mb-2 px-2">
                     <div
                       className="w-3 h-3 rounded"
-                      style={{ backgroundColor: classColors[groupName] || getClassColor(groupName, availableClasses.indexOf(groupName)) }}
+                      style={{ backgroundColor: getResolvedClassColor(groupName) }}
                     />
                     <span className="text-xs font-medium text-gray-700 flex-1">
                       {groupName} ({groupAnnotations.length})
@@ -2212,7 +2239,7 @@ export default forwardRef(function AnnotationCanvas({
                     <input
                       ref={el => (colorInputRefs.current[groupName] = el)}
                       type="color"
-                      value={classColors[groupName] || getClassColor(groupName, availableClasses.indexOf(groupName))}
+                      value={getResolvedClassColor(groupName)}
                       onChange={(e) => {
                         e.stopPropagation();
                         handleClassColorChange(groupName, e.target.value);

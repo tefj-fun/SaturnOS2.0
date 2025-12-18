@@ -1584,6 +1584,7 @@ export default function ImagePortal({
         onOpenChange={setShowUploadDialog}
         onUploadComplete={onImagesUpdate}
         currentStepId={currentStep?.id}
+        currentStep={currentStep}
         projectId={projectId} // Pass projectId to ImageUploadDialog
       />
     </div>
