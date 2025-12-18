@@ -98,6 +98,11 @@ export default function Layout({ children, currentPageName }) {
       setAuthChecked(true);
       if (!session && location.pathname !== "/") {
         navigate("/", { replace: true });
+        setEmail("");
+        setPassword("");
+        setFirstName("");
+        setLastName("");
+        setAuthMode("signin");
       }
     });
 
@@ -141,6 +146,11 @@ export default function Layout({ children, currentPageName }) {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/", { replace: true });
+    setEmail("");
+    setPassword("");
+    setFirstName("");
+    setLastName("");
+    setAuthMode("signin");
   };
 
   // Hide sidebar for Annotation Studio page
