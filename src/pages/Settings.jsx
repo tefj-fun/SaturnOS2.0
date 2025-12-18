@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/api/supabaseClient';
+import { inviteUser } from '@/api/invitations';
+import {
+  getCurrentAuthUser,
+  getProfile,
+  listProfiles,
+  updateProfile,
+  upsertProfile,
+} from '@/api/profiles';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -38,57 +46,18 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-// Mock user data
-const MOCK_CURRENT_USER = {
-  id: 'user1',
-  full_name: 'John Doe',
-  email: 'john.doe@company.com',
-  role: 'admin',
-  avatar_url: null,
-  preferences: {
-    theme: 'light',
-    notifications: {
-      email: true,
-      training_complete: true,
-      inference_ready: false,
-      weekly_summary: true
-    },
-    language: 'en',
-    timezone: 'UTC-8',
-    auto_save: true
-  }
+const DEFAULT_PREFERENCES = {
+  theme: 'light',
+  notifications: {
+    email: true,
+    training_complete: true,
+    inference_ready: false,
+    weekly_summary: true
+  },
+  language: 'en',
+  timezone: 'UTC-8',
+  auto_save: true
 };
-
-// Mock team members for RBAC
-const MOCK_TEAM_MEMBERS = [
-  {
-    id: 'user1',
-    full_name: 'John Doe',
-    email: 'john.doe@company.com',
-    role: 'admin',
-    status: 'active',
-    last_login: '2024-01-22T10:30:00Z',
-    projects_access: ['all']
-  },
-  {
-    id: 'user2',
-    full_name: 'Jane Smith',
-    email: 'jane.smith@company.com',
-    role: 'annotator',
-    status: 'active',
-    last_login: '2024-01-21T14:15:00Z',
-    projects_access: ['proj1', 'proj2']
-  },
-  {
-    id: 'user3',
-    full_name: 'Mike Johnson',
-    email: 'mike.johnson@company.com',
-    role: 'viewer',
-    status: 'inactive',
-    last_login: '2024-01-18T09:00:00Z',
-    projects_access: ['proj1']
-  }
-];
 
 const roleConfig = {
   admin: { 
@@ -112,18 +81,18 @@ const roleConfig = {
 };
 
 export default function SettingsPage() {
-  const [currentUser, setCurrentUser] = useState(MOCK_CURRENT_USER);
-  const [teamMembers, setTeamMembers] = useState(MOCK_TEAM_MEMBERS);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddUserDialog, setShowAddUserDialog] = useState(false);
   
   const [newUser, setNewUser] = useState({
     email: '',
-    role: 'viewer',
-    projects_access: []
+    full_name: '',
+    role: 'viewer'
   });
 
-  const [userSettings, setUserSettings] = useState(currentUser.preferences);
+  const [userSettings, setUserSettings] = useState(DEFAULT_PREFERENCES);
 
   useEffect(() => {
     loadCurrentUser();
@@ -131,26 +100,58 @@ export default function SettingsPage() {
 
   const loadCurrentUser = async () => {
     try {
-      const { data } = await supabase.auth.getUser();
-      const user = data?.user;
-      if (user) {
-        setCurrentUser({
-          full_name: user.email,
+      const user = await getCurrentAuthUser();
+      if (!user) return;
+
+      let profile = null;
+      try {
+        profile = await getProfile(user.id);
+      } catch (error) {
+        profile = null;
+      }
+
+      if (!profile) {
+        profile = await upsertProfile({
+          id: user.id,
           email: user.email,
-          role: 'admin',
-          preferences: MOCK_CURRENT_USER.preferences
+          full_name: user.user_metadata?.full_name || user.email,
+          role: 'viewer',
+          status: 'active',
+          preferences: DEFAULT_PREFERENCES,
+          last_login: new Date().toISOString()
         });
-        setUserSettings(MOCK_CURRENT_USER.preferences);
+      } else {
+        await updateProfile(user.id, { last_login: new Date().toISOString() });
+      }
+
+      setCurrentUser(profile);
+      setUserSettings(profile.preferences || DEFAULT_PREFERENCES);
+      if (profile.role === 'admin') {
+        await loadTeamMembers();
       }
     } catch (error) {
       console.error('Error loading user:', error);
     }
   };
 
+  const loadTeamMembers = async () => {
+    try {
+      const profiles = await listProfiles();
+      setTeamMembers(profiles);
+    } catch (error) {
+      console.error('Error loading team members:', error);
+    }
+  };
+
   const handleSaveProfile = async () => {
     setIsLoading(true);
     try {
-      setCurrentUser(prev => ({ ...prev, preferences: userSettings }));
+      if (!currentUser) return;
+      const updated = await updateProfile(currentUser.id, {
+        full_name: currentUser.full_name,
+        preferences: userSettings
+      });
+      setCurrentUser(updated);
     } catch (error) {
       console.error('Error saving profile:', error);
     }
@@ -160,44 +161,68 @@ export default function SettingsPage() {
   const handleSettingChange = (category, key, value) => {
     setUserSettings(prev => ({
       ...prev,
-      [category]: typeof prev[category] === 'object' ? 
-        { ...prev[category], [key]: value } : 
-        { [key]: value }
+      [category]: key === null
+        ? value
+        : typeof prev[category] === 'object'
+          ? { ...prev[category], [key]: value }
+          : { [key]: value }
     }));
   };
 
   const handleAddUser = async () => {
     if (!newUser.email) return;
     
-    // In real implementation, this would be an API call
-    const user = {
-      id: `user${Date.now()}`,
-      full_name: newUser.email.split('@')[0],
-      email: newUser.email,
-      role: newUser.role,
-      status: 'active',
-      last_login: null,
-      projects_access: newUser.projects_access
-    };
-    
-    setTeamMembers(prev => [...prev, user]);
-    setNewUser({ email: '', role: 'viewer', projects_access: [] });
-    setShowAddUserDialog(false);
+    setIsLoading(true);
+    try {
+      await inviteUser({
+        email: newUser.email,
+        fullName: newUser.full_name || newUser.email.split('@')[0],
+        role: newUser.role
+      });
+      await loadTeamMembers();
+      setNewUser({ email: '', full_name: '', role: 'viewer' });
+      setShowAddUserDialog(false);
+    } catch (error) {
+      console.error('Error inviting user:', error);
+    }
+    setIsLoading(false);
   };
 
   const handleUpdateUserRole = async (userId, newRole) => {
-    setTeamMembers(prev => prev.map(user => 
-      user.id === userId ? { ...user, role: newRole } : user
-    ));
+    try {
+      await updateProfile(userId, { role: newRole });
+      await loadTeamMembers();
+    } catch (error) {
+      console.error('Error updating user role:', error);
+    }
   };
 
   const handleRemoveUser = async (userId) => {
     if (confirm('Are you sure you want to remove this user?')) {
-      setTeamMembers(prev => prev.filter(user => user.id !== userId));
+      try {
+        await updateProfile(userId, { status: 'inactive' });
+        await loadTeamMembers();
+      } catch (error) {
+        console.error('Error removing user:', error);
+      }
     }
   };
 
-  const isAdmin = currentUser.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin';
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen p-6 md:p-8">
+        <div className="max-w-6xl mx-auto">
+          <Card className="glass-effect border-0 shadow-lg">
+            <CardContent className="py-12 text-center text-gray-600">
+              Loading settings...
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen p-6 md:p-8">
@@ -460,6 +485,15 @@ export default function SettingsPage() {
                               placeholder="user@company.com"
                               value={newUser.email}
                               onChange={(e) => setNewUser(prev => ({ ...prev, email: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="fullName">Full Name</Label>
+                            <Input
+                              id="fullName"
+                              placeholder="Jane Smith"
+                              value={newUser.full_name}
+                              onChange={(e) => setNewUser(prev => ({ ...prev, full_name: e.target.value }))}
                             />
                           </div>
                           <div className="space-y-2">

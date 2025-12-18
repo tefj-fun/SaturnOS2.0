@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { ProjectMember } from '@/api/entities';
-import { User } from '@/api/entities';
+import { supabase } from '@/api/supabaseClient';
+import { inviteUser } from '@/api/invitations';
+import { getProfile } from '@/api/profiles';
+import {
+  listProjectMembers,
+  updateProjectMember,
+  deleteProjectMember,
+} from '@/api/projectMembers';
+import { getPermissionsForProjectRole } from '@/api/rbac';
 import {
   Dialog,
   DialogContent,
@@ -44,25 +51,25 @@ const ROLE_CONFIGS = {
     label: 'Owner',
     color: 'bg-red-100 text-red-800',
     icon: <Crown className="w-3 h-3" />,
-    permissions: ['view_project', 'edit_project', 'delete_project', 'manage_steps', 'upload_datasets', 'annotate', 'train_models', 'view_results', 'manage_members', 'export_data']
+    permissions: getPermissionsForProjectRole('owner')
   },
   editor: {
     label: 'Editor', 
     color: 'bg-purple-100 text-purple-800',
     icon: <Edit3 className="w-3 h-3" />,
-    permissions: ['view_project', 'edit_project', 'manage_steps', 'upload_datasets', 'annotate', 'train_models', 'view_results', 'export_data']
+    permissions: getPermissionsForProjectRole('editor')
   },
   annotator: {
     label: 'Annotator',
     color: 'bg-blue-100 text-blue-800', 
     icon: <PenTool className="w-3 h-3" />,
-    permissions: ['view_project', 'upload_datasets', 'annotate', 'train_models', 'view_results']
+    permissions: getPermissionsForProjectRole('annotator')
   },
   viewer: {
     label: 'Viewer',
     color: 'bg-gray-100 text-gray-800',
     icon: <Eye className="w-3 h-3" />,
-    permissions: ['view_project', 'view_results']
+    permissions: getPermissionsForProjectRole('viewer')
   }
 };
 
@@ -97,8 +104,20 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
 
   const loadCurrentUser = async () => {
     try {
-      const user = await User.me();
-      setCurrentUser(user);
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
+      if (!user) return;
+      let profile = null;
+      try {
+        profile = await getProfile(user.id);
+      } catch (error) {
+        profile = null;
+      }
+      setCurrentUser({
+        id: user.id,
+        email: user.email,
+        role: profile?.role || null
+      });
     } catch (error) {
       console.error('Error loading current user:', error);
     }
@@ -106,7 +125,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
 
   const loadProjectMembers = async () => {
     try {
-      const projectMembers = await ProjectMember.filter({ project_id: project.id });
+      const projectMembers = await listProjectMembers(project.id);
       setMembers(projectMembers);
     } catch (error) {
       console.error('Error loading project members:', error);
@@ -119,16 +138,13 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
     setIsLoading(true);
     try {
       const permissions = customPermissions.length > 0 ? customPermissions : ROLE_CONFIGS[inviteRole].permissions;
-      
-      await ProjectMember.create({
-        project_id: project.id,
-        user_email: inviteEmail,
-        user_name: inviteEmail.split('@')[0], // Temporary name until user accepts
-        role: inviteRole,
-        permissions: permissions,
-        invited_by: currentUser?.email,
-        invited_date: new Date().toISOString(),
-        status: 'pending'
+      await inviteUser({
+        email: inviteEmail,
+        fullName: inviteEmail.split('@')[0],
+        role: "viewer",
+        projectId: project.id,
+        projectRole: inviteRole,
+        permissions
       });
 
       await loadProjectMembers();
@@ -145,7 +161,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
   const handleUpdateMemberRole = async (memberId, newRole) => {
     try {
       const permissions = ROLE_CONFIGS[newRole].permissions;
-      await ProjectMember.update(memberId, { 
+      await updateProjectMember(memberId, { 
         role: newRole,
         permissions: permissions 
       });
@@ -159,7 +175,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
     if (!confirm('Are you sure you want to remove this member from the project?')) return;
     
     try {
-      await ProjectMember.delete(memberId);
+      await deleteProjectMember(memberId);
       await loadProjectMembers();
     } catch (error) {
       console.error('Error removing member:', error);
@@ -167,8 +183,8 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
   };
 
   const canManageMembers = () => {
-    const currentMember = members.find(m => m.user_email === currentUser?.email);
-    return currentMember?.permissions?.includes('manage_members') || currentUser?.role === 'admin';
+    const currentMember = members.find(m => m.user_id === currentUser?.id || m.user_email === currentUser?.email);
+    return currentUser?.role === 'admin' || currentMember?.role === 'owner' || currentMember?.role === 'admin';
   };
 
   const handlePermissionToggle = (permission) => {

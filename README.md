@@ -27,21 +27,26 @@ npm install
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 VITE_OPENAI_PROXY_URL=http://localhost:8888/.netlify/functions/openai
+VITE_INVITE_USER_URL=http://localhost:8888/.netlify/functions/invite-user
 ```
 
 3. Configure the OpenAI server-side key:
    - For Netlify: set `OPENAI_API_KEY` in Site settings -> Environment variables.
    - For local dev: run `netlify dev` so the function reads `OPENAI_API_KEY` from your shell.
 
-4. Apply database migrations:
+4. Configure the Supabase admin key for invites:
+   - For Netlify: set `SUPABASE_SERVICE_ROLE_KEY` in Site settings -> Environment variables.
+   - For local dev: add `SUPABASE_SERVICE_ROLE_KEY` to your shell before running `netlify dev`.
+
+5. Apply database migrations:
    - Use Supabase SQL editor to run the files in `supabase/migrations/`, or
    - Use the Supabase CLI and run `supabase db push`.
 
-5. Create storage buckets (private):
+6. Create storage buckets (private):
    - `sops`
    - `step-images`
 
-6. Run the app:
+7. Run the app:
 
 ```bash
 npm run dev

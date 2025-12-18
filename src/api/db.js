@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { getPermissionsForProjectRole } from "./rbac";
 
 // Projects
 export async function listProjects() {
@@ -27,6 +28,28 @@ export async function createProject(projectData) {
     .select()
     .single();
   if (error) throw error;
+  const { data: authData } = await supabase.auth.getUser();
+  const currentUser = authData?.user;
+  if (currentUser) {
+    const ownerPermissions = getPermissionsForProjectRole("owner");
+    const memberPayload = {
+      project_id: data.id,
+      user_id: currentUser.id,
+      user_email: currentUser.email,
+      user_name:
+        currentUser.user_metadata?.full_name || currentUser.email,
+      role: "owner",
+      permissions: ownerPermissions,
+      status: "active",
+      joined_date: new Date().toISOString(),
+    };
+    const { error: memberError } = await supabase
+      .from("project_members")
+      .insert(memberPayload);
+    if (memberError) {
+      console.error("Failed to create project owner membership:", memberError);
+    }
+  }
   return data;
 }
 
