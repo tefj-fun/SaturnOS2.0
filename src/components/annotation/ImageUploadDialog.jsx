@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useCallback } from "react";
-import { StepImage } from "@/api/entities";
-import { UploadFile } from "@/api/integrations";
+import { uploadToSupabaseStorage } from "@/api/storage";
+import { createStepImage } from "@/api/db";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -143,13 +143,14 @@ export default function ImageUploadDialog({ open, onOpenChange, onUploadComplete
           setUploadMessage(`Uploading to "${groupName}": ${fileWrapper.file.name}`);
           setUploadProgress(Math.round((filesUploaded / totalFiles) * 100));
 
-          const { file_url } = await UploadFile({ file: fileWrapper.file });
+          const uploadPath = `${currentStepId}/${fileWrapper.file.name}`;
+          const { publicUrl } = await uploadToSupabaseStorage(fileWrapper.file, uploadPath, "step-images");
 
-          await StepImage.create({
+          await createStepImage({
             step_id: currentStepId,
-            image_url: file_url,
-            thumbnail_url: `${file_url}?w=300&h=300&fit=crop`,
-            display_url: `${file_url}?w=1200`,
+            image_url: publicUrl,
+            thumbnail_url: publicUrl,
+            display_url: publicUrl,
             image_name: fileWrapper.file.name,
             file_size: fileWrapper.file.size,
             image_group: groupName, // Assign the calculated group name

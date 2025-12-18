@@ -1,7 +1,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
-import { StepImage } from "@/api/entities";
-import { UploadFile } from "@/api/integrations";
+import { uploadToSupabaseStorage } from "@/api/storage";
+import { createStepImage, deleteStepImage, updateStepImage, listStepImages } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +38,7 @@ import {
   ArrowUpDown,
   ArrowDownUp,
   Image as ImageIcon,
+  MinusCircle,
   FolderOpen,
   ChevronDown,
   ChevronRight as ChevronRightIcon,
@@ -114,7 +115,7 @@ export default function ImagePortal({
 
   const deleteImage = async (imageId) => {
     try {
-      await StepImage.delete(imageId);
+      await deleteStepImage(imageId);
       onImagesUpdate();
 
       const deletedImageOriginalIndex = stepImages.findIndex(img => img.id === imageId);
@@ -134,7 +135,7 @@ export default function ImagePortal({
     setIsDeleting(true);
     try {
       for (const imageId of selectedImages) {
-        await StepImage.delete(imageId);
+        await deleteStepImage(imageId);
       }
 
       setSelectedImages(new Set());
@@ -162,7 +163,7 @@ export default function ImagePortal({
 
   const updateImageGroup = async (imageId, newGroup) => {
     try {
-      await StepImage.update(imageId, { image_group: newGroup });
+      await updateStepImage(imageId, { image_group: newGroup });
       onImagesUpdate();
       setEditingImageId(null);
     } catch (error) {
@@ -195,7 +196,7 @@ export default function ImagePortal({
       );
 
       for (const image of imagesToUpdate) {
-        await StepImage.update(image.id, { image_group: newGroupName.trim() });
+        await updateStepImage(image.id, { image_group: newGroupName.trim() });
       }
 
       // Update empty groups tracking
@@ -225,7 +226,7 @@ export default function ImagePortal({
       );
 
       for (const image of imagesToMove) {
-        await StepImage.update(image.id, { image_group: 'Untagged' });
+        await updateStepImage(image.id, { image_group: 'Untagged' });
       }
 
       // Remove from empty groups tracking
@@ -253,7 +254,7 @@ export default function ImagePortal({
 
     try {
       for (const imageId of selectedImages) {
-        await StepImage.update(imageId, { image_group: groupName });
+        await updateStepImage(imageId, { image_group: groupName });
       }
       onImagesUpdate();
       setSelectedImages(new Set());
@@ -266,7 +267,7 @@ export default function ImagePortal({
 
   const moveImageToGroup = async (imageId, newGroup) => {
     try {
-      await StepImage.update(imageId, { image_group: newGroup });
+      await updateStepImage(imageId, { image_group: newGroup });
 
       // Remove the group from empty groups tracking once it has images
       if (createdEmptyGroups.has(newGroup)) {
@@ -378,6 +379,19 @@ export default function ImagePortal({
     openPreview(image);
   };
 
+  const toggleNoAnnotationsNeeded = async (image) => {
+    if (!image) return;
+    const nextValue = !image.no_annotations_needed;
+    try {
+      await updateStepImage(image.id, { no_annotations_needed: nextValue });
+      if (onImagesUpdate) {
+        await onImagesUpdate();
+      }
+    } catch (error) {
+      console.error("Error updating no-annotations flag:", error);
+    }
+  };
+
   // Navigation handlers
   const navigateToNextImage = () => {
     if (groupedAndFilteredImages.length === 0) return;
@@ -413,15 +427,72 @@ export default function ImagePortal({
   };
 
   // Utility functions
+  const normalizeStorageUrl = (url) => {
+    if (!url) return url;
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname;
+      const publicDupMatch = path.match(/\/storage\/v1\/object\/public\/([^/]+)\/\1\//);
+      const objectDupMatch = path.match(/\/storage\/v1\/object\/([^/]+)\/\1\//);
+      if (publicDupMatch) {
+        parsed.pathname = path.replace(
+          `/storage/v1/object/public/${publicDupMatch[1]}/${publicDupMatch[1]}/`,
+          `/storage/v1/object/public/${publicDupMatch[1]}/`
+        );
+      } else if (objectDupMatch) {
+        parsed.pathname = path.replace(
+          `/storage/v1/object/${objectDupMatch[1]}/${objectDupMatch[1]}/`,
+          `/storage/v1/object/${objectDupMatch[1]}/`
+        );
+      }
+      return parsed.toString();
+    } catch (error) {
+      return url;
+    }
+  };
+
+  const buildRenderUrl = (url, { width, height, resize } = {}) => {
+    if (!url) return url;
+    try {
+      const parsed = new URL(normalizeStorageUrl(url));
+      const publicPrefix = "/storage/v1/object/public/";
+      const renderPrefix = "/storage/v1/render/image/public/";
+
+      if (parsed.pathname.includes(renderPrefix)) {
+        // Keep as render endpoint, just update params.
+      } else if (parsed.pathname.includes(publicPrefix)) {
+        parsed.pathname = parsed.pathname.replace(publicPrefix, renderPrefix);
+      } else {
+        return url;
+      }
+
+      const params = new URLSearchParams(parsed.search);
+      if (width) params.set("width", String(width));
+      if (height) params.set("height", String(height));
+      if (resize) params.set("resize", resize);
+      parsed.search = params.toString();
+      return parsed.toString();
+    } catch (error) {
+      return url;
+    }
+  };
+
   const getImageUrl = (image, context = 'full') => {
+    const baseUrl = image?.image_url || image?.display_url || image?.thumbnail_url;
     switch (context) {
       case 'thumbnail':
-        return image.thumbnail_url || `${image.image_url}?w=300&h=300&fit=crop`;
+        return buildRenderUrl(
+          image.thumbnail_url || image.display_url || image.image_url,
+          { width: 300, height: 300, resize: "cover" }
+        );
       case 'display':
-        return image.display_url || `${image.image_url}?w=1200&fit=inside`;
+        return buildRenderUrl(
+          image.display_url || image.image_url,
+          { width: 1200, resize: "contain" }
+        );
       case 'full':
       default:
-        return image.image_url;
+        return normalizeStorageUrl(baseUrl);
     }
   };
 
@@ -438,17 +509,20 @@ export default function ImagePortal({
 
   const getImageAnnotationStatus = useCallback((image) => {
     if (isImageProcessing(image)) return 'pending';
-    const hasAnnotations = currentStep?.annotation_data?.annotations?.some(ann =>
-      ann.image_id === image.id
-    );
-    return hasAnnotations ? 'completed' : 'pending';
-  }, [currentStep]);
+    if (image?.no_annotations_needed) return 'skipped';
+    const imageAnnotations = Array.isArray(image?.annotations)
+      ? image.annotations
+      : (image?.annotations?.annotations || []);
+    return imageAnnotations.length > 0 ? 'completed' : 'pending';
+  }, []);
 
 
   const getStatusIcon = (status) => {
     switch (status) {
       case 'completed':
         return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'skipped':
+        return <MinusCircle className="w-4 h-4 text-slate-500" />;
       case 'pending':
         return <Clock className="w-4 h-4 text-amber-600" />;
       default:
@@ -460,6 +534,8 @@ export default function ImagePortal({
     switch (status) {
       case 'completed':
         return <Badge className="bg-green-100 text-green-800 border-green-200">Annotated</Badge>;
+      case 'skipped':
+        return <Badge className="bg-slate-100 text-slate-700 border-slate-200">No annotations</Badge>;
       case 'pending':
         return <Badge className="bg-amber-100 text-amber-800 border-amber-200">Pending</Badge>;
       default:
@@ -486,7 +562,7 @@ export default function ImagePortal({
       // Status filter
       if (filterStatus !== 'all') {
         const status = getImageAnnotationStatus(image);
-        if (filterStatus === 'annotated' && status !== 'completed') return false;
+        if (filterStatus === 'annotated' && !['completed', 'skipped'].includes(status)) return false;
         if (filterStatus === 'pending' && status !== 'pending') return false;
       }
 
@@ -511,7 +587,7 @@ export default function ImagePortal({
           comparison = (a.file_size || 0) - (b.file_size || 0);
           break;
         case 'date':
-          comparison = new Date(a.created_date) - new Date(b.created_date);
+          comparison = new Date(a.created_at || a.created_date) - new Date(b.created_at || b.created_date);
           break;
         default:
           comparison = a.image_name.localeCompare(b.image_name);
@@ -578,6 +654,10 @@ export default function ImagePortal({
         <ContextMenuItem onClick={() => openPreview(image)}>
           <Maximize2 className="w-4 h-4 mr-2" />
           Full Preview
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => toggleNoAnnotationsNeeded(image)}>
+          <MinusCircle className="w-4 h-4 mr-2" />
+          {image.no_annotations_needed ? "Clear No Annotations" : "Mark No Annotations"}
         </ContextMenuItem>
         <ContextMenuSeparator />
         {allAvailableGroups.map(group => {
@@ -1202,7 +1282,7 @@ export default function ImagePortal({
                                         <div
                                           className={`group relative bg-white rounded border transition-all duration-200 cursor-pointer hover:shadow-sm hover:scale-105 ${
                                             isSelectionMode && selectedImages.has(image.id)
-                                              ? 'border-blue-500 shadow-md ring-2 ring-blue-200'
+                                              ? 'border-blue-500 bg-blue-50/70 shadow-md ring-2 ring-blue-400'
                                               : stepImages.findIndex(img => img.id === image.id) === currentImageIndex
                                                 ? 'border-teal-500 shadow-md ring-2 ring-teal-200 bg-teal-50'
                                                 : 'border-gray-200 hover:border-gray-300'
@@ -1234,7 +1314,17 @@ export default function ImagePortal({
                                               />
                                             )}
                                             {/* Overlay for selection and status */}
-                                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                            <div
+                                              className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100"
+                                              onClick={(e) => {
+                                                if (isSelectionMode) return;
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                openPreview(image);
+                                              }}
+                                              role="button"
+                                              aria-label="Open preview"
+                                            >
                                               {!isSelectionMode && (
                                                 <Eye className="w-3 h-3 text-white drop-shadow-sm" />
                                               )}
@@ -1268,8 +1358,20 @@ export default function ImagePortal({
 
                                           {/* Primary star - smaller */}
                                           {image.is_primary && (
-                                            <div className="absolute top-1 right-1">
+                                            <div className={`absolute top-1 ${isSelectionMode && selectedImages.has(image.id) ? "right-5" : "right-1"}`}>
                                               <Star className="w-3 h-3 text-amber-500 fill-current drop-shadow-sm" />
+                                            </div>
+                                          )}
+                                          {isSelectionMode && selectedImages.has(image.id) && (
+                                            <div className="absolute top-1 right-1">
+                                              <CheckCircle className="w-3 h-3 text-blue-600 bg-white rounded-full" />
+                                            </div>
+                                          )}
+                                          {image.no_annotations_needed && (
+                                            <div className="absolute bottom-1 left-1">
+                                              <div className="px-1.5 py-0.5 rounded bg-slate-700/90 text-white text-[10px]">
+                                                No ann.
+                                              </div>
                                             </div>
                                           )}
                                         </div>
@@ -1320,7 +1422,7 @@ export default function ImagePortal({
                                     <div
                                       className={`flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer transition-colors ${
                                         isSelectionMode && selectedImages.has(image.id)
-                                          ? 'bg-blue-50 border-l-4 border-blue-500'
+                                          ? 'bg-blue-50 border-l-4 border-blue-500 ring-1 ring-blue-200'
                                           : stepImages.findIndex(img => img.id === image.id) === currentImageIndex
                                             ? 'bg-teal-50 border-l-4 border-teal-500'
                                             : ''
@@ -1363,23 +1465,39 @@ export default function ImagePortal({
                                         </div>
                                         <div className="flex items-center gap-4 text-sm text-gray-500">
                                           <span>{formatFileSize(image.file_size)}</span>
-                                          <span>{new Date(image.created_date).toLocaleDateString()}</span>
+                      <span>{new Date(image.created_at || image.created_date).toLocaleDateString()}</span>
                                           {getStatusBadge(getImageAnnotationStatus(image))}
                                         </div>
                                       </div>
 
                                       <div className="flex items-center gap-2">
+                                        {isSelectionMode && selectedImages.has(image.id) && (
+                                          <CheckCircle className="w-4 h-4 text-blue-600" />
+                                        )}
                                         {!isSelectionMode && (
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              openPreview(image);
-                                            }}
-                                          >
-                                            <Eye className="w-4 h-4" />
-                                          </Button>
+                                          <>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                openPreview(image);
+                                              }}
+                                            >
+                                              <Eye className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleNoAnnotationsNeeded(image);
+                                              }}
+                                              title={image.no_annotations_needed ? "Clear no annotations" : "Mark no annotations"}
+                                            >
+                                              <MinusCircle className="w-4 h-4" />
+                                            </Button>
+                                          </>
                                         )}
                                       </div>
                                     </div>

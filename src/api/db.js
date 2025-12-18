@@ -10,6 +10,16 @@ export async function listProjects() {
   return data || [];
 }
 
+export async function getProjectById(id) {
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function createProject(projectData) {
   const { data, error } = await supabase
     .from("projects")
@@ -47,10 +57,97 @@ export async function listStepsByProject(projectId) {
   return data || [];
 }
 
+export async function listAllSteps() {
+  const { data, error } = await supabase
+    .from("sop_steps")
+    .select("*");
+  if (error) throw error;
+  return data || [];
+}
+
 export async function deleteStepsByProject(projectId) {
   const { error } = await supabase
     .from("sop_steps")
     .delete()
     .eq("project_id", projectId);
+  if (error) throw error;
+}
+
+export async function createStep(stepData) {
+  const { data, error } = await supabase
+    .from("sop_steps")
+    .insert(stepData)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function bulkCreateSteps(steps) {
+  const { error } = await supabase.from("sop_steps").insert(steps);
+  if (error) throw error;
+}
+
+export async function updateStep(stepId, updates) {
+  const { error } = await supabase
+    .from("sop_steps")
+    .update(updates)
+    .eq("id", stepId);
+  if (error) throw error;
+}
+
+export async function deleteStep(stepId) {
+  const { error } = await supabase
+    .from("sop_steps")
+    .delete()
+    .eq("id", stepId);
+  if (error) throw error;
+}
+
+// Training runs (lightweight for dashboard)
+export async function listTrainingRuns(limit = 10) {
+  const { data, error } = await supabase
+    .from("training_runs")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+// Step images
+export async function listStepImages(stepId) {
+  const { data, error } = await supabase
+    .from("step_images")
+    .select("*")
+    .eq("step_id", stepId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createStepImage(imageData) {
+  const { data, error } = await supabase
+    .from("step_images")
+    .insert(imageData)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateStepImage(imageId, updates) {
+  const { error } = await supabase
+    .from("step_images")
+    .update(updates)
+    .eq("id", imageId);
+  if (error) throw error;
+}
+
+export async function deleteStepImage(imageId) {
+  const { error } = await supabase
+    .from("step_images")
+    .delete()
+    .eq("id", imageId);
   if (error) throw error;
 }

@@ -1,7 +1,6 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { CheckCircle, Circle, Target, AlertTriangle } from "lucide-react";
+import { Circle, Target, AlertTriangle } from "lucide-react";
 
 export default function StepNavigation({ steps, currentStepIndex, onStepSelect }) {
   const getClarityIndicator = (step) => {
@@ -21,16 +20,12 @@ export default function StepNavigation({ steps, currentStepIndex, onStepSelect }
           className={`w-full justify-start h-auto p-3 text-left ${
             index === currentStepIndex 
               ? "bg-teal-600 hover:bg-teal-700" 
-              : step.is_annotated 
-                ? "border-green-200 bg-green-50 hover:bg-green-100" 
-                : "hover:bg-gray-50"
+              : "hover:bg-gray-50"
           }`}
         >
           <div className="flex items-start gap-3 w-full">
             <div className="flex-shrink-0 mt-1">
-              {step.is_annotated ? (
-                <CheckCircle className="w-4 h-4 text-green-600" />
-              ) : index === currentStepIndex ? (
+              {index === currentStepIndex ? (
                 <Target className="w-4 h-4 text-white" />
               ) : (
                 <Circle className="w-4 h-4 text-gray-400" />
@@ -55,7 +50,7 @@ export default function StepNavigation({ steps, currentStepIndex, onStepSelect }
                 <p className={`text-xs mt-1 ${
                   index === currentStepIndex ? "text-yellow-200" : "text-amber-600"
                 }`}>
-                  ⚠️ May need clarification
+                  May need clarification
                 </p>
               )}
             </div>

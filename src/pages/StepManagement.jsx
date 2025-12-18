@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Project } from "@/api/entities";
-import { SOPStep } from "@/api/entities";
+import { getProjectById, listStepsByProject, createStep, updateStep, deleteStep as deleteStepApi } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -70,12 +69,12 @@ export default function StepManagementPage() {
   const loadProjectData = async (id) => {
     try {
       const [projectData, stepsData] = await Promise.all([
-        Project.filter({ id }),
-        SOPStep.filter({ project_id: id }, 'step_number')
+        getProjectById(id),
+        listStepsByProject(id)
       ]);
       
-      if (projectData.length > 0) {
-        setProject(projectData[0]);
+      if (projectData) {
+        setProject(projectData);
         setSteps(stepsData);
       }
     } catch (error) {
@@ -107,7 +106,7 @@ export default function StepManagementPage() {
     try {
       // Update all step numbers in sequence
       for (const step of updatedSteps) {
-        await SOPStep.update(step.id, { step_number: step.step_number });
+        await updateStep(step.id, { step_number: step.step_number });
       }
     } catch (error) {
       console.error("Error updating step order:", error);
@@ -118,7 +117,7 @@ export default function StepManagementPage() {
 
   const handleToggleEnabled = async (stepId, isEnabled) => {
     try {
-      await SOPStep.update(stepId, { is_enabled: isEnabled });
+      await updateStep(stepId, { is_enabled: isEnabled });
       setSteps(prev => prev.map(step => 
         step.id === stepId ? { ...step, is_enabled: isEnabled } : step
       ));
@@ -153,7 +152,7 @@ export default function StepManagementPage() {
       
       // Delete selected steps
       for (const stepId of stepsToDelete) {
-        await SOPStep.delete(stepId);
+        await deleteStep(stepId);
       }
       
       // Reload and renumber remaining steps
@@ -207,7 +206,7 @@ export default function StepManagementPage() {
         classes: (editedStep.classes || []).filter(Boolean), // Filter out empty strings
       };
 
-      await SOPStep.update(stepToSave.id, stepToSave);
+      await updateStep(stepToSave.id, stepToSave);
       
       // Update the main steps list with the cleaned data
       setSteps(prev => prev.map(step => 
@@ -256,7 +255,7 @@ export default function StepManagementPage() {
         // For now, we'll iterate and update, then reload.
         const stepsToRenumber = steps.filter(step => step.step_number >= newStepNumber);
         for (const step of stepsToRenumber) {
-          await SOPStep.update(step.id, { step_number: step.step_number + 1 });
+          await updateStep(step.id, { step_number: step.step_number + 1 });
         }
       }
       
@@ -267,7 +266,7 @@ export default function StepManagementPage() {
         step_number: newStepNumber
       };
       
-      await SOPStep.create(stepData);
+      await createStep(stepData);
       
       // Reload all project data to ensure correct order and step numbers are reflected
       await loadProjectData(projectId);
@@ -294,7 +293,7 @@ export default function StepManagementPage() {
     if (!confirm("Are you sure you want to delete this step?")) return;
 
     try {
-      await SOPStep.delete(stepId);
+      await deleteStepApi(stepId);
       await loadProjectData(projectId); // Reload to re-number subsequent steps
     } catch (error) {
       console.error("Error deleting step:", error);
@@ -303,7 +302,7 @@ export default function StepManagementPage() {
 
   const markAsClarified = async (stepId) => {
     try {
-      await SOPStep.update(stepId, {
+      await updateStep(stepId, {
         needs_clarification: false,
         clarity_score: Math.max(8, steps.find(s => s.id === stepId)?.clarity_score || 0),
         clarification_questions: []

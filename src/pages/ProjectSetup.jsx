@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Project } from "@/api/entities";
-import { SOPStep } from "@/api/entities";
-import { UploadFile, InvokeLLM } from "@/api/integrations";
+import { uploadToSupabaseStorage } from "@/api/storage";
+import { generateStepsFromSOP } from "@/api/llm";
+import { getProjectById, listStepsByProject, bulkCreateSteps, updateProject } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -76,17 +75,17 @@ export default function ProjectSetupPage() {
   const loadProject = async (id) => {
     try {
       const [projectData, existingSteps] = await Promise.all([
-        Project.filter({ id }),
-        SOPStep.filter({ project_id: id }, 'step_number')
+        getProjectById(id),
+        listStepsByProject(id)
       ]);
 
-      if (projectData.length > 0) {
-        setProject(projectData[0]);
+      if (projectData) {
+        setProject(projectData);
         // If steps are already generated or exist, navigate to StepManagement
-        if (existingSteps.length > 0 || projectData[0].steps_generated) {
+        if (existingSteps.length > 0 || projectData.steps_generated) {
           navigate(createPageUrl(`StepManagement?projectId=${id}`));
           return;
-        } else if (projectData[0].sop_file_url) {
+        } else if (projectData.sop_file_url) {
           setSetupChoice('ai');
           setCurrentStep(3); // Go straight to generation
         }
@@ -118,16 +117,17 @@ export default function ProjectSetupPage() {
         setUploadProgress(prev => Math.min(95, prev + 10));
       }, 200);
 
-      const { file_url } = await UploadFile({ file });
+      const uploadPath = `${projectId}/${Date.now()}-${file.name}`;
+      const { publicUrl } = await uploadToSupabaseStorage(file, uploadPath, "sops");
       clearInterval(progressInterval);
       setUploadProgress(100);
 
-      await Project.update(projectId, {
-        sop_file_url: file_url,
+      await updateProject(projectId, {
+        sop_file_url: publicUrl,
         status: "sop_uploaded"
       });
 
-      setProject(prev => ({ ...prev, sop_file_url: file_url, status: "sop_uploaded" }));
+      setProject(prev => ({ ...prev, sop_file_url: publicUrl, status: "sop_uploaded" }));
 
       setTimeout(() => {
         setCurrentStep(3);
@@ -149,133 +149,43 @@ export default function ProjectSetupPage() {
     setCurrentLogIndex(0);
 
     const logMessages = [
-      { icon: "FileText", message: "Opening SOP document...", type: "info", duration: 1000 },
-      { icon: "Eye", message: "Reading through the document structure...", type: "processing", duration: 1500 },
-      { icon: "Search", message: "Scanning for procedural steps...", type: "processing", duration: 2000 },
-      { icon: "Brain", message: "Thinking deeply about the workflow...", type: "thinking", duration: 2500 },
-      { icon: "Lightbulb", message: "Identifying UI components and interactions...", type: "discovery", duration: 2000 },
-      { icon: "Users", message: "Consulting with annotation experts...", type: "expert", duration: 1800 },
-      { icon: "Zap", message: "Analyzing business logic patterns...", type: "analysis", duration: 2200 },
-      { icon: "Sparkles", message: "Generating annotation classes...", type: "generation", duration: 2000 },
-      { icon: "Brain", message: "Cross-referencing with best practices...", type: "validation", duration: 1500 },
-      { icon: "CheckCircle", message: "Finalizing step definitions...", type: "completion", duration: 1000 }
-    ];
-
-    const randomMessages = [
-      { icon: "Brain", message: "Hmm, this is an interesting workflow...", type: "thinking" },
-      { icon: "Lightbulb", message: "Found some complex UI patterns here...", type: "discovery" },
-      { icon: "Search", message: "Looking for hidden annotation opportunities...", type: "processing" },
-      { icon: "Users", message: "What would a senior annotator do here?", type: "expert" },
-      { icon: "Sparkles", message: "This section has great annotation potential!", type: "generation" },
-      { icon: "Zap", message: "Detecting some tricky edge cases...", type: "analysis" }
+      { icon: "FileText", message: "Opening SOP document...", type: "info", duration: 800 },
+      { icon: "Eye", message: "Reading through the document structure...", type: "processing", duration: 1000 },
+      { icon: "Search", message: "Scanning for procedural steps...", type: "processing", duration: 1000 },
+      { icon: "Brain", message: "Thinking about annotation steps...", type: "thinking", duration: 800 },
+      { icon: "Sparkles", message: "Asking GPT to draft steps...", type: "generation", duration: 800 }
     ];
 
     try {
       const logPromise = (async () => {
         for (let i = 0; i < logMessages.length; i++) {
           const message = logMessages[i];
-
-          setGenerationLogs(prev => [...prev, {
-            ...message,
-            id: Date.now() + i,
-            timestamp: new Date()
-          }]);
-
+          setGenerationLogs(prev => [...prev, { ...message, id: Date.now() + i, timestamp: new Date() }]);
           setCurrentLogIndex(i);
           setGenerationProgress(Math.min(90, (i + 1) / logMessages.length * 70));
-
           await new Promise(resolve => setTimeout(resolve, message.duration));
         }
-
-        for (let i = 0; i < 3; i++) {
-          const randomMessage = randomMessages[Math.floor(Math.random() * randomMessages.length)];
-
-          setGenerationLogs(prev => [...prev, {
-            ...randomMessage,
-            id: Date.now() + logMessages.length + i,
-            timestamp: new Date()
-          }]);
-
-          await new Promise(resolve => setTimeout(resolve, 1200 + Math.random() * 800));
-        }
-
         setGenerationProgress(90);
       })();
 
       const prompt = `
-        You are an expert in computer vision and object detection annotation. Analyze this SOP document and extract annotation steps for object detection tasks.
-
-        For each step in the SOP, create an annotation step with the following structure:
-        
-        1. **title**: A clear, descriptive title for the annotation step
-        2. **description**: Detailed description of what needs to be annotated/detected
-        3. **product**: The type of object detection task (use "object_detection" for all steps)
-        4. **condition**: The presence/absence conditions (usually "Present, Absent")
-        5. **classes**: Array of specific objects/components to detect (e.g., ["apple", "label", "box"])
-        6. **status**: The result labels for annotation (e.g., "Pass, Fail" or "good, bad")
-        7. **clarity_score**: Rate clarity from 0-10 (should be high for clear detection tasks)
-        8. **business_logic**: The specific counting/detection rules that determine pass/fail
-
-        **Important Guidelines:**
-        - Focus on OBJECT DETECTION, not UI elements
-        - Each step should specify what objects to detect and count
-        - Include specific numerical thresholds (e.g., "exactly 4 apples", "at least 2 boxes")
-        - Business logic should include counting rules and spatial relationships
-        - Use object names as classes (apple, box, label, etc.)
-        - Status should typically be "Pass, Fail" for quality control SOPs
-
-        **Example for reference:**
-        Step: "Check that there are 4 apples on the table"
-        - title: "Apple Count Verification"
-        - classes: ["apple"]
-        - status: "Pass, Fail" 
-        - business_logic: "Count total apples. Pass if exactly 4 apples detected, Fail otherwise"
-
-        Analyze the uploaded SOP and extract ALL steps following this pattern. Focus on:
-        - Object counting tasks
-        - Quality verification steps  
-        - Spatial relationship detection
-        - Component presence/absence checks
-
-        Return exactly the number of steps shown in the SOP document.
+        You are an expert in computer vision and object detection annotation. Analyze this SOP and extract annotation steps.
+        For each step, return: title, description, product ("object_detection"), condition ("Present, Absent" if unsure),
+        classes (array of strings), status (e.g., "Pass, Fail"), clarity_score (0-10), business_logic (string).
+        Keep steps concise and actionable. Return JSON only.
       `;
 
-      const [result] = await Promise.all([
-        InvokeLLM({
-          prompt,
-          file_urls: [project.sop_file_url],
-          response_json_schema: {
-            type: "object",
-            properties: {
-              steps: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    title: { type: "string" },
-                    description: { type: "string" },
-                    product: { type: "string" },
-                    condition: { type: "string" },
-                    classes: {
-                      type: "array",
-                      items: { type: "string" }
-                    },
-                    status: { type: "string" },
-                    business_logic: { type: "string" },
-                    clarity_score: { type: "number", minimum: 0, maximum: 10 }
-                  },
-                  required: ["title", "description", "product", "condition", "classes", "status", "business_logic", "clarity_score"]
-                }
-              }
-            }
-          }
-        }),
-        logPromise
-      ]);
+      const steps = await generateStepsFromSOP({
+        sopUrl: project.sop_file_url,
+        prompt,
+        temperature: 0.2
+      });
+
+      await logPromise;
 
       setGenerationLogs(prev => [...prev, {
         icon: "CheckCircle",
-        message: "✨ Step generation complete! Redirecting to Step Management...",
+        message: "Step generation complete! Redirecting to Step Management...",
         type: "success",
         id: Date.now() + 999,
         timestamp: new Date()
@@ -283,33 +193,36 @@ export default function ProjectSetupPage() {
 
       setGenerationProgress(100);
 
-      if (result.steps && result.steps.length > 0) {
-        setGeneratedSteps(result.steps);
+      if (steps && steps.length > 0) {
+        setGeneratedSteps(steps);
 
-        const stepsToCreate = result.steps.map((step, index) => ({
+        const stepsToCreate = steps.map((step, index) => ({
           project_id: projectId,
           step_number: index + 1,
-          title: step.title,
-          description: step.description,
+          title: step.title || `Step ${index + 1}`,
+          description: step.description || "",
           product: step.product || "object_detection",
-          condition: step.condition + (step.business_logic ? ` | Business Logic: ${step.business_logic}` : ""),
-          classes: step.classes,
-          status: step.status,
-          clarity_score: step.clarity_score,
-          needs_clarification: step.clarity_score < 7,
+          condition: step.condition || "Present, Absent",
+          classes: Array.isArray(step.classes) ? step.classes : [],
+          status: step.status || "Pass, Fail",
+          clarity_score: step.clarity_score ?? 8,
+          needs_clarification: (step.clarity_score ?? 8) < 7,
+          business_logic: step.business_logic || "",
+          is_enabled: true,
+          is_annotated: false,
           clarification_questions: [],
         }));
 
-        await SOPStep.bulkCreate(stepsToCreate);
+        await bulkCreateSteps(stepsToCreate);
 
-        await Project.update(projectId, {
+        await updateProject(projectId, {
           status: "steps_generated",
           steps_generated: true
         });
 
         setTimeout(() => {
           navigate(createPageUrl(`StepManagement?projectId=${projectId}`));
-        }, 2000);
+        }, 1500);
 
       } else {
         throw new Error("No steps could be generated from the SOP");
@@ -317,22 +230,23 @@ export default function ProjectSetupPage() {
 
     } catch (error) {
       console.error("Error generating steps:", error);
-      setError("Failed to generate steps from SOP. Please try again.");
-      setIsGeneratingSteps(false);
+      setError(error.message || "Failed to generate steps from SOP. Please try again.");
       setGenerationLogs(prev => [...prev, {
         icon: "AlertCircle",
-        message: "❌ Generation failed. Please try again.",
+        message: "Generation failed. Please try again.",
         type: "error",
         id: Date.now() + 1000,
         timestamp: new Date()
       }]);
     }
+    setIsGeneratingSteps(false);
   };
+
 
   // Function to skip to manual step creation
   const skipToManualCreation = async () => {
     try {
-      await Project.update(projectId, {
+      await updateProject(projectId, {
         status: "steps_generated",
         steps_generated: true
       });

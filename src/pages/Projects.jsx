@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect } from "react";
-import { listProjects, createProject, updateProject, deleteProject } from "@/api/db";
-import { listStepsByProject, deleteStepsByProject } from "@/api/db";
+import { listProjects, createProject, updateProject, deleteProject, listStepsByProject, deleteStepsByProject } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +46,14 @@ import LoadingOverlay from "../components/projects/LoadingOverlay";
 import ProjectMembersDialog from "../components/projects/ProjectMembersDialog";
 import PermissionGate, { useProjectPermissions } from "../components/rbac/PermissionGate";
 
+// Normalize project created date across legacy/Base44 and Supabase fields
+const getCreatedDate = (project) =>
+  project.created_at ||
+  project.created_date ||
+  project.createdAt ||
+  project.createdDate ||
+  new Date().toISOString();
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
   const [filteredProjects, setFilteredProjects] = useState([]);
@@ -72,6 +79,15 @@ export default function ProjectsPage() {
     loadProjects();
   }, []);
 
+  const getCreatedDate = (project) => {
+    // Normalize date fields coming from Supabase or legacy data
+    return project.created_at ||
+      project.created_date ||
+      project.createdAt ||
+      project.createdDate ||
+      new Date().toISOString();
+  };
+
   useEffect(() => {
     let processedProjects = projects;
 
@@ -90,7 +106,7 @@ export default function ProjectsPage() {
     const sortedProjects = [...processedProjects].sort((a, b) => {
       switch (sortOrder) {
         case 'oldest':
-          return new Date(a.created_date) - new Date(b.created_date);
+          return new Date(getCreatedDate(a)) - new Date(getCreatedDate(b));
         case 'name_asc':
           return a.name.localeCompare(b.name);
         case 'name_desc':
@@ -105,7 +121,7 @@ export default function ProjectsPage() {
           return statusA - statusB;
         case 'newest':
         default:
-          return new Date(b.created_date) - new Date(a.created_date);
+          return new Date(getCreatedDate(b)) - new Date(getCreatedDate(a));
       }
     });
 
@@ -194,7 +210,7 @@ export default function ProjectsPage() {
   const handleDeleteProject = async (projectId) => {
     setIsDeleting(true);
     try {
-      const steps = await SOPStep.filter({ project_id: projectId });
+      const steps = await listStepsByProject(projectId);
       if (steps.length > 0) {
         await deleteStepsByProject(projectId);
         await delay(300);
@@ -704,7 +720,7 @@ function ProjectCard({
           )}
 
           <div className="text-xs text-gray-500 mb-4">
-            Created {new Date(project.created_date).toLocaleDateString()}
+            Created {new Date(getCreatedDate(project)).toLocaleDateString()}
           </div>
 
           <div className="flex flex-wrap gap-2 mb-4">

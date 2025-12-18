@@ -2,12 +2,8 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { User } from "@/api/entities";
-import { requiresAuth } from "@/api/base44Client";
-import { Project } from "@/api/entities";
-import { SOPStep } from "@/api/entities";
-import { TrainingRun } from "@/api/entities";
-import { StepImage } from "@/api/entities";
+import { supabase } from "@/api/supabaseClient";
+import { listProjects, listAllSteps, listTrainingRuns } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -60,24 +56,15 @@ export default function DashboardPage() {
   }, []);
 
   const loadDashboardData = async () => {
-    if (!requiresAuth) {
-      setUser({
-        full_name: "Local User",
-        role: "admin"
-      });
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      const [currentUser, projectsData, stepsData, runsData] = await Promise.all([
-      User.me(),
-      Project.list('-created_date'),
-      SOPStep.list(),
-      TrainingRun.list('-created_date', 10)]
-      );
+      const [{ data: authUser }, projectsData, stepsData, runsData] = await Promise.all([
+        supabase.auth.getUser(),
+        listProjects(),
+        listAllSteps(),
+        listTrainingRuns(10)
+      ]);
 
-      setUser(currentUser);
+      setUser(authUser?.user ? { full_name: authUser.user.email, role: "admin" } : { full_name: "Local User", role: "admin" });
       setProjects(projectsData);
       setAllSteps(stepsData);
       setTrainingRuns(runsData);
@@ -152,7 +139,7 @@ export default function DashboardPage() {
         id: `project-${project.id}`,
         type: 'project',
         message: `Project "${project.name}" was ${project.status === 'completed' ? 'completed' : 'updated'}`,
-        date: project.updated_date || project.created_date,
+        date: project.updated_at || project.created_at,
         icon: <FolderPlus className="w-4 h-4 text-blue-600" />,
         color: 'blue'
       });
@@ -166,7 +153,7 @@ export default function DashboardPage() {
         id: `run-${run.id}`,
         type: 'training',
         message: `Model "${run.run_name}" ${statusMessage}`,
-        date: run.updated_date || run.created_date,
+        date: run.updated_at || run.created_at,
         icon: <Brain className="w-4 h-4 text-green-600" />,
         color: 'green'
       });
@@ -385,7 +372,7 @@ export default function DashboardPage() {
                   Quick Actions
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="grid gap-1">
                 <Link to={createPageUrl('Projects')}>
                   <Button className="w-full bg-blue-600 hover:bg-blue-700 justify-start" size="lg">
                     <Plus className="w-5 h-5 mr-3" />

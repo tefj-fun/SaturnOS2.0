@@ -2,27 +2,17 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { 
   Bot,
   Send,
   User,
-  AlertTriangle,
   Target,
   Square,
   MousePointer2,
   Lightbulb,
-  Sparkles,
-  Layers,
   Palette,
-  ChevronUp, // Added for collapse/expand
-  ChevronDown, // Added for collapse/expand
-  Pin, // Added for pinning
-  PinOff, // Added for unpinning
   Spline, // For Polygon tool
   Brush // For Brush tool
 } from "lucide-react";
@@ -44,8 +34,6 @@ export default function AnnotationChat({
   const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-  const [isHovered, setIsHovered] = useState(false);
-  const [isPinned, setIsPinned] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -152,8 +140,6 @@ export default function AnnotationChat({
     "Can you explain the business logic?"
   ];
   
-  const isExpanded = isPinned || isHovered;
-
   return (
     <div className="h-full flex flex-col bg-gradient-to-b from-gray-50 to-white">
       {/* Header */}
@@ -174,72 +160,6 @@ export default function AnnotationChat({
       {/* Static Controls Section */}
       {currentStep && (
         <div className="p-4 bg-gray-50 border-b border-gray-200">
-          {/* Current Step Context */}
-          <div 
-            className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 transition-all duration-200"
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Target className="w-4 h-4 text-blue-700" />
-                <span className="font-semibold text-xs text-blue-900">Current Step Goal</span>
-              </div>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                className="h-6 w-6" 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsPinned(!isPinned);
-                }}
-              >
-                  {isPinned ? <Pin className="h-4 w-4 text-blue-700" /> : <PinOff className="h-4 w-4 text-gray-400" />}
-              </Button>
-            </div>
-            
-            <AnimatePresence>
-            {isExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="overflow-hidden"
-              >
-                <div className="space-y-2 pt-2">
-                  <div>
-                    <h3 className="font-semibold text-blue-900 text-sm mb-1">
-                      {currentStep.title}
-                    </h3>
-                    {currentStep.description && (
-                      <p className="text-blue-800 text-xs">
-                        {currentStep.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {(currentStep.condition || currentStep.business_logic) && (
-                    <div>
-                      <span className="text-xs font-medium text-blue-700">BUSINESS LOGIC:</span>
-                      <p className="text-blue-800 text-xs mt-1 bg-white/50 p-2 rounded">
-                        {currentStep.business_logic || currentStep.condition}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-blue-700">TARGET STATUS:</span>
-                    <Badge className="bg-blue-600 text-white text-xs">
-                      {currentStep.status}
-                    </Badge>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-            </AnimatePresence>
-          </div>
-
           {/* Annotation Tools */}
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-2">

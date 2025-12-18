@@ -1,12 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { Project } from "@/api/entities";
-import { SOPStep } from "@/api/entities";
-import { LogicRule } from "@/api/entities";
-import { StepImage } from "@/api/entities";
-import { BuildVariant } from "@/api/entities";
-import { StepVariantConfig } from "@/api/entities";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { getProjectById, listStepsByProject, listStepImages, updateProject, updateStep, updateStepImage } from "@/api/db";
+import { createSignedImageUrl, getStoragePathFromUrl } from "@/api/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -41,7 +37,9 @@ import {
   List,
   BarChart3,
   Spline,
-  Package
+  Package,
+  FileText,
+  Download
 } from "lucide-react";
 import { createPageUrl } from "@/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -57,11 +55,14 @@ import AnnotationInsights from "../components/annotation/AnnotationInsights";
 
 export default function AnnotationStudioPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState(null);
   const [steps, setSteps] = useState([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [projectId, setProjectId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSopLoading, setIsSopLoading] = useState(false);
+  const [sopSignedUrl, setSopSignedUrl] = useState(null);
   const [showCopilot, setShowCopilot] = useState(true);
   const [activeTab, setActiveTab] = useState('canvas');
   const [annotationMode, setAnnotationMode] = useState('draw');
@@ -74,10 +75,63 @@ export default function AnnotationStudioPage() {
   const [showStepsPopup, setShowStepsPopup] = useState(false);
   const [brushSize, setBrushSize] = useState(10);
   const canvasRef = useRef(null);
+  const initialStepAppliedRef = useRef(false);
+  const initialImageAppliedRef = useRef(false);
 
   const [selectedBuildVariant, setSelectedBuildVariant] = useState(null);
   const [buildVariants, setBuildVariants] = useState([]);
   const [currentStepConfig, setCurrentStepConfig] = useState(null);
+  const isCopilotAllowed = activeTab !== 'images' && activeTab !== 'insights';
+  const sopFilename = useMemo(() => {
+    if (!project?.sop_file_url) return "sop.pdf";
+    const path = getStoragePathFromUrl(project.sop_file_url, "sops");
+    if (path) {
+      const parts = path.split("/");
+      return parts[parts.length - 1] || "sop.pdf";
+    }
+    try {
+      const parsed = new URL(project.sop_file_url);
+      const parts = parsed.pathname.split("/");
+      return decodeURIComponent(parts[parts.length - 1]) || "sop.pdf";
+    } catch (error) {
+      return "sop.pdf";
+    }
+  }, [project?.sop_file_url]);
+
+  const isImageAnnotated = useCallback((image) => {
+    if (image?.no_annotations_needed) return true;
+    const imageAnnotations = Array.isArray(image?.annotations)
+      ? image.annotations
+      : (image?.annotations?.annotations || []);
+    return imageAnnotations.length > 0;
+  }, []);
+
+  const imageProgress = useMemo(() => {
+    if (!stepImages.length) return null;
+    const groupStats = {};
+    let completed = 0;
+    stepImages.forEach((image) => {
+      const groupName = image.image_group || "Untagged";
+      if (!groupStats[groupName]) {
+        groupStats[groupName] = { total: 0, completed: 0 };
+      }
+      groupStats[groupName].total += 1;
+      if (isImageAnnotated(image)) {
+        groupStats[groupName].completed += 1;
+        completed += 1;
+      }
+    });
+    const total = stepImages.length;
+    const groupSummary = Object.entries(groupStats)
+      .map(([groupName, stats]) => `${groupName}: ${stats.completed}/${stats.total}`)
+      .join(" | ");
+    return {
+      total,
+      completed,
+      isComplete: total > 0 && completed === total,
+      groupSummary,
+    };
+  }, [stepImages, isImageAnnotated]);
 
   // This effect will run when the component mounts and unmounts
   useEffect(() => {
@@ -109,20 +163,35 @@ export default function AnnotationStudioPage() {
   }, [currentStep, currentStepConfig]);
 
 
-  const loadProjectData = useCallback(async (id) => {
+  const loadProjectData = useCallback(async (id, initialStepId = null) => {
     try {
       const [projectData, stepsData] = await Promise.all([
-        Project.filter({ id }),
-        SOPStep.filter({ project_id: id }, 'step_number')
+        getProjectById(id),
+        listStepsByProject(id)
       ]);
 
-      if (projectData.length > 0) {
-        setProject(projectData[0]);
-        setSteps(stepsData);
+      if (projectData) {
+        setProject(projectData);
+        setSteps(stepsData || []);
 
-        const firstIncompleteIndex = stepsData.findIndex(step => !step.is_annotated);
-        if (firstIncompleteIndex !== -1) {
-          setCurrentStepIndex(firstIncompleteIndex);
+        if (
+          (stepsData || []).length > 0 &&
+          projectData.status !== "annotation_in_progress" &&
+          projectData.status !== "completed"
+        ) {
+          try {
+            await updateProject(id, { status: "annotation_in_progress" });
+            setProject(prev => (prev ? { ...prev, status: "annotation_in_progress" } : prev));
+          } catch (error) {
+            console.error("Error updating project status:", error);
+          }
+        }
+
+        if (!initialStepId) {
+          const firstIncompleteIndex = (stepsData || []).findIndex(step => !step.is_annotated);
+          if (firstIncompleteIndex !== -1) {
+            setCurrentStepIndex(firstIncompleteIndex);
+          }
         }
       }
     } catch (error) {
@@ -131,55 +200,58 @@ export default function AnnotationStudioPage() {
     setIsLoading(false);
   }, []);
 
+  // Stubbed build variants for Supabase migration (none yet)
   const loadBuildVariants = useCallback(async () => {
-    try {
-      const variants = await BuildVariant.list();
-      setBuildVariants(variants);
-      if (variants.length > 0 && !selectedBuildVariant) {
-        setSelectedBuildVariant(variants[0]);
-      }
-    } catch (error) {
-      console.error("Error loading build variants:", error);
-    }
-  }, [selectedBuildVariant]);
+    setBuildVariants([]);
+    setSelectedBuildVariant(null);
+  }, []);
 
   const loadStepVariantConfig = useCallback(async () => {
-    if (!currentStep || !selectedBuildVariant) {
-      setCurrentStepConfig(null); // Ensure currentStepConfig is reset if conditions are not met
-      return;
-    }
-    
-    try {
-      const configs = await StepVariantConfig.filter({
-        build_variant_id: selectedBuildVariant.id,
-        sop_step_id: currentStep.id,
-        is_active: true
-      });
-      
-      setCurrentStepConfig(configs.length > 0 ? configs[0] : null);
-    } catch (error) {
-      console.error("Error loading step variant config:", error);
-    }
-  }, [currentStep, selectedBuildVariant]);
+    setCurrentStepConfig(null);
+  }, []);
 
   const loadLogicRules = useCallback(async () => {
     if (!currentStep) return;
-    try {
-      const rules = await LogicRule.filter({ step_id: currentStep.id }, 'priority');
-      setLogicRules(rules);
-    } catch (error) {
-      console.error("Error loading logic rules:", error);
-    }
+    setLogicRules([]);
   }, [currentStep]);
 
   const loadStepImages = useCallback(async () => {
     if (!currentStep) return;
     try {
-      const images = await StepImage.filter({ step_id: currentStep.id }, '-created_date');
-      setStepImages(images);
+      const images = await listStepImages(currentStep.id);
+      const signedImages = await Promise.all(
+        images.map(async (image) => {
+          const baseUrl = image.image_url || image.display_url || image.thumbnail_url;
+          const path = getStoragePathFromUrl(baseUrl, "step-images");
+          if (!path) return image;
+
+          const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
+            createSignedImageUrl("step-images", path, {
+              expiresIn: 3600,
+              transform: { width: 300, height: 300, resize: "cover" },
+            }),
+            createSignedImageUrl("step-images", path, {
+              expiresIn: 3600,
+              transform: { width: 1200, resize: "contain" },
+            }),
+            createSignedImageUrl("step-images", path, { expiresIn: 3600 }),
+          ]);
+
+          return {
+            ...image,
+            storage_path: path,
+            thumbnail_url: thumbnailUrl || image.thumbnail_url,
+            display_url: displayUrl || image.display_url,
+            image_url: fullUrl || image.image_url,
+          };
+        })
+      );
+
+      setStepImages(signedImages);
       setCurrentImageIndex(0);
     } catch (error) {
       console.error("Error loading step images:", error);
+      setStepImages([]);
     }
   }, [currentStep]);
 
@@ -229,20 +301,74 @@ export default function AnnotationStudioPage() {
   }, [effectiveStepConfig]);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const id = urlParams.get('projectId');
+    const id = searchParams.get('projectId');
+    const stepIdParam = searchParams.get('stepId');
     if (id) {
+      if (id === projectId) {
+        return;
+      }
       setProjectId(id);
-      loadProjectData(id);
+      loadProjectData(id, stepIdParam);
     } else {
-      navigate(createPageUrl('Projects'));
+      if (!projectId) {
+        navigate(createPageUrl('Projects'));
+      }
     }
-  }, [navigate, loadProjectData]);
+  }, [navigate, loadProjectData, projectId, searchParams]);
+
+  useEffect(() => {
+    initialStepAppliedRef.current = false;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!steps.length || initialStepAppliedRef.current) {
+      return;
+    }
+    const stepIdParam = searchParams.get('stepId');
+    if (stepIdParam) {
+      const stepIndex = steps.findIndex(step => step.id === stepIdParam);
+      if (stepIndex !== -1) {
+        setCurrentStepIndex(stepIndex);
+      }
+    }
+    initialStepAppliedRef.current = true;
+  }, [steps, searchParams]);
 
   // New: Load build variants on mount
   useEffect(() => {
     loadBuildVariants();
   }, [loadBuildVariants]);
+
+  useEffect(() => {
+    if (!project?.sop_file_url) {
+      setSopSignedUrl(null);
+      return;
+    }
+
+    let isActive = true;
+    const loadSopUrl = async () => {
+      setIsSopLoading(true);
+      try {
+        const path = getStoragePathFromUrl(project.sop_file_url, "sops");
+        if (!path) {
+          if (isActive) setSopSignedUrl(project.sop_file_url);
+          return;
+        }
+        const signedUrl = await createSignedImageUrl("sops", path, { expiresIn: 3600 });
+        if (isActive) setSopSignedUrl(signedUrl || project.sop_file_url);
+      } catch (error) {
+        console.error("Error creating signed SOP URL:", error);
+        if (isActive) setSopSignedUrl(project.sop_file_url);
+      } finally {
+        if (isActive) setIsSopLoading(false);
+      }
+    };
+
+    loadSopUrl();
+    return () => {
+      isActive = false;
+    };
+  }, [project?.sop_file_url]);
 
   // Existing useEffect for currentStep changes to load base data (rules, images)
   useEffect(() => {
@@ -251,6 +377,74 @@ export default function AnnotationStudioPage() {
       loadStepImages();
     }
   }, [currentStep, loadLogicRules, loadStepImages]);
+
+  useEffect(() => {
+    initialImageAppliedRef.current = false;
+  }, [currentStepIndex]);
+
+  useEffect(() => {
+    if (!stepImages.length || initialImageAppliedRef.current) {
+      return;
+    }
+    const imageIdParam = searchParams.get('imageId');
+    if (imageIdParam) {
+      const imageIndex = stepImages.findIndex(image => image.id === imageIdParam);
+      if (imageIndex !== -1) {
+        setCurrentImageIndex(imageIndex);
+      }
+    }
+    initialImageAppliedRef.current = true;
+  }, [stepImages, searchParams]);
+
+  useEffect(() => {
+    if (!currentStep || !imageProgress) return;
+    const shouldBeAnnotated = imageProgress.isComplete;
+    if (Boolean(currentStep.is_annotated) === shouldBeAnnotated) return;
+
+    const syncStepCompletion = async () => {
+      try {
+        await updateStep(currentStep.id, { is_annotated: shouldBeAnnotated });
+        setSteps(prev =>
+          prev.map(step =>
+            step.id === currentStep.id ? { ...step, is_annotated: shouldBeAnnotated } : step
+          )
+        );
+      } catch (error) {
+        console.error("Error syncing step completion:", error);
+      }
+    };
+
+    syncStepCompletion();
+  }, [currentStep, imageProgress]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const stepId = steps[currentStepIndex]?.id;
+    const imageId = stepImages[currentImageIndex]?.id;
+    const currentProjectId = searchParams.get('projectId');
+    const currentStepId = searchParams.get('stepId');
+    const currentImageId = searchParams.get('imageId');
+    if (
+      currentProjectId === projectId &&
+      currentStepId === (stepId || null) &&
+      currentImageId === (imageId || null)
+    ) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('projectId', projectId);
+    if (stepId) {
+      nextParams.set('stepId', stepId);
+    } else {
+      nextParams.delete('stepId');
+    }
+    if (imageId) {
+      nextParams.set('imageId', imageId);
+    } else {
+      nextParams.delete('imageId');
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [projectId, steps, currentStepIndex, stepImages, currentImageIndex, searchParams, setSearchParams]);
 
   // New: Load step variant config when currentStep or selectedBuildVariant changes
   useEffect(() => {
@@ -327,32 +521,6 @@ export default function AnnotationStudioPage() {
     setIsAIThinking(false);
   };
 
-  // Simplified: The canvas now saves its own data. This just marks the step as done.
-  const handleStepComplete = async (stepId) => {
-    try {
-      await SOPStep.update(stepId, {
-        is_annotated: true,
-      });
-
-      const updatedSteps = await SOPStep.filter({ project_id: projectId }, 'step_number');
-      setSteps(updatedSteps);
-
-      const allComplete = updatedSteps.every(step => step.is_annotated);
-      if (allComplete) {
-        await Project.update(projectId, { status: "completed" });
-      } else {
-        await Project.update(projectId, { status: "annotation_in_progress" });
-      }
-
-      // Navigate to the next step if available
-      if (currentStepIndex < steps.length - 1) {
-        await goToNextStep();
-      }
-    } catch (error) {
-      console.error("Error completing step:", error);
-    }
-  };
-
   const handleLogicRulesUpdate = async (updatedRules) => {
     setLogicRules(updatedRules);
     await loadLogicRules();
@@ -361,6 +529,12 @@ export default function AnnotationStudioPage() {
   const handleImagesUpdate = async () => {
     await loadStepImages();
   };
+
+  const handleImageSaved = useCallback((imageId, updates) => {
+    setStepImages(prev =>
+      prev.map(image => (image.id === imageId ? { ...image, ...updates } : image))
+    );
+  }, []);
   
   const saveAndRun = async (action) => {
     if (canvasRef.current?.saveCurrentAnnotations) {
@@ -391,6 +565,24 @@ export default function AnnotationStudioPage() {
   const handleImageIndexChange = (index) => {
     saveAndRun(() => setCurrentImageIndex(index));
   };
+
+  const handleViewSop = useCallback(() => {
+    const url = sopSignedUrl || project?.sop_file_url;
+    if (!url || isSopLoading) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, [sopSignedUrl, project?.sop_file_url, isSopLoading]);
+
+  const handleDownloadSop = useCallback(() => {
+    const url = sopSignedUrl || project?.sop_file_url;
+    if (!url || isSopLoading) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = sopFilename || "sop.pdf";
+    link.rel = "noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, [sopSignedUrl, project?.sop_file_url, isSopLoading, sopFilename]);
 
 
   const getProgress = () => {
@@ -505,8 +697,32 @@ export default function AnnotationStudioPage() {
                   <BarChart3 className="w-4 h-4" />
                   Insights
                 </TabsTrigger>
-              </TabsList>
+            </TabsList>
             <div className="flex items-center gap-3">
+              {project?.sop_file_url && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleViewSop}
+                    disabled={isSopLoading}
+                    className="text-xs"
+                  >
+                    <FileText className="w-3 h-3 mr-1.5" />
+                    View
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadSop}
+                    disabled={isSopLoading}
+                    className="text-xs"
+                  >
+                    <Download className="w-3 h-3 mr-1.5" />
+                    Download
+                  </Button>
+                </>
+              )}
               <Button
                   variant="outline"
                   size="sm"
@@ -527,15 +743,17 @@ export default function AnnotationStudioPage() {
                   Train Model
               </Button>
               
-              <Button
-                variant={showCopilot ? "default" : "outline"}
-                size="sm"
-                onClick={() => setShowCopilot(!showCopilot)}
-                className={showCopilot ? "bg-blue-600 hover:bg-blue-700" : ""}
-              >
-                <Bot className="w-4 h-4 mr-2" />
-                AI Copilot
-              </Button>
+              {isCopilotAllowed && (
+                <Button
+                  variant={showCopilot ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setShowCopilot(!showCopilot)}
+                  className={showCopilot ? "bg-blue-600 hover:bg-blue-700" : ""}
+                >
+                  <Bot className="w-4 h-4 mr-2" />
+                  AI Copilot
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -553,7 +771,6 @@ export default function AnnotationStudioPage() {
                         currentImage={currentImage}
                         annotationMode={annotationMode}
                         activeClass={activeClass}
-                        onStepComplete={handleStepComplete}
                         projectId={projectId}
                         onNextImage={() => handleImageIndexChange(Math.min(currentImageIndex + 1, stepImages.length - 1))}
                         onPrevImage={() => handleImageIndexChange(Math.max(currentImageIndex - 1, 0))}
@@ -562,6 +779,7 @@ export default function AnnotationStudioPage() {
                         brushSize={brushSize}
                         stepImages={stepImages}
                         onImageIndexChange={handleImageIndexChange}
+                        onImageSaved={handleImageSaved}
                     />
                 </TabsContent>
                 <TabsContent value="logic" className="h-full m-0">
@@ -593,7 +811,7 @@ export default function AnnotationStudioPage() {
             </div>
           {/* Right Sidebar - AI Chat & Copilot */}
           <AnimatePresence>
-            {showCopilot && (
+            {showCopilot && isCopilotAllowed && (
               <motion.aside
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: 400, opacity: 1 }}
@@ -626,7 +844,7 @@ export default function AnnotationStudioPage() {
         <DialogHeader>
           <DialogTitle>Annotation Steps</DialogTitle>
           <DialogDescription>
-            Select a step to view its details and begin annotating. Completed steps are marked with a green check.
+            Select a step to view its details and begin annotating.
           </DialogDescription>
         </DialogHeader>
         <div className="py-4 max-h-[60vh] overflow-y-auto">
