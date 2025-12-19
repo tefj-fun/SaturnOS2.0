@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getProjectById, listStepsByProject, listStepImages, updateProject, updateStep, updateStepImage } from "@/api/db";
+import { BuildVariant, StepVariantConfig } from "@/api/entities";
 import { createSignedImageUrl, getStoragePathFromUrl } from "@/api/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -200,15 +201,39 @@ export default function AnnotationStudioPage() {
     setIsLoading(false);
   }, []);
 
-  // Stubbed build variants for Supabase migration (none yet)
   const loadBuildVariants = useCallback(async () => {
-    setBuildVariants([]);
-    setSelectedBuildVariant(null);
+    try {
+      const variants = await BuildVariant.list();
+      setBuildVariants(variants);
+      setSelectedBuildVariant(prev => {
+        if (!variants.length) return null;
+        if (!prev) return variants[0];
+        const match = variants.find(variant => variant.id === prev.id);
+        return match || variants[0];
+      });
+    } catch (error) {
+      console.error("Error loading build variants:", error);
+      setBuildVariants([]);
+      setSelectedBuildVariant(null);
+    }
   }, []);
 
   const loadStepVariantConfig = useCallback(async () => {
-    setCurrentStepConfig(null);
-  }, []);
+    if (!currentStep || !selectedBuildVariant) {
+      setCurrentStepConfig(null);
+      return;
+    }
+    try {
+      const configs = await StepVariantConfig.filter({
+        build_variant_id: selectedBuildVariant.id,
+        sop_step_id: currentStep.id,
+      });
+      setCurrentStepConfig(configs[0] || null);
+    } catch (error) {
+      console.error("Error loading step variant config:", error);
+      setCurrentStepConfig(null);
+    }
+  }, [currentStep, selectedBuildVariant]);
 
   const loadLogicRules = useCallback(async () => {
     if (!currentStep) return;

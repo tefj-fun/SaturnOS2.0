@@ -17,9 +17,11 @@ const CONTENT_TYPE_BY_EXT = {
   ".svg": "image/svg+xml",
 };
 
+const YAML_TYPES = new Set(["text/yaml", "application/x-yaml", "application/yaml"]);
+
 const guessContentType = (file, path, options) => {
   if (options?.contentType) return options.contentType;
-  if (file?.type) return file.type;
+  if (file?.type && !YAML_TYPES.has(file.type)) return file.type;
   const name = (path || file?.name || "").toLowerCase();
   const ext = name.includes(".") ? `.${name.split(".").pop()}` : "";
   return CONTENT_TYPE_BY_EXT[ext] || "application/octet-stream";
@@ -28,7 +30,7 @@ const guessContentType = (file, path, options) => {
 const withContentType = (file, contentType, fallbackName) => {
   if (!contentType || typeof Blob === "undefined" || !(file instanceof Blob)) return file;
   const existingType = file.type || "";
-  if (existingType && existingType !== "application/octet-stream") return file;
+  if (existingType === contentType) return file;
   if (typeof File !== "undefined" && file instanceof File) {
     return new File([file], file.name || fallbackName, { type: contentType });
   }

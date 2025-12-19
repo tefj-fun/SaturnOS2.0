@@ -270,7 +270,7 @@ export default function ImageUploadDialog({
       yamlLines.push("names: []");
     }
     const yamlContent = `${yamlLines.join("\n")}\n`;
-    const blob = new Blob([yamlContent], { type: "text/yaml" });
+    const blob = new Blob([yamlContent], { type: "text/plain" });
     const storagePath = `${projectId}/${currentStepId}/data.yaml`;
     const { path, publicUrl } = await uploadToSupabaseStorage(blob, storagePath, {
       bucket: DATASET_BUCKET,
@@ -294,7 +294,10 @@ export default function ImageUploadDialog({
         : "test";
     const imagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
     await uploadToSupabaseStorage(file, imagePath, { bucket: DATASET_BUCKET });
-    const labelPayload = labelContent === undefined ? "" : labelContent;
+    if (labelContent === undefined) {
+      return;
+    }
+    const labelPayload = labelContent;
     const labelBlob = new Blob([labelPayload], { type: "text/plain" });
     const labelPath = `${projectId}/${currentStepId}/labels/${splitName}/${stem}.txt`;
     await uploadToSupabaseStorage(labelBlob, labelPath, {

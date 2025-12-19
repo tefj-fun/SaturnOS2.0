@@ -26,6 +26,8 @@ import Dashboard from "./Dashboard";
 
 import BuildVariants from "./BuildVariants";
 
+import Welcome from "./Welcome";
+
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 
 const PAGES = {
@@ -74,6 +76,11 @@ function _getCurrentPage(url) {
 // Create a wrapper component that uses useLocation inside the Router context
 function PagesContent() {
     const location = useLocation();
+    const normalizedPath = location.pathname.replace(/\/+$/, "") || "/";
+    if (normalizedPath === "/welcome") {
+        return <Welcome />;
+    }
+
     const currentPage = _getCurrentPage(location.pathname);
     
     return (
