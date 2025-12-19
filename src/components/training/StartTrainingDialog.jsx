@@ -11,6 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info, Sparkles, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { SOPStep } from '@/api/entities';
+import { listStepImages } from '@/api/db';
+import { createSignedImageUrl, getStoragePathFromUrl, uploadToSupabaseStorage } from '@/api/storage';
 
 const TooltipLabel = ({ children, tooltipText }) => (
     <div className="flex items-center gap-1.5">
@@ -47,6 +50,8 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
     const [formError, setFormError] = useState("");
     const [autoYamlSource, setAutoYamlSource] = useState("");
+    const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
+    const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
     
     const [config, setConfig] = useState({
         runName: "",
@@ -72,19 +77,88 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         }
     });
 
+    const buildDatasetYaml = useMemo(() => {
+        return (classes = []) => {
+            const names = (classes || []).filter(Boolean);
+            const namesYaml = names.length
+                ? names.map((name, index) => `  ${index}: ${JSON.stringify(name)}`).join("\n")
+                : "";
+            const yamlLines = [
+                "path: .",
+                "train: images/train",
+                "val: images/val",
+            ];
+            if (namesYaml) {
+                yamlLines.push("names:", namesYaml);
+            } else {
+                yamlLines.push("names: []");
+            }
+            return `${yamlLines.join("\n")}\n`;
+        };
+    }, []);
+
     useEffect(() => {
-        if (open) {
-            const newVersion = (existingRuns?.length || 0) + 1;
-            const safeTitle = stepTitle?.replace(/[^a-zA-Z0-9]/g, '_') || 'training';
-            const linkedYaml = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
-            setConfig(prev => ({
-                ...prev,
-                runName: `${safeTitle}_v${newVersion}`,
-                dataYaml: linkedYaml || prev.dataYaml
-            }));
-            setAutoYamlSource(linkedYaml);
-        }
-    }, [open, stepTitle, existingRuns, stepData]);
+        if (!open) return;
+        let isMounted = true;
+        const newVersion = (existingRuns?.length || 0) + 1;
+        const safeTitle = stepTitle?.replace(/[^a-zA-Z0-9]/g, '_') || 'training';
+        const linkedYaml = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
+
+        setConfig(prev => ({
+            ...prev,
+            runName: `${safeTitle}_v${newVersion}`,
+            dataYaml: linkedYaml || prev.dataYaml
+        }));
+        setAutoYamlSource(linkedYaml);
+
+        const refreshYaml = async () => {
+            if (!stepId) return;
+            try {
+                const [freshStep] = await SOPStep.filter({ id: stepId });
+                if (!isMounted || !freshStep) return;
+                let freshYaml = freshStep.dataset_yaml_url || freshStep.dataset_yaml_path || "";
+                if (!freshYaml) {
+                    const projectId = freshStep.project_id || stepData?.project_id;
+                    if (projectId) {
+                        const yamlContent = buildDatasetYaml(freshStep.classes || []);
+                        const blob = new Blob([yamlContent], { type: "text/plain" });
+                        const storagePath = `${projectId}/${stepId}/data.yaml`;
+                        const { path, publicUrl } = await uploadToSupabaseStorage(blob, storagePath, {
+                            bucket: DATASET_BUCKET,
+                            contentType: "text/plain",
+                        });
+                        await SOPStep.update(stepId, {
+                            dataset_yaml_path: `storage:${DATASET_BUCKET}/${path}`,
+                            dataset_yaml_url: publicUrl,
+                            dataset_yaml_name: "data.yaml",
+                        });
+                        freshYaml = publicUrl;
+                    }
+                }
+                if (!freshYaml || freshYaml === linkedYaml) return;
+                setConfig(prev => {
+                    if (prev.dataYaml && prev.dataYaml !== linkedYaml) {
+                        return prev;
+                    }
+                    return { ...prev, dataYaml: freshYaml };
+                });
+                setAutoYamlSource(freshYaml);
+            } catch (error) {
+                console.warn("Failed to refresh dataset YAML:", error);
+            }
+        };
+
+        refreshYaml();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [open, stepId, stepTitle, existingRuns, stepData, buildDatasetYaml]);
+
+    useEffect(() => {
+        if (!autoYamlSource) return;
+        setConfig(prev => (prev.dataYaml ? prev : { ...prev, dataYaml: autoYamlSource }));
+    }, [autoYamlSource]);
 
     const dynamicModelOptions = useMemo(() => {
         const completedRuns = (existingRuns || []).filter(run => run.status === 'completed' && run.trained_model_url);
@@ -121,21 +195,235 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
 
     const resolveDevice = (compute) => (compute === 'cpu' ? 'cpu' : 0);
 
+    const getSplitName = (groupName) => {
+        if (!groupName) return "train";
+        const normalized = String(groupName).toLowerCase();
+        if (normalized === "training") return "train";
+        if (normalized === "inference" || normalized === "validation" || normalized === "val") return "val";
+        if (normalized === "test" || normalized === "testing") return "test";
+        return "train";
+    };
+
+    const clamp01 = (value) => Math.min(1, Math.max(0, value));
+
+    const normalizeNumber = (value) => {
+        if (!Number.isFinite(value)) return "0";
+        return Number(value).toFixed(6);
+    };
+
+    const extractAnnotations = (imageRow) => {
+        const raw = imageRow?.annotations;
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === "object") {
+            if (Array.isArray(raw.annotations)) return raw.annotations;
+            if (Array.isArray(raw.objects)) return raw.objects;
+        }
+        return [];
+    };
+
+    const getImageSize = (imageRow) => {
+        const raw = imageRow?.annotations;
+        if (raw?.image_natural_size?.width && raw?.image_natural_size?.height) {
+            return raw.image_natural_size;
+        }
+        if (imageRow?.image_natural_size?.width && imageRow?.image_natural_size?.height) {
+            return imageRow.image_natural_size;
+        }
+        if (imageRow?.width && imageRow?.height) {
+            return { width: imageRow.width, height: imageRow.height };
+        }
+        return null;
+    };
+
+    const buildLabelContent = (imageRow, classNames) => {
+        const annotations = extractAnnotations(imageRow);
+        const size = getImageSize(imageRow);
+        if (!size || !size.width || !size.height) return { content: "", hasLabels: false };
+        const lines = [];
+        annotations.forEach((annotation) => {
+            if (!annotation) return;
+            if (annotation.status && ["deleted", "disabled", "archived"].includes(String(annotation.status))) {
+                return;
+            }
+            const type = annotation.type || annotation.shape;
+            const className = annotation.class || annotation.label;
+            if (!className) return;
+            const classIndex = classNames.indexOf(className);
+            if (classIndex < 0) return;
+
+            if (type === "bbox" || type === "rectangle") {
+                const width = annotation.width;
+                const height = annotation.height;
+                const x = annotation.x;
+                const y = annotation.y;
+                if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(x) || !Number.isFinite(y)) {
+                    return;
+                }
+                const cx = clamp01((x + width / 2) / size.width);
+                const cy = clamp01((y + height / 2) / size.height);
+                const w = clamp01(width / size.width);
+                const h = clamp01(height / size.height);
+                lines.push([
+                    classIndex,
+                    normalizeNumber(cx),
+                    normalizeNumber(cy),
+                    normalizeNumber(w),
+                    normalizeNumber(h),
+                ].join(" "));
+                return;
+            }
+
+            if (type === "polygon" || type === "segmentation") {
+                const points = annotation.points || annotation.vertices;
+                if (!Array.isArray(points) || points.length < 3) return;
+                const coords = points.flatMap((point) => {
+                    const px = clamp01(point.x / size.width);
+                    const py = clamp01(point.y / size.height);
+                    return [normalizeNumber(px), normalizeNumber(py)];
+                });
+                lines.push([classIndex, ...coords].join(" "));
+            }
+        });
+        return { content: lines.join("\n"), hasLabels: lines.length > 0 };
+    };
+
+    const ensureDatasetExport = async ({ projectId, stepId: activeStepId, classNames }) => {
+        const stepImages = await listStepImages(activeStepId);
+        if (!stepImages.length) {
+            setFormError("No images found for this step. Upload or annotate images before training.");
+            return { ok: false };
+        }
+        const hasTestSplit = stepImages.some((imageRow) => getSplitName(imageRow.image_group) === "test");
+        let hasAnyLabels = false;
+
+        for (const imageRow of stepImages) {
+            const splitName = getSplitName(imageRow.image_group);
+            const imageName = imageRow.image_name
+                || imageRow.file_name
+                || imageRow.name
+                || getStoragePathFromUrl(imageRow.image_url, STEP_IMAGES_BUCKET)?.split("/").pop()
+                || getStoragePathFromUrl(imageRow.image_url, DATASET_BUCKET)?.split("/").pop()
+                || `image-${imageRow.id || Date.now()}.jpg`;
+
+            const datasetImagePath = `${projectId}/${activeStepId}/images/${splitName}/${imageName}`;
+            const existingDatasetPath = getStoragePathFromUrl(imageRow.image_url, DATASET_BUCKET);
+            if (!existingDatasetPath || existingDatasetPath !== datasetImagePath) {
+                if (imageRow.image_url) {
+                    let imageUrl = imageRow.image_url;
+                    const stepImagePath = getStoragePathFromUrl(imageRow.image_url, STEP_IMAGES_BUCKET);
+                    if (stepImagePath) {
+                        try {
+                            imageUrl = await createSignedImageUrl(STEP_IMAGES_BUCKET, stepImagePath, {
+                                expiresIn: 600,
+                            });
+                        } catch (error) {
+                            console.warn("Failed to create signed image URL, falling back to raw URL.", error);
+                        }
+                    }
+                    const response = await fetch(imageUrl);
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch image ${imageName}`);
+                    }
+                    const blob = await response.blob();
+                    await uploadToSupabaseStorage(blob, datasetImagePath, {
+                        bucket: DATASET_BUCKET,
+                        contentType: blob.type || "image/jpeg",
+                    });
+                }
+            }
+
+            const { content, hasLabels } = buildLabelContent(imageRow, classNames);
+            hasAnyLabels = hasAnyLabels || hasLabels;
+            const labelContent = content || "";
+            const labelName = imageName.replace(/\.[^/.]+$/, "");
+            const labelPath = `${projectId}/${activeStepId}/labels/${splitName}/${labelName}.txt`;
+            const labelBlob = new Blob([labelContent], { type: "text/plain" });
+            await uploadToSupabaseStorage(labelBlob, labelPath, {
+                bucket: DATASET_BUCKET,
+                contentType: "text/plain",
+            });
+        }
+
+        if (!hasAnyLabels) {
+            setFormError("No annotations found for this step. Add labels in the annotation studio before training.");
+            return { ok: false };
+        }
+
+        return { ok: true, hasTestSplit };
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!config.dataYaml || !config.dataYaml.trim()) {
-            setFormError("Dataset YAML path is required to start training.");
-            return;
-        }
+        let dataYamlValue = (config.dataYaml || autoYamlSource || "").trim();
         setFormError("");
         setIsSubmitting(true);
         
         try {
+            if (stepId) {
+                const [freshStep] = await SOPStep.filter({ id: stepId });
+                const projectId = freshStep?.project_id || stepData?.project_id;
+                const classNames = (freshStep?.classes || stepData?.classes || []).filter(Boolean);
+                if (!projectId) {
+                    setFormError("Missing project information for this step.");
+                    return;
+                }
+                const exportResult = await ensureDatasetExport({
+                    projectId,
+                    stepId,
+                    classNames,
+                });
+                if (!exportResult?.ok) {
+                    return;
+                }
+                if (!dataYamlValue) {
+                    const yamlContent = buildDatasetYaml(classNames);
+                    const blob = new Blob([yamlContent], { type: "text/plain" });
+                    const storagePath = `${projectId}/${stepId}/data.yaml`;
+                    const { path, publicUrl } = await uploadToSupabaseStorage(blob, storagePath, {
+                        bucket: DATASET_BUCKET,
+                        contentType: "text/plain",
+                    });
+                    await SOPStep.update(stepId, {
+                        dataset_yaml_path: `storage:${DATASET_BUCKET}/${path}`,
+                        dataset_yaml_url: publicUrl,
+                        dataset_yaml_name: "data.yaml",
+                    });
+                    dataYamlValue = publicUrl;
+                    setConfig(prev => ({ ...prev, dataYaml: publicUrl }));
+                    setAutoYamlSource(publicUrl);
+                }
+            }
+            if (!dataYamlValue && stepId) {
+                const [freshStep] = await SOPStep.filter({ id: stepId });
+                const projectId = freshStep?.project_id || stepData?.project_id;
+                if (projectId) {
+                    const yamlContent = buildDatasetYaml(freshStep?.classes || stepData?.classes || []);
+                    const blob = new Blob([yamlContent], { type: "text/plain" });
+                    const storagePath = `${projectId}/${stepId}/data.yaml`;
+                    const { path, publicUrl } = await uploadToSupabaseStorage(blob, storagePath, {
+                        bucket: DATASET_BUCKET,
+                        contentType: "text/plain",
+                    });
+                    await SOPStep.update(stepId, {
+                        dataset_yaml_path: `storage:${DATASET_BUCKET}/${path}`,
+                        dataset_yaml_url: publicUrl,
+                        dataset_yaml_name: "data.yaml",
+                    });
+                    dataYamlValue = publicUrl;
+                    setConfig(prev => ({ ...prev, dataYaml: publicUrl }));
+                    setAutoYamlSource(publicUrl);
+                }
+            }
+            if (!dataYamlValue) {
+                setFormError("Dataset YAML is not linked to this step. Upload images or attach a dataset YAML before starting training.");
+                return;
+            }
             await onSubmit({
                 step_id: stepId,
                 run_name: config.runName,
                 base_model: config.baseModel,
-                data_yaml: config.dataYaml,
+                data_yaml: dataYamlValue,
                 status: 'queued',
                 configuration: {
                     ...config,
@@ -145,6 +433,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             onOpenChange(false);
         } catch (error) {
             console.error('Error starting training:', error);
+            setFormError("Failed to start training. Please try again.");
         } finally {
             setIsSubmitting(false);
         }
@@ -174,24 +463,16 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                             <Input id="runName" value={config.runName} onChange={e => handleConfigChange('runName', e.target.value)} placeholder="e.g., Button_Detection_v1"/>
                         </div>
 
-                        <div>
-                            <TooltipLabel tooltipText="Path on the training server to your dataset YAML file (YOLO format).">Dataset YAML Path (Server)</TooltipLabel>
-                            <Input
-                                id="dataYaml"
-                                value={config.dataYaml}
-                                onChange={e => handleConfigChange('dataYaml', e.target.value)}
-                                placeholder="/mnt/d/datasets/your_dataset/data.yaml"
-                                required
-                            />
-                            <p className="text-xs text-gray-500 mt-1">
-                                Use a trainer-local path or a Supabase storage URL. The trainer will download storage URLs automatically.
-                            </p>
-                            {autoYamlSource && (
-                                <p className="text-xs text-emerald-600 mt-1">
-                                    Auto-linked from step dataset YAML: {autoYamlSource}
-                                </p>
-                            )}
-                        </div>
+                        {autoYamlSource ? (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                Dataset YAML linked from step: {autoYamlSource}
+                            </div>
+                        ) : null}
+                        {!autoYamlSource && (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                Dataset YAML missing. It will be generated automatically when you start training.
+                            </div>
+                        )}
                         
                         <div>
                             <TooltipLabel tooltipText="Choose a pre-trained model as your starting point. YOLOv8s offers the best balance of speed and accuracy for most tasks.">Base Model</TooltipLabel>
@@ -523,8 +804,8 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         <Button
                             type="submit"
                             className="bg-blue-600 hover:bg-blue-700"
-                            disabled={isSubmitting || !config.runName || !config.dataYaml.trim()}
-                        >
+                        disabled={isSubmitting || !config.runName || !stepId}
+                    >
                             {isSubmitting ? "Starting Training..." : "Start Training"}
                         </Button>
                     </div>

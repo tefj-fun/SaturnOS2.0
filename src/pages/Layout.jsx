@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef, memo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
@@ -83,10 +83,32 @@ const navigationItems = [
   featureKey: "settings",
 }];
 
+const SidebarNavigationMenu = memo(function SidebarNavigationMenu({ items, activePath }) {
+  return (
+    <>
+      {items.map((item) => (
+        <SidebarMenuItem key={item.title}>
+          <SidebarMenuButton
+            asChild
+            isActive={activePath === item.url}
+            className="mb-1 border border-transparent rounded-xl !transition-colors duration-150 hover:bg-blue-50 hover:text-blue-700 data-[active=true]:bg-blue-50 data-[active=true]:text-blue-700 data-[active=true]:shadow-sm data-[active=true]:border-blue-100"
+          >
+            <Link to={item.url} className="flex items-center gap-3 px-4 py-3 text-gray-600">
+              <item.icon className="w-4 h-4" />
+              <span className="font-medium">{item.title}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </>
+  );
+});
+
 
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const locationRef = useRef(location.pathname);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -99,15 +121,33 @@ export default function Layout({ children, currentPageName }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const lastRoleRef = useRef(null);
+  const roleStorageKeyRef = useRef(null);
+  const [cachedRole, setCachedRole] = useState(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return localStorage.getItem("saturnos_role") || null;
+  });
+
+  useEffect(() => {
+    locationRef.current = location.pathname;
+  }, [location.pathname]);
 
   useEffect(() => {
     const init = async () => {
       try {
         const { data } = await supabase.auth.getUser();
-        setUser(data?.user || null);
+        if (data?.user) {
+          setUser(data.user);
+        } else if (!user) {
+          setUser(null);
+        }
       } catch (err) {
         // If there is no session, keep user null and continue to the auth screen
-        setUser(null);
+        if (!user) {
+          setUser(null);
+        }
       } finally {
         setAuthChecked(true);
       }
@@ -115,9 +155,19 @@ export default function Layout({ children, currentPageName }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
-      setProfile(null);
+      if (!session) {
+        setProfile(null);
+        lastRoleRef.current = null;
+        if (roleStorageKeyRef.current) {
+          localStorage.removeItem(roleStorageKeyRef.current);
+        } else {
+          localStorage.removeItem("saturnos_role");
+        }
+        roleStorageKeyRef.current = null;
+        setCachedRole(null);
+      }
       setAuthChecked(true);
-      if (!session && location.pathname !== "/") {
+      if (!session && locationRef.current !== "/") {
         navigate("/", { replace: true });
         setEmail("");
         setPassword("");
@@ -130,7 +180,7 @@ export default function Layout({ children, currentPageName }) {
 
     init();
     return () => listener?.subscription?.unsubscribe();
-  }, [location.pathname, navigate]);
+  }, [navigate, user]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -145,10 +195,30 @@ export default function Layout({ children, currentPageName }) {
         .single();
       if (!error) {
         setProfile(data);
+        if (data?.role) {
+          lastRoleRef.current = data.role;
+          const key = `saturnos_role_${user.id}`;
+          roleStorageKeyRef.current = key;
+          localStorage.setItem(key, data.role);
+          localStorage.setItem("saturnos_role", data.role);
+          setCachedRole(data.role);
+        }
       }
     };
     loadProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+    const key = `saturnos_role_${user.id}`;
+    roleStorageKeyRef.current = key;
+    const storedRole = localStorage.getItem(key) || localStorage.getItem("saturnos_role");
+    if (storedRole) {
+      setCachedRole(storedRole);
+    }
+  }, [user?.id]);
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -200,14 +270,17 @@ export default function Layout({ children, currentPageName }) {
     setProfile(null);
   };
 
-  const isAdmin = profile?.role === "admin";
-  const featureFlags = {
+  const effectiveRole = profile?.role || cachedRole || lastRoleRef.current;
+  const isAdmin = effectiveRole === "admin";
+  const featureFlags = useMemo(() => ({
     ...defaultFeatureVisibility,
     ...(profile?.preferences?.features || {}),
-  };
-  const filteredNavigation = isAdmin
-    ? navigationItems
-    : navigationItems.filter((item) => featureFlags[item.featureKey]);
+  }), [profile?.preferences?.features]);
+  const filteredNavigation = useMemo(() => (
+    isAdmin
+      ? navigationItems
+      : navigationItems.filter((item) => featureFlags[item.featureKey])
+  ), [isAdmin, featureFlags]);
 
   // Hide sidebar for Annotation Studio page
   const isAnnotationStudio = currentPageName === "AnnotationStudio" || location.pathname.includes("AnnotationStudio") || currentPageName === "AnnotationReview";
@@ -455,23 +528,7 @@ export default function Layout({ children, currentPageName }) {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu className="space-y-1">
-                  {filteredNavigation.map((item) =>
-                  <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                      asChild
-                      className={`hover:bg-blue-50 hover:text-blue-700 transition-all duration-300 rounded-xl mb-1 ${
-                      location.pathname === item.url ?
-                      'bg-blue-50 text-blue-700 shadow-sm border border-blue-100' :
-                      'text-gray-600'}`
-                      }>
-
-                        <Link to={item.url} className="flex items-center gap-3 px-4 py-3">
-                          <item.icon className="w-4 h-4" />
-                          <span className="font-medium">{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
+                  <SidebarNavigationMenu items={filteredNavigation} activePath={location.pathname} />
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -490,7 +547,7 @@ export default function Layout({ children, currentPageName }) {
                       {user ? user.email : 'Loading...'}
                     </p>
                     <p className="text-xs text-gray-500 truncate capitalize">
-                      {profile?.role || "member"}
+                      {effectiveRole || "member"}
                     </p>
                   </div>
                 </div>

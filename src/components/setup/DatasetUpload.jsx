@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { SOPStep } from "@/api/entities";
-import { UploadFile } from "@/api/integrations";
+import { uploadToSupabaseStorage } from "@/api/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,38 @@ export default function DatasetUpload({ projectId, steps, onComplete }) {
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [error, setError] = useState(null);
   const [stepsData, setStepsData] = useState([]);
+  const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
+
+  const isYamlFile = (file) => /\.(ya?ml)$/i.test(file?.name || "");
+  const toSafeSegment = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+  const buildDatasetYaml = (classes = []) => {
+    const names = (classes || []).filter(Boolean);
+    const namesYaml = names.length
+      ? names.map((name, index) => `  ${index}: ${JSON.stringify(name)}`).join("\n")
+      : "";
+    const yamlLines = [
+      "path: .",
+      "train: images/train",
+      "val: images/val",
+    ];
+    if (namesYaml) {
+      yamlLines.push("names:", namesYaml);
+    } else {
+      yamlLines.push("names: []");
+    }
+    return `${yamlLines.join("\n")}\n`;
+  };
+
+  const uploadGeneratedYaml = async (stepId, classes) => {
+    const yamlContent = buildDatasetYaml(classes);
+    const blob = new Blob([yamlContent], { type: "text/plain" });
+    const storagePath = `${projectId}/${stepId}/data.yaml`;
+    return uploadToSupabaseStorage(blob, storagePath, {
+      bucket: DATASET_BUCKET,
+      contentType: "text/plain",
+    });
+  };
 
   useEffect(() => {
     loadStepsData();
@@ -60,17 +92,36 @@ export default function DatasetUpload({ projectId, steps, onComplete }) {
         }));
       }, 200);
 
-      const { file_url } = await UploadFile({ file });
+      const safeName = toSafeSegment(file.name || "dataset");
+      const storagePath = `${projectId}/${stepId}/${Date.now()}-${safeName}`;
+      const { path, publicUrl } = await uploadToSupabaseStorage(file, storagePath, {
+        bucket: DATASET_BUCKET,
+      });
       clearInterval(progressInterval);
       
       setUploadProgress(prev => ({ ...prev, [stepId]: 100 }));
 
       // Update step with dataset info
-      await SOPStep.update(stepId, {
-        dataset_url: file_url,
+      const updates = {
+        dataset_url: publicUrl,
         dataset_filename: file.name,
-        has_dataset: true
-      });
+        has_dataset: true,
+      };
+      if (isYamlFile(file)) {
+        updates.dataset_yaml_path = `storage:${DATASET_BUCKET}/${path}`;
+        updates.dataset_yaml_url = publicUrl;
+        updates.dataset_yaml_name = file.name;
+      } else {
+        const stepRecord = stepsData.find((step) => step.id === stepId);
+        const hasYaml = stepRecord?.dataset_yaml_url || stepRecord?.dataset_yaml_path;
+        if (!hasYaml) {
+          const generated = await uploadGeneratedYaml(stepId, stepRecord?.classes || []);
+          updates.dataset_yaml_path = `storage:${DATASET_BUCKET}/${generated.path}`;
+          updates.dataset_yaml_url = generated.publicUrl;
+          updates.dataset_yaml_name = "data.yaml";
+        }
+      }
+      await SOPStep.update(stepId, updates);
 
       setCompletedSteps(prev => new Set([...prev, stepId]));
       

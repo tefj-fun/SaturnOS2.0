@@ -5,11 +5,10 @@ import { TrainingRun } from '@/api/entities';
 import { Project } from '@/api/entities';
 import { SOPStep } from '@/api/entities';
 import { StepImage } from '@/api/entities';
-import { LogicRule } from '@/api/entities';
+import { PredictedAnnotation } from '@/api/entities';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -23,101 +22,19 @@ import {
   Target,
   ArrowLeft,
   Search,
-  Filter,
   CheckCircle,
-  XCircle,
   AlertTriangle,
   Play,
   Loader2,
-  Download,
-  Code,
-  Grid3x3,
   Zap,
   BarChart3,
-  Clock,
   Rocket,
   ChevronRight,
-  ArrowUpDown,
-  X,
-  Settings,
   History,
-  Calendar,
-  User,
   Database,
-  Spline // Added Spline icon
+  Spline
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
-import { motion, AnimatePresence } from 'framer-motion';
-
-// Mock data for existing images in database
-const MOCK_DB_IMAGES = [
-  {
-    id: 'img1',
-    name: 'dashboard_01.png',
-    url: 'https://images.unsplash.com/photo-1588336142586-3642324c2f48?w=600',
-    thumbnail: 'https://images.unsplash.com/photo-1588336142586-3642324c2f48?w=150',
-    project: 'Dashboard UI Analysis',
-    date: '2024-01-15',
-    tags: ['training', 'validated']
-  },
-  {
-    id: 'img2',
-    name: 'form_interface.png',
-    url: 'https://images.unsplash.com/photo-1563520239483-199b95d87c33?w=600',
-    thumbnail: 'https://images.unsplash.com/photo-1563520239483-199b95d87c33?w=150',
-    project: 'Form Validation Study',
-    date: '2024-01-12',
-    tags: ['training']
-  },
-  {
-    id: 'img3',
-    name: 'mobile_nav.png',
-    url: 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=600',
-    thumbnail: 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=150',
-    project: 'Navigation Elements',
-    date: '2024-01-18',
-    tags: ['inference', 'production']
-  }
-];
-
-// MOCK_TRAINED_MODELS is removed as it will be replaced by dynamic 'deployedModels'
-
-
-// Mock inference history/results
-const MOCK_INFERENCE_HISTORY = [
-  {
-    id: 'inf1',
-    run_name: 'Dashboard Test Run #1',
-    model_name: 'Button Detector v2.1',
-    project_name: 'Dashboard UI Analysis',
-    image_name: 'dashboard_01.png',
-    status: 'completed',
-    created_date: '2024-01-22T10:30:00Z',
-    created_by: 'john.doe@company.com',
-    results: {
-      total_predictions: 4,
-      avg_confidence: 0.89,
-      logic_status: 'PASS',
-      compliance_score: 1.0
-    }
-  },
-  {
-    id: 'inf2',
-    run_name: 'Form Elements Test',
-    model_name: 'Form Elements Classifier',
-    project_name: 'Form Validation Study',
-    image_name: 'form_interface.png',
-    status: 'completed',
-    created_date: '2024-01-21T14:15:00Z',
-    created_by: 'jane.smith@company.com',
-    results: {
-      total_predictions: 6,
-      avg_confidence: 0.92,
-      logic_status: 'FAIL',
-      compliance_score: 0.67
-    }
-  }
-];
 
 const statusConfig = {
   running: { icon: <Rocket className="w-4 h-4 text-blue-500" />, color: "bg-blue-100 text-blue-800", label: "Running" },
@@ -125,10 +42,96 @@ const statusConfig = {
   failed: { icon: <AlertTriangle className="w-4 h-4 text-red-500" />, color: "bg-red-100 text-red-800", label: "Failed" }
 };
 
+const deriveImageName = (imageUrl) => {
+  if (!imageUrl) return "Unknown image";
+  const last = imageUrl.split("?")[0].split("/").pop();
+  return last || "Unknown image";
+};
+
+const toNumber = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizePredictions = (annotations) => {
+  let normalized = annotations;
+  if (typeof normalized === "string") {
+    try {
+      normalized = JSON.parse(normalized);
+    } catch (error) {
+      normalized = [];
+    }
+  }
+  if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
+    normalized = normalized.predictions ?? normalized.annotations ?? [];
+  }
+  if (!Array.isArray(normalized)) return [];
+  return normalized.map((annotation, index) => {
+    const confidence = toNumber(
+      annotation?.confidence ??
+      annotation?.score ??
+      annotation?.conf ??
+      annotation?.prob
+    );
+    const rawBox = annotation?.bbox ?? annotation?.box ?? annotation?.bounding_box;
+    let bbox = null;
+    if (Array.isArray(rawBox) && rawBox.length >= 4) {
+      const [x, y, width, height] = rawBox;
+      bbox = { x, y, width, height };
+    } else if (rawBox && typeof rawBox === "object") {
+      if (rawBox.x1 !== undefined && rawBox.y1 !== undefined && rawBox.x2 !== undefined && rawBox.y2 !== undefined) {
+        bbox = {
+          x: rawBox.x1,
+          y: rawBox.y1,
+          width: rawBox.x2 - rawBox.x1,
+          height: rawBox.y2 - rawBox.y1,
+        };
+      } else if (rawBox.x !== undefined && rawBox.y !== undefined && rawBox.width !== undefined && rawBox.height !== undefined) {
+        bbox = { x: rawBox.x, y: rawBox.y, width: rawBox.width, height: rawBox.height };
+      } else if (rawBox.cx !== undefined && rawBox.cy !== undefined && rawBox.w !== undefined && rawBox.h !== undefined) {
+        bbox = {
+          x: rawBox.cx - rawBox.w / 2,
+          y: rawBox.cy - rawBox.h / 2,
+          width: rawBox.w,
+          height: rawBox.h,
+        };
+      }
+    }
+
+    let area = null;
+    if (bbox) {
+      const width = toNumber(bbox.width);
+      const height = toNumber(bbox.height);
+      if (width !== null && height !== null) {
+        area = width * height;
+      }
+    }
+    return {
+      id: annotation?.id ?? `${index}-${annotation?.class ?? annotation?.label ?? "pred"}`,
+      class: annotation?.class ?? annotation?.label ?? "Unknown",
+      confidence,
+      bbox,
+      area,
+    };
+  });
+};
+
+const averageConfidence = (predictions) => {
+  if (!predictions.length) return null;
+  const values = predictions
+    .map((prediction) => toNumber(prediction.confidence))
+    .filter((value) => value !== null);
+  if (!values.length) return null;
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return total / values.length;
+};
+
 export default function ResultsAndAnalysisPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('inference-testing');
   const [deployedModels, setDeployedModels] = useState([]); // New state for deployed models
+  const [dbImages, setDbImages] = useState([]);
+  const [inferenceHistory, setInferenceHistory] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
   const [uploadFile, setUploadFile] = useState(null);
@@ -141,6 +144,8 @@ export default function ResultsAndAnalysisPage() {
 
   useEffect(() => {
     loadDeployedModels();
+    loadImageDatabase();
+    loadInferenceHistory();
 
     // Check if a specific model was selected from URL
     const urlParams = new URLSearchParams(window.location.search);
@@ -162,9 +167,93 @@ export default function ResultsAndAnalysisPage() {
     }
   };
 
+  const loadImageDatabase = async () => {
+    try {
+      const [images, steps, projects] = await Promise.all([
+        StepImage.list("-created_date"),
+        SOPStep.list(),
+        Project.list(),
+      ]);
+
+      const stepsById = new Map(steps.map((step) => [step.id, step]));
+      const projectsById = new Map(projects.map((project) => [project.id, project]));
+
+      const normalized = images.map((image) => {
+        const step = stepsById.get(image.step_id);
+        const project = step ? projectsById.get(step.project_id) : null;
+        const tags = [];
+        if (image.image_group) tags.push(image.image_group);
+        if (image.processing_status) tags.push(image.processing_status);
+        return {
+          id: image.id,
+          name: image.image_name || deriveImageName(image.display_url || image.image_url),
+          url: image.display_url || image.image_url,
+          thumbnail: image.thumbnail_url || image.display_url || image.image_url,
+          project: project?.name || "Unknown project",
+          date: image.created_date,
+          tags,
+        };
+      });
+
+      setDbImages(normalized);
+    } catch (error) {
+      console.error('Error loading image database:', error);
+    }
+  };
+
+  const loadInferenceHistory = async () => {
+    try {
+      const [predictions, runs, images, steps, projects] = await Promise.all([
+        PredictedAnnotation.list("-created_date"),
+        TrainingRun.list(),
+        StepImage.list(),
+        SOPStep.list(),
+        Project.list(),
+      ]);
+
+      const runsById = new Map(runs.map((run) => [run.id, run]));
+      const imagesById = new Map(images.map((image) => [image.id, image]));
+      const stepsById = new Map(steps.map((step) => [step.id, step]));
+      const projectsById = new Map(projects.map((project) => [project.id, project]));
+
+      const normalized = predictions.map((prediction) => {
+        const run = runsById.get(prediction.run_id);
+        const image = imagesById.get(prediction.step_image_id);
+        const step = image ? stepsById.get(image.step_id) : null;
+        const project = step ? projectsById.get(step.project_id) : null;
+        const normalizedPredictions = normalizePredictions(prediction.annotations);
+        const avgConfidence = averageConfidence(normalizedPredictions);
+
+        return {
+          id: prediction.id,
+          run_name: run?.run_name || "Inference run",
+          model_name: run?.base_model || run?.run_name || "Unknown model",
+          project_name: project?.name || "Unknown project",
+          image_name: image?.image_name || deriveImageName(image?.display_url || image?.image_url),
+          status: run?.status || "completed",
+          created_date: prediction.created_date,
+          created_by: run?.created_by || "system",
+          results: normalizedPredictions.length
+            ? {
+              total_predictions: normalizedPredictions.length,
+              avg_confidence: avgConfidence ?? 0,
+              logic_status: null,
+              compliance_score: null,
+            }
+            : null,
+        };
+      });
+
+      setInferenceHistory(normalized);
+    } catch (error) {
+      console.error('Error loading inference history:', error);
+    }
+  };
+
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
     if (file) {
+      setSelectedImage(null);
       setUploadFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -176,64 +265,56 @@ export default function ResultsAndAnalysisPage() {
   };
 
   const handleRunInference = async () => {
-    if (!selectedModel || (!selectedImage && !uploadFile)) {
+    if (!selectedModel || !selectedImage) {
       return;
     }
 
     setIsProcessing(true);
     setInferenceResults(null);
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Mock results
-    const mockResults = {
-      status: 'completed',
-      timestamp: new Date().toISOString(),
-      model_used: selectedModel,
-      image_analyzed: selectedImage?.name || uploadFile?.name,
-      processing_time: '1.24s',
-      predictions: [
-        {
-          id: 1,
-          class: 'Button',
-          confidence: 0.94,
-          bbox: { x: 150, y: 80, width: 100, height: 40 },
-          area: 4000
-        },
-        {
-          id: 2,
-          class: 'Input Field',
-          confidence: 0.87,
-          bbox: { x: 50, y: 200, width: 200, height: 30 },
-          area: 6000
-        }
-      ],
-      logic_evaluation: {
-        status: 'PASS',
-        rules_checked: 2,
-        rules_passed: 2,
-        compliance_score: 1.0
-      },
-      raw_response: {
-        model_version: '2.1',
-        inference_id: 'inf_' + Math.random().toString(36).substr(2, 9),
-        total_objects: 2,
-        processing_metadata: {
-          gpu_used: 'Tesla T4',
-          memory_usage: '2.1GB',
-          batch_size: 1
-        }
+    try {
+      const predictions = await PredictedAnnotation.filter(
+        { run_id: selectedModel, step_image_id: selectedImage.id },
+        "-created_date"
+      );
+      const latest = predictions[0];
+      if (!latest) {
+        setInferenceResults({
+          status: "missing",
+          message: "No stored inference results for this model and image yet.",
+        });
+        setIsProcessing(false);
+        return;
       }
-    };
 
-    setInferenceResults(mockResults);
-    setIsProcessing(false);
+      const normalizedPredictions = normalizePredictions(latest.annotations);
+      setInferenceResults({
+        status: "completed",
+        timestamp: latest.created_date,
+        model_used: selectedModel,
+        image_analyzed: selectedImage?.name,
+        processing_time: null,
+        predictions: normalizedPredictions,
+        logic_evaluation: null,
+        raw_response: latest.annotations,
+      });
+    } catch (error) {
+      console.error("Error loading inference results:", error);
+      setInferenceResults({
+        status: "missing",
+        message: "Unable to load inference results from Supabase.",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const filteredHistory = MOCK_INFERENCE_HISTORY.filter(item => {
+  const filteredHistory = inferenceHistory.filter(item => {
     if (historyFilter !== 'all' && item.status !== historyFilter) return false;
-    if (searchQuery && !item.run_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (searchQuery) {
+      const runName = item.run_name || "";
+      if (!runName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    }
     return true;
   });
 
@@ -279,10 +360,20 @@ export default function ResultsAndAnalysisPage() {
                 <CardContent>
                   <ScrollArea className="h-[600px]">
                     <div className="space-y-3">
-                      {MOCK_DB_IMAGES.map((image) => (
+                      {dbImages.length === 0 && (
+                        <div className="text-sm text-gray-500 text-center py-8">
+                          No images found in Supabase yet.
+                        </div>
+                      )}
+                      {dbImages.map((image) => (
                         <div
                           key={image.id}
-                          onClick={() => setSelectedImage(image)}
+                          onClick={() => {
+                            setSelectedImage(image);
+                            setUploadFile(null);
+                            setUploadPreview(null);
+                            setInferenceResults(null);
+                          }}
                           className={`p-3 rounded-lg border cursor-pointer transition-all ${
                             selectedImage?.id === image.id
                               ? 'border-blue-500 bg-blue-50'
@@ -290,21 +381,29 @@ export default function ResultsAndAnalysisPage() {
                           }`}
                         >
                           <div className="flex items-center gap-3">
-                            <img
-                              src={image.thumbnail}
-                              alt={image.name}
-                              className="w-12 h-12 rounded object-cover"
-                            />
+                            {image.thumbnail ? (
+                              <img
+                                src={image.thumbnail}
+                                alt={image.name}
+                                className="w-12 h-12 rounded object-cover"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-400">
+                                <ImageIcon className="w-5 h-5" />
+                              </div>
+                            )}
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-sm truncate">{image.name}</p>
                               <p className="text-xs text-gray-500">{image.project}</p>
-                              <div className="flex gap-1 mt-1">
-                                {image.tags.map(tag => (
-                                  <Badge key={tag} variant="outline" className="text-xs">
-                                    {tag}
-                                  </Badge>
-                                ))}
-                              </div>
+                              {image.tags.length > 0 && (
+                                <div className="flex gap-1 mt-1 flex-wrap">
+                                  {image.tags.map(tag => (
+                                    <Badge key={tag} variant="outline" className="text-xs">
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -346,21 +445,24 @@ export default function ResultsAndAnalysisPage() {
                     {/* Inference Results Overlay */}
                     {inferenceResults?.predictions && (
                       <>
-                        {inferenceResults.predictions.map((prediction, index) => (
-                          <div
-                            key={prediction.id}
-                            className="absolute border-2 border-red-500 bg-red-500/10"
-                            style={{
-                              left: `${prediction.bbox.x}px`,
-                              top: `${prediction.bbox.y}px`,
-                              width: `${prediction.bbox.width}px`,
-                              height: `${prediction.bbox.height}px`,
-                            }}
-                          >
-                            <div className="absolute -top-6 left-0 bg-red-500 text-white px-2 py-1 text-xs rounded">
-                              {prediction.class} ({(prediction.confidence * 100).toFixed(1)}%)
+                        {inferenceResults.predictions.map((prediction) => (
+                          prediction.bbox ? (
+                            <div
+                              key={prediction.id}
+                              className="absolute border-2 border-red-500 bg-red-500/10"
+                              style={{
+                                left: `${prediction.bbox.x}px`,
+                                top: `${prediction.bbox.y}px`,
+                                width: `${prediction.bbox.width}px`,
+                                height: `${prediction.bbox.height}px`,
+                              }}
+                            >
+                              <div className="absolute -top-6 left-0 bg-red-500 text-white px-2 py-1 text-xs rounded">
+                                {prediction.class}
+                                {prediction.confidence !== null ? ` (${(prediction.confidence * 100).toFixed(1)}%)` : ""}
+                              </div>
                             </div>
-                          </div>
+                          ) : null
                         ))}
                       </>
                     )}
@@ -396,6 +498,11 @@ export default function ResultsAndAnalysisPage() {
                         <p className="text-sm text-gray-600">Click to upload image</p>
                       </div>
                     </Button>
+                    {uploadFile && (
+                      <p className="mt-3 text-xs text-gray-500">
+                        Selected upload: {uploadFile.name}. Uploads are not yet linked to inference results.
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -455,7 +562,7 @@ export default function ResultsAndAnalysisPage() {
 
                     <Button
                       onClick={handleRunInference}
-                      disabled={!selectedModel || (!selectedImage && !uploadFile) || isProcessing || deployedModels.length === 0}
+                      disabled={!selectedModel || !selectedImage || isProcessing || deployedModels.length === 0}
                       className="w-full bg-blue-600 hover:bg-blue-700"
                     >
                       {isProcessing ? (
@@ -483,48 +590,69 @@ export default function ResultsAndAnalysisPage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                      {inferenceResults.status === "missing" && (
+                        <Alert>
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription>{inferenceResults.message}</AlertDescription>
+                        </Alert>
+                      )}
+
                       {/* Logic Status */}
-                      <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="w-5 h-5 text-green-600" />
-                          <span className="font-medium text-green-800">Logic Status: PASS</span>
+                      {inferenceResults.logic_evaluation && (
+                        <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-5 h-5 text-green-600" />
+                            <span className="font-medium text-green-800">
+                              Logic Status: {inferenceResults.logic_evaluation.status}
+                            </span>
+                          </div>
+                          {typeof inferenceResults.logic_evaluation.compliance_score === "number" && (
+                            <Badge className="bg-green-100 text-green-800">
+                              {(inferenceResults.logic_evaluation.compliance_score * 100).toFixed(0)}%
+                            </Badge>
+                          )}
                         </div>
-                        <Badge className="bg-green-100 text-green-800">
-                          {(inferenceResults.logic_evaluation.compliance_score * 100).toFixed(0)}%
-                        </Badge>
-                      </div>
+                      )}
 
                       {/* Predictions List */}
-                      <div>
-                        <h4 className="font-medium mb-2">Detections ({inferenceResults.predictions.length})</h4>
-                        <div className="space-y-2">
-                          {inferenceResults.predictions.map((pred, index) => (
-                            <div key={pred.id} className="p-2 bg-gray-50 rounded text-sm">
-                              <div className="flex justify-between items-center">
-                                <span className="font-medium">{pred.class}</span>
-                                <Badge variant="outline">
-                                  {(pred.confidence * 100).toFixed(1)}%
-                                </Badge>
+                      {inferenceResults.predictions && (
+                        <div>
+                          <h4 className="font-medium mb-2">Detections ({inferenceResults.predictions.length})</h4>
+                          <div className="space-y-2">
+                            {inferenceResults.predictions.map((pred) => (
+                              <div key={pred.id} className="p-2 bg-gray-50 rounded text-sm">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-medium">{pred.class}</span>
+                                  {pred.confidence !== null && (
+                                    <Badge variant="outline">
+                                      {(pred.confidence * 100).toFixed(1)}%
+                                    </Badge>
+                                  )}
+                                </div>
+                                {pred.bbox && (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    Location: ({pred.bbox.x}, {pred.bbox.y}) |
+                                    Size: {pred.bbox.width}x{pred.bbox.height} |
+                                    Area: {pred.area ?? "N/A"} px
+                                  </div>
+                                )}
                               </div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                Location: ({pred.bbox.x}, {pred.bbox.y}) |
-                                Size: {pred.bbox.width}×{pred.bbox.height} |
-                                Area: {pred.area}px²
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Raw JSON */}
-                      <details className="text-xs">
-                        <summary className="cursor-pointer font-medium text-gray-700 mb-2">
-                          View Raw JSON Response
-                        </summary>
-                        <pre className="bg-gray-100 p-3 rounded overflow-auto max-h-40">
-                          {JSON.stringify(inferenceResults.raw_response, null, 2)}
-                        </pre>
-                      </details>
+                      {inferenceResults.raw_response && (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer font-medium text-gray-700 mb-2">
+                            View Raw JSON Response
+                          </summary>
+                          <pre className="bg-gray-100 p-3 rounded overflow-auto max-h-40">
+                            {JSON.stringify(inferenceResults.raw_response, null, 2)}
+                          </pre>
+                        </details>
+                      )}
                     </CardContent>
                   </Card>
                 )}
@@ -583,48 +711,58 @@ export default function ResultsAndAnalysisPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredHistory.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-medium">{item.run_name}</TableCell>
-                          <TableCell>{item.model_name}</TableCell>
-                          <TableCell>{item.project_name}</TableCell>
-                          <TableCell>{item.image_name}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {statusConfig[item.status].icon}
-                              <Badge className={statusConfig[item.status].color}>
-                                {statusConfig[item.status].label}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell>{new Date(item.created_date).toLocaleDateString()}</TableCell>
-                          <TableCell>{item.created_by.split('@')[0]}</TableCell>
-                          <TableCell>
-                            {item.results ? (
-                              <div className="text-sm">
-                                <div>Objects: {item.results.total_predictions}</div>
-                                <div>Confidence: {(item.results.avg_confidence * 100).toFixed(1)}%</div>
-                                <Badge
-                                  className={
-                                    item.results.logic_status === 'PASS'
-                                      ? 'bg-green-100 text-green-800'
-                                      : 'bg-red-100 text-red-800'
-                                  }
-                                >
-                                  {item.results.logic_status}
+                      {filteredHistory.map((item) => {
+                        const status = statusConfig[item.status] || statusConfig.completed;
+                        const logicStatus = item.results?.logic_status || "N/A";
+                        const logicBadgeClass =
+                          logicStatus === "PASS"
+                            ? "bg-green-100 text-green-800"
+                            : logicStatus === "FAIL"
+                              ? "bg-red-100 text-red-800"
+                              : "bg-gray-100 text-gray-700";
+                        const avgConfidence = item.results?.avg_confidence;
+                        const createdAt = item.created_date ? new Date(item.created_date).toLocaleDateString() : "N/A";
+                        const createdBy = item.created_by ? item.created_by.split("@")[0] : "system";
+
+                        return (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.run_name}</TableCell>
+                            <TableCell>{item.model_name}</TableCell>
+                            <TableCell>{item.project_name}</TableCell>
+                            <TableCell>{item.image_name}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {status.icon}
+                                <Badge className={status.color}>
+                                  {status.label}
                                 </Badge>
                               </div>
-                            ) : (
-                              <span className="text-gray-400">N/A</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="outline" size="sm">
-                              <ChevronRight className="w-4 h-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                            <TableCell>{createdAt}</TableCell>
+                            <TableCell>{createdBy}</TableCell>
+                            <TableCell>
+                              {item.results ? (
+                                <div className="text-sm">
+                                  <div>Objects: {item.results.total_predictions}</div>
+                                  <div>
+                                    Confidence: {typeof avgConfidence === "number" ? `${(avgConfidence * 100).toFixed(1)}%` : "N/A"}
+                                  </div>
+                                  <Badge className={logicBadgeClass}>
+                                    {logicStatus}
+                                  </Badge>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">N/A</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="outline" size="sm">
+                                <ChevronRight className="w-4 h-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </ScrollArea>
@@ -636,3 +774,4 @@ export default function ResultsAndAnalysisPage() {
     </div>
   );
 }
+
