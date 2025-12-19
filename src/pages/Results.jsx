@@ -29,9 +29,11 @@ import { motion } from 'framer-motion';
 const statusConfig = {
     running: { icon: <Rocket className="w-4 h-4 text-blue-500" />, color: "bg-blue-100 text-blue-800", label: "Running" },
     queued: { icon: <Clock className="w-4 h-4 text-amber-500" />, color: "bg-amber-100 text-amber-800", label: "Queued" },
+    canceling: { icon: <Clock className="w-4 h-4 text-amber-500" />, color: "bg-amber-100 text-amber-800", label: "Canceling" },
     completed: { icon: <CheckCircle className="w-4 h-4 text-green-500" />, color: "bg-green-100 text-green-800", label: "Completed" },
     failed: { icon: <AlertTriangle className="w-4 h-4 text-red-500" />, color: "bg-red-100 text-red-800", label: "Failed" },
     stopped: { icon: <XCircle className="w-4 h-4 text-gray-500" />, color: "bg-gray-100 text-gray-800", label: "Stopped" },
+    canceled: { icon: <XCircle className="w-4 h-4 text-gray-500" />, color: "bg-gray-100 text-gray-800", label: "Canceled" },
     configuring: { icon: <Settings className="w-4 h-4 text-gray-500" />, color: "bg-gray-100 text-gray-800", label: "Configuring" },
 };
 

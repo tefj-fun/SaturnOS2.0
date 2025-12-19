@@ -93,10 +93,10 @@ export default function TrainingConfigurationPage() {
     const loadTrainerStatus = useCallback(async () => {
         try {
             const [activeRuns, workers] = await Promise.all([
-                TrainingRun.filter({ status: ['running', 'queued'] }, '-created_date'),
+                TrainingRun.filter({ status: ['running', 'queued', 'canceling'] }, '-created_date'),
                 TrainerWorker.list('-last_seen'),
             ]);
-            const running = activeRuns.filter(run => run.status === 'running').length;
+            const running = activeRuns.filter(run => run.status === 'running' || run.status === 'canceling').length;
             const queued = activeRuns.filter(run => run.status === 'queued').length;
             const now = Date.now();
             const activeWorkers = (workers || []).filter((worker) => {
@@ -128,13 +128,13 @@ export default function TrainingConfigurationPage() {
     const groupedRuns = useMemo(() => {
         const groups = { running: [], queued: [], completed: [], history: [] };
         trainingRuns.forEach(run => {
-            if (run.status === 'running') {
+            if (run.status === 'running' || run.status === 'canceling') {
                 groups.running.push(run);
             } else if (run.status === 'queued') {
                  groups.queued.push(run);
             } else if (run.status === 'completed') {
                 groups.completed.push(run);
-            } else { // failed, stopped
+            } else { // failed, stopped, canceled
                 groups.history.push(run);
             }
         });
@@ -206,7 +206,7 @@ export default function TrainingConfigurationPage() {
 
     useEffect(() => {
         if (!selectedStepId) return;
-        const hasActiveRuns = trainingRuns.some(run => ['running', 'queued'].includes(run.status));
+        const hasActiveRuns = trainingRuns.some(run => ['running', 'queued', 'canceling'].includes(run.status));
         if (!hasActiveRuns) return;
 
         const interval = setInterval(() => {
@@ -238,7 +238,18 @@ export default function TrainingConfigurationPage() {
     };
     
     const handleStopTraining = async (runId) => {
-        await TrainingRun.update(runId, { status: 'stopped' });
+        const run = trainingRuns.find(item => item.id === runId);
+        if (run?.status === 'queued') {
+            await TrainingRun.update(runId, {
+                status: 'canceled',
+                cancel_requested: true,
+                canceled_at: new Date().toISOString(),
+                completed_at: new Date().toISOString(),
+                error_message: 'Canceled by user.',
+            });
+        } else {
+            await TrainingRun.update(runId, { status: 'canceling', cancel_requested: true });
+        }
         loadStepData(selectedStepId);
     };
 

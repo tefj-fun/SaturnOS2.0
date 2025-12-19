@@ -187,7 +187,7 @@ export default function TrainingStatusPage() {
 
   useEffect(() => {
     if (!runId) return;
-    if (!trainingRun || !['queued', 'running'].includes(trainingRun.status)) return;
+    if (!trainingRun || !['queued', 'running', 'canceling'].includes(trainingRun.status)) return;
 
     const interval = setInterval(() => {
       loadTrainingData(runId);
@@ -207,8 +207,19 @@ export default function TrainingStatusPage() {
   const handleStopTraining = async () => {
     if (!trainingRun) return;
     try {
-        await TrainingRun.update(trainingRun.id, { status: 'stopped' });
-        setTrainingRun(prev => ({ ...prev, status: 'stopped' }));
+        if (trainingRun.status === 'queued') {
+          await TrainingRun.update(trainingRun.id, {
+            status: 'canceled',
+            cancel_requested: true,
+            canceled_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+            error_message: 'Canceled by user.',
+          });
+          setTrainingRun(prev => ({ ...prev, status: 'canceled', cancel_requested: true }));
+        } else {
+          await TrainingRun.update(trainingRun.id, { status: 'canceling', cancel_requested: true });
+          setTrainingRun(prev => ({ ...prev, status: 'canceling', cancel_requested: true }));
+        }
     } catch (error) {
         console.error("Failed to stop training:", error);
         // Optionally show an error alert to the user
@@ -298,11 +309,13 @@ export default function TrainingStatusPage() {
   }
 
   // Now we can safely define these constants, because `trainingRun` is guaranteed to exist.
-  const isTraining = trainingRun.status === 'running';
+  const isTraining = trainingRun.status === 'running' || trainingRun.status === 'canceling';
   const isCompleted = trainingRun.status === 'completed';
   const isStopped = trainingRun.status === 'stopped';
   const isFailed = trainingRun.status === 'failed';
   const isQueued = trainingRun.status === 'queued';
+  const isCanceling = trainingRun.status === 'canceling';
+  const isCanceled = trainingRun.status === 'canceled';
   const results = trainingRun.results || {};
   const rawMetrics = results.metrics || {};
   const totalEpochs = trainingRun.configuration?.epochs || 0;
@@ -314,12 +327,16 @@ export default function TrainingStatusPage() {
   const currentEpochDisplay = Math.max(0, Math.floor(currentEpochValue || 0));
   const progressLabel = isCompleted
     ? "100%"
+    : isCanceling
+      ? "Canceling"
     : isTraining
       ? "Running"
       : isQueued
         ? "Queued"
       : isFailed
         ? "Failed"
+        : isCanceled
+          ? "Canceled"
         : isStopped
           ? "Stopped"
           : "0%";
@@ -431,11 +448,27 @@ export default function TrainingStatusPage() {
           </AlertDescription>
         </Alert>
       )}
+      {isCanceling && (
+        <Alert className="border-amber-300 bg-amber-50">
+          <Clock className="h-4 w-4 text-amber-600" />
+          <AlertDescription className="text-amber-800">
+            Cancellation requested. The trainer will stop after the current epoch.
+          </AlertDescription>
+        </Alert>
+      )}
       {isStopped && (
         <Alert variant="destructive" className="border-red-300 bg-red-50">
           <StopCircle className="h-4 w-4 text-red-600" />
           <AlertDescription className="text-red-800">
             You have manually stopped the training run. No further progress was made.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isCanceled && (
+        <Alert variant="destructive" className="border-red-300 bg-red-50">
+          <StopCircle className="h-4 w-4 text-red-600" />
+          <AlertDescription className="text-red-800">
+            Training was canceled before completion.
           </AlertDescription>
         </Alert>
       )}
@@ -530,24 +563,28 @@ export default function TrainingStatusPage() {
 
       {/* Action Buttons */}
       <div className="space-y-3">
-        {isTraining && (
+        {(isTraining || isCanceling || isQueued) && (
            <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="destructive" className="w-full">
+              <Button variant="destructive" className="w-full" disabled={isCanceling || isCanceled}>
                 <StopCircle className="w-4 h-4 mr-2" />
-                Stop Training
+                {isCanceling ? 'Canceling...' : 'Cancel Training'}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Are you sure you want to stop training?</AlertDialogTitle>
+                <AlertDialogTitle>Cancel this training run?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will mark the run as stopped in the dashboard. The trainer service does not support mid-run cancellation yet.
+                  {isQueued
+                    ? "This will cancel the queued run before it starts."
+                    : "This requests cancellation. The trainer will stop after the current epoch."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleStopTraining} className="bg-red-600 hover:bg-red-700">Stop Training</AlertDialogAction>
+                <AlertDialogAction onClick={handleStopTraining} className="bg-red-600 hover:bg-red-700">
+                  Cancel Training
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -595,6 +632,11 @@ export default function TrainingStatusPage() {
                 <CheckCircle className="w-8 h-8 text-green-600" />
                 Training Complete!
               </>
+            ) : isCanceled ? (
+              <>
+                <StopCircle className="w-8 h-8 text-red-600" />
+                Training Canceled
+              </>
             ) : isStopped ? (
               <>
                 <StopCircle className="w-8 h-8 text-red-600" />
@@ -609,6 +651,11 @@ export default function TrainingStatusPage() {
               <>
                 <Clock className="w-8 h-8 text-amber-600" />
                 Training Queued
+              </>
+            ) : isCanceling ? (
+              <>
+                <Clock className="w-8 h-8 text-amber-600" />
+                Canceling Training
               </>
             ) : (
               <>
@@ -628,10 +675,14 @@ export default function TrainingStatusPage() {
               className={`px-4 py-2 text-sm font-semibold capitalize ${
                 isCompleted
                   ? 'bg-green-100 text-green-800'
-                  : isTraining
-                    ? 'bg-blue-100 text-blue-800'
+                  : isCanceling
+                    ? 'bg-amber-100 text-amber-800'
+                    : isTraining
+                      ? 'bg-blue-100 text-blue-800'
                     : isFailed
                       ? 'bg-red-100 text-red-800'
+                      : isCanceled
+                        ? 'bg-red-100 text-red-800'
                       : isStopped
                         ? 'bg-red-100 text-red-800'
                         : 'bg-gray-100 text-gray-800'

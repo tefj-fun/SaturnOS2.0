@@ -12,9 +12,11 @@ import { TrainingRun } from '@/api/entities';
 const statusConfig = {
     running: { icon: <Rocket className="w-4 h-4 text-blue-600" />, color: "bg-blue-100 text-blue-800", label: "Running" },
     queued: { icon: <Clock className="w-4 h-4 text-amber-600" />, color: "bg-amber-100 text-amber-800", label: "Queued" },
+    canceling: { icon: <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />, color: "bg-amber-100 text-amber-800", label: "Canceling" },
     completed: { icon: <CheckCircle className="w-4 h-4 text-green-600" />, color: "bg-green-100 text-green-800", label: "Completed" },
     failed: { icon: <AlertTriangle className="w-4 h-4 text-red-600" />, color: "bg-red-100 text-red-800", label: "Failed" },
     stopped: { icon: <XCircle className="w-4 h-4 text-gray-600" />, color: "bg-gray-100 text-gray-800", label: "Stopped" },
+    canceled: { icon: <XCircle className="w-4 h-4 text-gray-600" />, color: "bg-gray-100 text-gray-800", label: "Canceled" },
 };
 
 export default function TrainingRunCard({ run, onStop, onDelete }) {
@@ -97,7 +99,7 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
               </div>
             </div>
           )}
-          {run.status === 'running' && (
+          {(run.status === 'running' || run.status === 'canceling') && (
             <div className="space-y-2 mb-4 text-xs text-gray-500">
               <div className="flex items-center justify-between">
                 <span>Worker</span>
@@ -109,7 +111,11 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
                   <span className="font-medium text-gray-700">{startedAtLabel}</span>
                 </div>
               )}
-              <p className="text-[11px] text-gray-400">Progress updates are posted once training completes.</p>
+              <p className="text-[11px] text-gray-400">
+                {run.status === 'canceling'
+                  ? 'Cancel requested. The trainer will stop after the current epoch.'
+                  : 'Progress updates stream while training runs.'}
+              </p>
             </div>
           )}
           
@@ -189,15 +195,16 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
               </Link>
             )}
 
-            {(run.status === 'running' || run.status === 'queued') && (
+            {(run.status === 'running' || run.status === 'queued' || run.status === 'canceling') && (
               <Button
                 onClick={() => onStop(run.id)}
                 variant="outline"
                 size="sm"
                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                disabled={run.status === 'canceling'}
               >
                 <Square className="w-3 h-3 mr-1" />
-                Stop
+                {run.status === 'canceling' ? 'Canceling' : 'Cancel'}
               </Button>
             )}
 
