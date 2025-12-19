@@ -1,8 +1,8 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import { uploadToSupabaseStorage } from "@/api/storage";
-import { createStepImage } from "@/api/db";
-import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
+import { createStepImage, updateStep } from "@/api/db";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +31,9 @@ const isImageFile = (file) => (
 );
 const isLabelFile = (file) => /\.txt$/i.test(file.name);
 const isClassFile = (file) => /\.(txt|names|ya?ml)$/i.test(file.name);
+const isYamlFile = (file) => /\.(ya?ml)$/i.test(file.name);
+const toSafeSegment = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
+const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
 
 const stripInlineComment = (value) => value.split(/\s+#/)[0].trim();
 const stripQuotes = (value) => value.replace(/^['"]|['"]$/g, "");
@@ -189,11 +192,13 @@ export default function ImageUploadDialog({
   onUploadComplete,
   currentStepId,
   currentStep,
+  projectId,
 }) {
   const [step, setStep] = useState('select'); // 'select', 'split', 'uploading'
   const [files, setFiles] = useState([]);
   const [labelFiles, setLabelFiles] = useState([]);
   const [classFile, setClassFile] = useState(null);
+  const [yamlUploadStatus, setYamlUploadStatus] = useState({ state: "idle", message: "" });
 
   const stepClasses = useMemo(
     () => (currentStep?.classes || []).filter(Boolean),
@@ -208,6 +213,95 @@ export default function ImageUploadDialog({
       : parseClassListFromText(classFile.content);
     return parsed.length > 0 ? parsed : stepClasses;
   }, [classFile, stepClasses]);
+
+  const saveYamlToStep = useCallback(async (file) => {
+    if (!file || !isYamlFile(file)) {
+      setYamlUploadStatus({
+        state: "skipped",
+        message: "Class file is not YAML. Upload a .yaml/.yml file to link training.",
+      });
+      return;
+    }
+    if (!projectId || !currentStepId) {
+      setYamlUploadStatus({
+        state: "error",
+        message: "Missing project or step id for saving dataset YAML.",
+      });
+      return;
+    }
+
+    setYamlUploadStatus({ state: "uploading", message: "Saving dataset YAML for training..." });
+    try {
+      const safeName = toSafeSegment(file.name);
+      const storagePath = `${projectId}/${currentStepId}/${Date.now()}-${safeName}`;
+      const { path, publicUrl } = await uploadToSupabaseStorage(file, storagePath, {
+        bucket: DATASET_BUCKET,
+        contentType: "text/plain",
+      });
+      await updateStep(currentStepId, {
+        dataset_yaml_path: `storage:${DATASET_BUCKET}/${path}`,
+        dataset_yaml_url: publicUrl,
+        dataset_yaml_name: file.name,
+      });
+      setYamlUploadStatus({ state: "saved", message: "Dataset YAML linked for training." });
+    } catch (error) {
+      console.error("Failed to save dataset YAML:", error);
+      setYamlUploadStatus({ state: "error", message: "Failed to save dataset YAML. Try again." });
+    }
+  }, [projectId, currentStepId]);
+
+  const generateDatasetYaml = useCallback(async (hasTestSplit) => {
+    if (!projectId || !currentStepId) return null;
+    const names = classMapping.length > 0 ? classMapping : stepClasses;
+    const namesYaml = names.length
+      ? names.map((name, index) => `  ${index}: ${JSON.stringify(name)}`).join("\n")
+      : "";
+    const yamlLines = [
+      "path: .",
+      "train: images/train",
+      "val: images/val",
+    ];
+    if (hasTestSplit) {
+      yamlLines.push("test: images/test");
+    }
+    if (namesYaml) {
+      yamlLines.push("names:", namesYaml);
+    } else {
+      yamlLines.push("names: []");
+    }
+    const yamlContent = `${yamlLines.join("\n")}\n`;
+    const blob = new Blob([yamlContent], { type: "text/yaml" });
+    const storagePath = `${projectId}/${currentStepId}/data.yaml`;
+    const { path, publicUrl } = await uploadToSupabaseStorage(blob, storagePath, {
+      bucket: DATASET_BUCKET,
+      contentType: "text/plain",
+    });
+    await updateStep(currentStepId, {
+      dataset_yaml_path: `storage:${DATASET_BUCKET}/${path}`,
+      dataset_yaml_url: publicUrl,
+      dataset_yaml_name: "data.yaml",
+    });
+    return { path, publicUrl };
+  }, [projectId, currentStepId, classMapping, stepClasses]);
+
+  const uploadDatasetArtifact = useCallback(async ({ file, stem, labelContent, groupName }) => {
+    if (!projectId || !currentStepId) return;
+    const safeName = toSafeSegment(file.name);
+    const splitName = groupName === "Training"
+      ? "train"
+      : groupName === "Inference"
+        ? "val"
+        : "test";
+    const imagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
+    await uploadToSupabaseStorage(file, imagePath, { bucket: DATASET_BUCKET });
+    const labelPayload = labelContent === undefined ? "" : labelContent;
+    const labelBlob = new Blob([labelPayload], { type: "text/plain" });
+    const labelPath = `${projectId}/${currentStepId}/labels/${splitName}/${stem}.txt`;
+    await uploadToSupabaseStorage(labelBlob, labelPath, {
+      bucket: DATASET_BUCKET,
+      contentType: "text/plain",
+    });
+  }, [projectId, currentStepId]);
   
   // Split configuration state
   const [splitType, setSplitType] = useState('auto'); // 'auto', 'manual'
@@ -261,6 +355,7 @@ export default function ImageUploadDialog({
         file,
         content,
       });
+      await saveYamlToStep(file);
     } catch (error) {
       console.error("Failed to read class file:", error);
     }
@@ -300,6 +395,7 @@ export default function ImageUploadDialog({
 
   const removeClassFile = () => {
     setClassFile(null);
+    setYamlUploadStatus({ state: "idle", message: "" });
   };
 
   const labelStats = useMemo(() => {
@@ -446,7 +542,22 @@ export default function ImageUploadDialog({
           }
 
           await createStepImage(payload);
+          await uploadDatasetArtifact({
+            file: fileWrapper.file,
+            stem,
+            labelContent,
+            groupName,
+          });
         }
+      }
+
+      if (!classFile || !isYamlFile(classFile.file)) {
+        const hasTestSplit = Object.keys(assignments).some(
+          (name) => name !== "Training" && name !== "Inference"
+        );
+        setYamlUploadStatus({ state: "uploading", message: "Generating dataset YAML..." });
+        await generateDatasetYaml(hasTestSplit);
+        setYamlUploadStatus({ state: "saved", message: "Dataset YAML generated for training." });
       }
 
       setUploadMessage("Upload complete!");
@@ -662,6 +773,21 @@ export default function ImageUploadDialog({
                     </Button>
                   </div>
                   <p className="mt-1 text-[11px] text-slate-500">{classMapping.length || 0} classes loaded</p>
+                  {yamlUploadStatus.state !== "idle" && (
+                    <p
+                      className={`mt-2 text-[11px] ${
+                        yamlUploadStatus.state === "saved"
+                          ? "text-emerald-700"
+                          : yamlUploadStatus.state === "uploading"
+                            ? "text-blue-600"
+                            : yamlUploadStatus.state === "error"
+                              ? "text-rose-600"
+                              : "text-slate-600"
+                      }`}
+                    >
+                      {yamlUploadStatus.message}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -844,6 +970,10 @@ export default function ImageUploadDialog({
   return (
     <Dialog open={open} onOpenChange={!isUploading ? handleClose : () => {}}>
       <DialogContent className="sm:max-w-5xl p-0 overflow-hidden">
+        <DialogTitle className="sr-only">Upload images and labels</DialogTitle>
+        <DialogDescription className="sr-only">
+          Upload images with optional labels and class mapping, then split them into training and inference groups.
+        </DialogDescription>
         <AnimatePresence mode="wait">
           {step === 'select' && renderSelectStep()}
           {step === 'split' && renderSplitStep()}

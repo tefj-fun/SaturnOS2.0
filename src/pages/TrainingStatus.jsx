@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom'; // Added Link import
+import React, { useState, useEffect, useMemo } from 'react';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrainingRun } from '@/api/entities';
 import { Project } from '@/api/entities';
@@ -11,7 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'; // Added Tabs imports
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,15 +24,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  Zap,
   Brain,
   Target,
   TrendingUp,
-  Clock,
-  Cpu,
   Activity,
+  Cpu,
   CheckCircle,
-  AlertTriangle,
   ArrowLeft,
   Sparkles,
   Rocket,
@@ -40,29 +37,14 @@ import {
   Code,
   BarChart3,
   StopCircle,
-  Download, // Added icon
-  Share2,   // Added icon
-  Eye,      // Added icon
-  TrendingDown, // Added icon
-  Loader2, // Added icon for deployment
-  XCircle // Added icon for deployment failure
+  Download,
+  Share2,
+  Eye,
+  Loader2,
+  XCircle,
+  Clock
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell
-} from 'recharts'; // Added recharts imports
 
 const trainingTips = [
   "💡 Did you know? Your model learns by looking at thousands of examples!",
@@ -137,97 +119,24 @@ const MetricCard = ({ icon, label, value, trend, color = "blue" }) => (
   </Card>
 );
 
-// Mock validation data - in real implementation this would come from the training results
-const generateMockValidationResults = () => {
-  const classes = ['Button', 'Input Field', 'Label', 'Dropdown', 'Checkbox'];
-
-  // Training curves data
-  const trainingCurves = Array.from({ length: 100 }, (_, i) => ({
-    epoch: i + 1,
-    trainLoss: 0.8 * Math.exp(-i * 0.05) + Math.random() * 0.1,
-    valLoss: 0.85 * Math.exp(-i * 0.045) + Math.random() * 0.12,
-    trainAcc: 1 - (0.8 * Math.exp(-i * 0.05)) + Math.random() * 0.05,
-    valAcc: 1 - (0.85 * Math.exp(-i * 0.045)) + Math.random() * 0.06,
-  }));
-
-  // Confusion Matrix data
-  const confusionMatrix = classes.map(actualClass =>
-    classes.map(predictedClass => ({
-      actual: actualClass,
-      predicted: predictedClass,
-      count: actualClass === predictedClass
-        ? Math.floor(Math.random() * 50) + 80  // True positives (higher)
-        : Math.floor(Math.random() * 15) + 2   // False positives/negatives (lower)
-    }))
-  ).flat();
-
-  // Per-class metrics
-  const classMetrics = classes.map(cls => ({
-    class: cls,
-    precision: parseFloat((0.75 + Math.random() * 0.2).toFixed(3)),
-    recall: parseFloat((0.70 + Math.random() * 0.25).toFixed(3)),
-    f1Score: parseFloat((0.72 + Math.random() * 0.23).toFixed(3)),
-    support: Math.floor(Math.random() * 200) + 50
-  }));
-
-  return {
-    trainingCurves,
-    confusionMatrix,
-    classMetrics,
-    overallMetrics: {
-      mAP: 0.847,
-      precision: 0.823,
-      recall: 0.856,
-      f1Score: 0.839,
-      accuracy: 0.891
-    }
-  };
+const toNumber = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 };
 
-const ConfusionMatrixHeatmap = ({ data, classes }) => {
-  const maxCount = Math.max(...data.map(d => d.count));
+const formatMetric = (value, digits = 3) => {
+  const numeric = toNumber(value);
+  return numeric === null ? "N/A" : numeric.toFixed(digits);
+};
 
-  return (
-    <div className="w-full overflow-x-auto">
-      <div className="min-w-max grid" style={{gridTemplateColumns: `auto repeat(${classes.length}, minmax(0, 1fr))`}}>
-        <div className="col-start-2 col-span-full text-center text-xs text-gray-500 mb-2">Predicted</div>
-        <div className="row-start-2 row-span-full text-center text-xs text-gray-500 transform -rotate-90 origin-bottom-left whitespace-nowrap">Actual</div>
-
-        <div className="col-start-1 row-start-1"></div> {/* Empty top-left corner */}
-        {classes.map((cls, idx) => (
-          <div key={`pred-${cls}`} className="text-center font-medium text-gray-600 p-1 truncate" style={{gridColumn: idx + 2}}>{cls}</div>
-        ))}
-        {classes.map((actualClass, i) => (
-          <React.Fragment key={`row-${actualClass}`}>
-            <div className="text-right font-medium text-gray-600 p-1 truncate" style={{gridColumn: 1, gridRow: i + 2}}>{actualClass}</div>
-            {classes.map((predictedClass, j) => {
-              const cell = data.find(d => d.actual === actualClass && d.predicted === predictedClass);
-              const intensity = cell ? cell.count / maxCount : 0;
-              const isCorrect = actualClass === predictedClass;
-
-              const bgColor = isCorrect
-                ? `bg-green-${Math.min(900, Math.floor(intensity * 400) + 100)}`
-                : `bg-red-${Math.min(900, Math.floor(intensity * 300) + 100)}`;
-              const textColor = isCorrect
-                ? `text-green-${Math.min(900, Math.floor(intensity * 400) + 100)}`
-                : `text-red-${Math.min(900, Math.floor(intensity * 300) + 100)}`;
-
-              return (
-                <div
-                  key={`${actualClass}-${predictedClass}`}
-                  className={`aspect-square flex items-center justify-center text-xs font-medium rounded ${bgColor} ${cell?.count > maxCount * 0.7 ? 'text-white' : 'text-gray-900'}`}
-                  title={`Actual: ${actualClass}, Predicted: ${predictedClass}, Count: ${cell?.count || 0}`}
-                  style={{gridColumn: j + 2, gridRow: i + 2}}
-                >
-                  {cell?.count || 0}
-                </div>
-              );
-            })}
-          </React.Fragment>
-        ))}
-      </div>
-    </div>
-  );
+const formatDeviceLabel = (device, compute) => {
+  if (device === "cpu") return "CPU";
+  if (device === 0 || device === "0") return "GPU (device 0)";
+  if (typeof device === "number") return `GPU (device ${device})`;
+  if (device) return String(device);
+  if (compute === "cpu") return "CPU";
+  if (compute === "gpu") return "GPU (device 0)";
+  return "Default";
 };
 
 
@@ -236,17 +145,7 @@ export default function TrainingStatusPage() {
   const [trainingRun, setTrainingRun] = useState(null);
   const [project, setProject] = useState(null);
   const [step, setStep] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [currentEpoch, setCurrentEpoch] = useState(0);
-  const [logs, setLogs] = useState([]);
   const [currentTip, setCurrentTip] = useState(0);
-  const [validationResults, setValidationResults] = useState(null); // New state for validation results
-  const [metrics, setMetrics] = useState({
-    loss: 0.5,
-    accuracy: 0.0,
-    learningRate: 0.001,
-    timeRemaining: "Calculating..."
-  });
   const [isDeploying, setIsDeploying] = useState(false);
   const [deploymentMessage, setDeploymentMessage] = useState('');
 
@@ -266,26 +165,36 @@ export default function TrainingStatusPage() {
         if (projects.length > 0) setProject(projects[0]);
         if (steps.length > 0) setStep(steps[0]);
 
-        // Initialize progress based on status
-        if (run.status === 'completed' || run.status === 'stopped') {
-          setProgress(100); // Or the last recorded progress if available
-          setCurrentEpoch(run.configuration?.epochs || 100); // Or last recorded epoch
-        }
       }
     } catch (error) {
       console.error("Error loading training data:", error);
     }
   };
 
+  const location = useLocation();
+  const runId = useMemo(() => {
+    const urlParams = new URLSearchParams(location.search);
+    return urlParams.get('runId');
+  }, [location.search]);
+
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const runId = urlParams.get('runId');
     if (runId) {
       loadTrainingData(runId);
     } else {
       navigate(createPageUrl('Projects'));
     }
-  }, []);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId) return;
+    if (!trainingRun || !['queued', 'running'].includes(trainingRun.status)) return;
+
+    const interval = setInterval(() => {
+      loadTrainingData(runId);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [runId, trainingRun?.status]);
 
   // Rotate tips every 10 seconds
   useEffect(() => {
@@ -294,65 +203,6 @@ export default function TrainingStatusPage() {
     }, 10000);
     return () => clearInterval(interval);
   }, []);
-
-  // Simulate training progress
-  useEffect(() => {
-    // Only run simulation if trainingRun is available and its status is 'running'
-    if (!trainingRun || trainingRun.status !== 'running') return;
-
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        const newProgress = Math.min(prev + (Math.random() * 2), 100);
-
-        // Update epoch based on progress
-        const totalEpochs = trainingRun.configuration?.epochs || 100;
-        const newEpoch = Math.floor((newProgress / 100) * totalEpochs);
-        setCurrentEpoch(newEpoch);
-
-        // Add random log entries
-        if (Math.random() < 0.3) {
-          const logMessages = [
-            `Epoch ${newEpoch}/${totalEpochs}: loss: ${(0.8 - newProgress * 0.007).toFixed(4)}`,
-            `Validation mAP improved to ${(newProgress * 0.008).toFixed(3)}`,
-            `Learning rate: ${(0.001 * (1 - newProgress * 0.005)).toFixed(6)}`,
-            `Processing batch ${Math.floor(Math.random() * 50)}...`,
-            `GPU utilization: ${Math.floor(85 + Math.random() * 10)}%`
-          ];
-
-          setLogs(prev => [
-            ...prev.slice(-20), // Keep last 20 logs
-            {
-              id: Date.now(),
-              message: logMessages[Math.floor(Math.random() * logMessages.length)],
-              timestamp: new Date()
-            }
-          ]);
-        }
-
-        // Update metrics
-        setMetrics(prev => ({
-          loss: Math.max(0.1, 0.8 - newProgress * 0.007),
-          accuracy: newProgress * 0.008,
-          learningRate: 0.001 * (1 - newProgress * 0.005),
-          timeRemaining: newProgress > 95 ? "Almost done!" : `${Math.floor((100 - newProgress) * 2)} minutes`
-        }));
-
-        if (newProgress >= 100) {
-          // Training complete
-          setTrainingRun(prev => ({ ...prev, status: 'completed' }));
-          setLogs(prev => [...prev, {
-            id: Date.now(),
-            message: "🎉 Training completed successfully!",
-            timestamp: new Date()
-          }]);
-        }
-
-        return newProgress;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [trainingRun]);
 
   const handleStopTraining = async () => {
     if (!trainingRun) return;
@@ -432,14 +282,6 @@ export default function TrainingStatusPage() {
     }
   };
 
-  // Generate mock validation results when training is complete
-  useEffect(() => {
-    if (trainingRun?.status === 'completed' && !validationResults) {
-      setValidationResults(generateMockValidationResults());
-    }
-  }, [trainingRun?.status, validationResults]); // Added validationResults to dependency array
-
-
   // **THE FIX**: Add a loading guard before defining any components that use the data.
   // This ensures that `trainingRun` is not null when the rest of the page renders.
   if (!trainingRun) {
@@ -459,6 +301,37 @@ export default function TrainingStatusPage() {
   const isTraining = trainingRun.status === 'running';
   const isCompleted = trainingRun.status === 'completed';
   const isStopped = trainingRun.status === 'stopped';
+  const isFailed = trainingRun.status === 'failed';
+  const isQueued = trainingRun.status === 'queued';
+  const results = trainingRun.results || {};
+  const rawMetrics = results.metrics || {};
+  const totalEpochs = trainingRun.configuration?.epochs || 0;
+  const metricEpoch = toNumber(rawMetrics.epoch);
+  const currentEpochValue = metricEpoch !== null ? metricEpoch : (isCompleted ? totalEpochs : 0);
+  const progress = totalEpochs && currentEpochValue
+    ? Math.min(100, (currentEpochValue / totalEpochs) * 100)
+    : (isCompleted ? 100 : 0);
+  const currentEpochDisplay = Math.max(0, Math.floor(currentEpochValue || 0));
+  const progressLabel = isCompleted
+    ? "100%"
+    : isTraining
+      ? "Running"
+      : isQueued
+        ? "Queued"
+      : isFailed
+        ? "Failed"
+        : isStopped
+          ? "Stopped"
+          : "0%";
+  const workerLabel = trainingRun.worker_id || (isTraining ? "Assigned" : "Pending");
+  const artifacts = Array.isArray(results.artifacts) ? results.artifacts : [];
+  const dataYaml = trainingRun.data_yaml || trainingRun.configuration?.dataYaml;
+  const hasResults = isCompleted && (
+    toNumber(results.mAP) !== null ||
+    toNumber(results.precision) !== null ||
+    toNumber(results.recall) !== null ||
+    artifacts.length > 0
+  );
 
   // Content for the left column / Training Progress tab
   const trainingProgressContent = (
@@ -478,18 +351,18 @@ export default function TrainingStatusPage() {
             <div>
               <div className="flex justify-between text-sm text-gray-600 mb-2">
                 <span>Training Progress</span>
-                <span>{progress.toFixed(1)}%</span>
+                <span>{progressLabel}</span>
               </div>
               <Progress value={progress} className="h-3" />
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-center">
               <div>
-                <p className="text-2xl font-bold text-blue-600">{currentEpoch}</p>
+                <p className="text-2xl font-bold text-blue-600">{currentEpochDisplay}</p>
                 <p className="text-sm text-gray-600">Current Epoch</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-purple-600">{trainingRun.configuration?.epochs || 100}</p>
+                <p className="text-2xl font-bold text-purple-600">{totalEpochs || 'N/A'}</p>
                 <p className="text-sm text-gray-600">Total Epochs</p>
               </div>
             </div>
@@ -500,29 +373,27 @@ export default function TrainingStatusPage() {
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 gap-4">
         <MetricCard
-          icon={<TrendingUp />}
-          label="Training Loss"
-          value={metrics.loss.toFixed(4)}
-          trend={-5}
-          color="green"
-        />
-        <MetricCard
           icon={<Target />}
-          label="Accuracy (mAP)"
-          value={metrics.accuracy.toFixed(3)}
-          trend={8}
+          label="mAP"
+          value={formatMetric(results.mAP)}
           color="blue"
         />
         <MetricCard
+          icon={<TrendingUp />}
+          label="Precision"
+          value={formatMetric(results.precision)}
+          color="green"
+        />
+        <MetricCard
           icon={<Activity />}
-          label="Learning Rate"
-          value={metrics.learningRate.toFixed(6)}
+          label="Recall"
+          value={formatMetric(results.recall)}
           color="purple"
         />
         <MetricCard
-          icon={<Clock />}
-          label="Time Remaining"
-          value={metrics.timeRemaining}
+          icon={<Cpu />}
+          label="Worker"
+          value={workerLabel}
           color="orange"
         />
       </div>
@@ -568,6 +439,14 @@ export default function TrainingStatusPage() {
           </AlertDescription>
         </Alert>
       )}
+      {isFailed && (
+        <Alert variant="destructive" className="border-red-300 bg-red-50">
+          <StopCircle className="h-4 w-4 text-red-600" />
+          <AlertDescription className="text-red-800">
+            {trainingRun.error_message || "Training failed. Check the trainer service logs for details."}
+          </AlertDescription>
+        </Alert>
+      )}
     </div>
   );
 
@@ -599,6 +478,32 @@ export default function TrainingStatusPage() {
             <span className="text-gray-600">Optimizer:</span>
             <span className="font-medium">{trainingRun.configuration?.optimizer || 'Adam'}</span>
           </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Device:</span>
+            <span className="font-medium">
+              {formatDeviceLabel(trainingRun.configuration?.device, trainingRun.configuration?.compute)}
+            </span>
+          </div>
+          {dataYaml && (
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-600">Dataset YAML:</span>
+              <span className="font-medium text-right truncate" title={dataYaml}>
+                {dataYaml}
+              </span>
+            </div>
+          )}
+          {trainingRun.started_at && (
+            <div className="flex justify-between">
+              <span className="text-gray-600">Started:</span>
+              <span className="font-medium">{new Date(trainingRun.started_at).toLocaleString()}</span>
+            </div>
+          )}
+          {trainingRun.completed_at && (
+            <div className="flex justify-between">
+              <span className="text-gray-600">Completed:</span>
+              <span className="font-medium">{new Date(trainingRun.completed_at).toLocaleString()}</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -607,32 +512,19 @@ export default function TrainingStatusPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-gray-600" />
-            Live Training Logs
+            Training Logs
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-64">
-            <div className="space-y-2">
-              {logs.map(log => (
-                <motion.div
-                  key={log.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="text-xs font-mono bg-gray-900 text-green-400 p-2 rounded"
-                >
-                  <span className="text-gray-500">
-                    [{log.timestamp.toLocaleTimeString()}]
-                  </span>{' '}
-                  {log.message}
-                </motion.div>
-              ))}
-              {logs.length === 0 && (
-                <p className="text-sm text-gray-500 text-center py-8">
-                  Training logs will appear here...
-                </p>
-              )}
-            </div>
-          </ScrollArea>
+          {trainingRun.error_message ? (
+            <Alert variant="destructive" className="border-red-300 bg-red-50">
+              <AlertDescription className="text-red-800">{trainingRun.error_message}</AlertDescription>
+            </Alert>
+          ) : (
+            <p className="text-sm text-gray-500 text-center py-8">
+              Logs are not streamed from the trainer service yet.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -650,7 +542,7 @@ export default function TrainingStatusPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Are you sure you want to stop training?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will halt the current training process. The progress will be saved, but the model will not be completed. This action cannot be undone.
+                  This will mark the run as stopped in the dashboard. The trainer service does not support mid-run cancellation yet.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -682,8 +574,6 @@ export default function TrainingStatusPage() {
     </div>
   );
 
-  const mockClasses = ['Button', 'Input Field', 'Label', 'Dropdown', 'Checkbox'];
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
       <div className="max-w-7xl mx-auto"> {/* Increased max-width */}
@@ -700,22 +590,32 @@ export default function TrainingStatusPage() {
             </Button>
             <div>
               <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                {isCompleted ? (
-                  <>
-                    <CheckCircle className="w-8 h-8 text-green-600" />
-                    Training Complete!
-                  </>
-                ) : isStopped ? (
-                  <>
-                    <StopCircle className="w-8 h-8 text-red-600" />
-                    Training Stopped
-                  </>
-                ) : (
-                  <>
-                    <Rocket className="w-8 h-8 text-blue-600" />
-                    Training in Progress
-                  </>
-                )}
+            {isCompleted ? (
+              <>
+                <CheckCircle className="w-8 h-8 text-green-600" />
+                Training Complete!
+              </>
+            ) : isStopped ? (
+              <>
+                <StopCircle className="w-8 h-8 text-red-600" />
+                Training Stopped
+              </>
+            ) : isFailed ? (
+              <>
+                <StopCircle className="w-8 h-8 text-red-600" />
+                Training Failed
+              </>
+            ) : isQueued ? (
+              <>
+                <Clock className="w-8 h-8 text-amber-600" />
+                Training Queued
+              </>
+            ) : (
+              <>
+                <Rocket className="w-8 h-8 text-blue-600" />
+                Training in Progress
+              </>
+            )}
               </h1>
               <p className="text-gray-600 mt-1">
                 {project?.name} • {step?.title} • {trainingRun.run_name}
@@ -730,9 +630,11 @@ export default function TrainingStatusPage() {
                   ? 'bg-green-100 text-green-800'
                   : isTraining
                     ? 'bg-blue-100 text-blue-800'
-                  : isStopped
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-gray-100 text-gray-800'
+                    : isFailed
+                      ? 'bg-red-100 text-red-800'
+                      : isStopped
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-gray-100 text-gray-800'
               }`}
             >
               {trainingRun.status}
@@ -740,10 +642,19 @@ export default function TrainingStatusPage() {
 
             {isCompleted && (
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="glass-effect">
-                  <Download className="w-4 h-4 mr-2" />
-                  Export Model
-                </Button>
+                {trainingRun.trained_model_url ? (
+                  <Button asChild variant="outline" size="sm" className="glass-effect">
+                    <a href={trainingRun.trained_model_url} target="_blank" rel="noopener noreferrer">
+                      <Download className="w-4 h-4 mr-2" />
+                      Export Model
+                    </a>
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="glass-effect" disabled>
+                    <Download className="w-4 h-4 mr-2" />
+                    Export Model
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" className="glass-effect">
                   <Share2 className="w-4 h-4 mr-2" />
                   Share Results
@@ -754,7 +665,7 @@ export default function TrainingStatusPage() {
         </div>
 
         {/* Content Tabs for Completed Models */}
-        {isCompleted && validationResults ? (
+        {isCompleted && hasResults ? (
           <Tabs defaultValue="results" className="w-full">
             <TabsList className="grid w-full grid-cols-3 md:grid-cols-3 lg:grid-cols-3">
               <TabsTrigger value="results">Validation Results</TabsTrigger>
@@ -764,109 +675,80 @@ export default function TrainingStatusPage() {
 
             {/* Validation Results Tab */}
             <TabsContent value="results" className="space-y-6 mt-6">
-              {/* Overall Performance Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <MetricCard
                   icon={<Target />}
                   label="Mean Average Precision"
-                  value={validationResults.overallMetrics.mAP.toFixed(3)}
+                  value={formatMetric(results.mAP)}
                   color="blue"
                 />
                 <MetricCard
                   icon={<TrendingUp />}
                   label="Precision"
-                  value={validationResults.overallMetrics.precision.toFixed(3)}
+                  value={formatMetric(results.precision)}
                   color="green"
                 />
                 <MetricCard
                   icon={<Activity />}
                   label="Recall"
-                  value={validationResults.overallMetrics.recall.toFixed(3)}
+                  value={formatMetric(results.recall)}
                   color="purple"
                 />
                 <MetricCard
-                  icon={<BarChart3 />}
-                  label="F1-Score"
-                  value={validationResults.overallMetrics.f1Score.toFixed(3)}
-                  color="orange"
-                />
-                <MetricCard
                   icon={<CheckCircle />}
-                  label="Accuracy"
-                  value={`${(validationResults.overallMetrics.accuracy * 100).toFixed(1)}%`}
+                  label="Artifacts"
+                  value={`${artifacts.length}`}
                   color="green"
                 />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Confusion Matrix */}
                 <Card className="glass-effect border-0 shadow-lg">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <Brain className="w-5 h-5 text-gray-600" />
-                      Confusion Matrix
+                      Training Artifacts
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="flex flex-col items-center">
-                    <ConfusionMatrixHeatmap
-                      data={validationResults.confusionMatrix}
-                      classes={mockClasses}
-                    />
-                    <p className="text-xs text-gray-500 mt-4 text-center">
-                      Darker colors indicate higher prediction counts. Green = correct predictions, Red = incorrect.
-                    </p>
+                  <CardContent>
+                    {artifacts.length > 0 ? (
+                      <div className="space-y-2">
+                        {artifacts.map((artifact) => (
+                          <div key={artifact.path || artifact.name} className="flex items-center justify-between rounded border border-gray-200 p-2">
+                            <span className="text-sm text-gray-700">{artifact.name}</span>
+                            <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">Download</a>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No artifacts uploaded yet.</p>
+                    )}
                   </CardContent>
                 </Card>
 
-                {/* Per-Class Performance */}
                 <Card className="glass-effect border-0 shadow-lg">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="w-5 h-5 text-gray-600" />
-                      Per-Class Performance
+                      Run Details
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="h-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={validationResults.classMetrics}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                          <XAxis dataKey="class" angle={-45} textAnchor="end" height={80} interval={0} fontSize={10} />
-                          <YAxis fontSize={10} />
-                          <Tooltip formatter={(value) => value.toFixed(3)} />
-                          <Legend iconType="rect" wrapperStyle={{paddingTop: '10px'}} />
-                          <Bar dataKey="precision" fill="#3b82f6" name="Precision" />
-                          <Bar dataKey="recall" fill="#10b981" name="Recall" />
-                          <Bar dataKey="f1Score" fill="#f59e0b" name="F1-Score" />
-                        </BarChart>
-                      </ResponsiveContainer>
+                  <CardContent className="space-y-2 text-sm text-gray-600">
+                    <div className="flex justify-between">
+                      <span>Run Directory:</span>
+                      <span className="font-medium text-gray-800">{results.run_dir || 'N/A'}</span>
                     </div>
-                  </CardContent>
-                </Card>
-
-                {/* Training Loss Curves */}
-                <Card className="glass-effect border-0 shadow-lg lg:col-span-2">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <TrendingDown className="w-5 h-5 text-gray-600" />
-                      Training & Validation Curves
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-80">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={validationResults.trainingCurves}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="epoch" fontSize={10} />
-                          <YAxis fontSize={10} />
-                          <Tooltip formatter={(value) => value.toFixed(4)} />
-                          <Legend iconType="rect" wrapperStyle={{paddingTop: '10px'}} />
-                          <Line type="monotone" dataKey="trainLoss" stroke="#ef4444" name="Training Loss" strokeWidth={2} dot={false} />
-                          <Line type="monotone" dataKey="valLoss" stroke="#f97316" name="Validation Loss" strokeWidth={2} dot={false} />
-                          <Line type="monotone" dataKey="trainAcc" stroke="#3b82f6" name="Training Accuracy" strokeWidth={2} dot={false} />
-                          <Line type="monotone" dataKey="valAcc" stroke="#10b981" name="Validation Accuracy" strokeWidth={2} dot={false} />
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className="flex justify-between">
+                      <span>Trained Model:</span>
+                      {trainingRun.trained_model_url ? (
+                        <a href={trainingRun.trained_model_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Download</a>
+                      ) : (
+                        <span className="font-medium text-gray-800">N/A</span>
+                      )}
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Worker:</span>
+                      <span className="font-medium text-gray-800">{workerLabel}</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -902,9 +784,7 @@ export default function TrainingStatusPage() {
               <Alert className="border-green-300 bg-green-50 mt-6">
                 <CheckCircle className="h-4 w-4 text-green-600" />
                 <AlertDescription className="text-green-800">
-                  <strong>Excellent Results!</strong> Your model achieved high precision ({(validationResults.overallMetrics.precision * 100).toFixed(1)}%)
-                  and recall ({(validationResults.overallMetrics.recall * 100).toFixed(1)}%).
-                  The validation curves show good convergence without significant overfitting.
+                  <strong>Excellent Results!</strong> Your model metrics and artifacts are now available for download and review.
                 </AlertDescription>
               </Alert>
 

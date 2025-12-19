@@ -38,13 +38,15 @@ const modelOptions = [
 ];
 
 const computeOptions = [
-  { value: 'gpu_standard', label: 'Standard GPU (T4)', description: 'Cost-effective for most tasks.' },
-  { value: 'gpu_high_perf', label: 'Performance GPU (A10G)', description: 'Faster training for large models.' },
+  { value: 'gpu', label: 'GPU (device 0)', description: 'Uses the trainer default GPU.' },
+  { value: 'cpu', label: 'CPU', description: 'Much slower, useful for debugging.' },
 ];
 
-export default function StartTrainingDialog({ open, onOpenChange, onSubmit, stepId, stepTitle, existingRuns }) {
+export default function StartTrainingDialog({ open, onOpenChange, onSubmit, stepId, stepTitle, existingRuns, stepData }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+    const [formError, setFormError] = useState("");
+    const [autoYamlSource, setAutoYamlSource] = useState("");
     
     const [config, setConfig] = useState({
         runName: "",
@@ -55,7 +57,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         imgSize: 640,
         learningRate: 0.001,
         optimizer: 'Adam',
-        compute: 'gpu_standard',
+        compute: 'gpu',
         optimizationStrategy: 'manual',
         bayesianConfig: {
             objective: 'maximize_mAP',
@@ -74,12 +76,15 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         if (open) {
             const newVersion = (existingRuns?.length || 0) + 1;
             const safeTitle = stepTitle?.replace(/[^a-zA-Z0-9]/g, '_') || 'training';
+            const linkedYaml = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
             setConfig(prev => ({
                 ...prev,
-                runName: `${safeTitle}_v${newVersion}`
+                runName: `${safeTitle}_v${newVersion}`,
+                dataYaml: linkedYaml || prev.dataYaml
             }));
+            setAutoYamlSource(linkedYaml);
         }
-    }, [open, stepTitle, existingRuns]);
+    }, [open, stepTitle, existingRuns, stepData]);
 
     const dynamicModelOptions = useMemo(() => {
         const completedRuns = (existingRuns || []).filter(run => run.status === 'completed' && run.trained_model_url);
@@ -114,8 +119,15 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         }));
     };
 
+    const resolveDevice = (compute) => (compute === 'cpu' ? 'cpu' : 0);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!config.dataYaml || !config.dataYaml.trim()) {
+            setFormError("Dataset YAML path is required to start training.");
+            return;
+        }
+        setFormError("");
         setIsSubmitting(true);
         
         try {
@@ -125,7 +137,10 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 base_model: config.baseModel,
                 data_yaml: config.dataYaml,
                 status: 'queued',
-                configuration: config,
+                configuration: {
+                    ...config,
+                    device: resolveDevice(config.compute),
+                },
             });
             onOpenChange(false);
         } catch (error) {
@@ -166,7 +181,16 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                 value={config.dataYaml}
                                 onChange={e => handleConfigChange('dataYaml', e.target.value)}
                                 placeholder="/mnt/d/datasets/your_dataset/data.yaml"
+                                required
                             />
+                            <p className="text-xs text-gray-500 mt-1">
+                                Use a trainer-local path or a Supabase storage URL. The trainer will download storage URLs automatically.
+                            </p>
+                            {autoYamlSource && (
+                                <p className="text-xs text-emerald-600 mt-1">
+                                    Auto-linked from step dataset YAML: {autoYamlSource}
+                                </p>
+                            )}
                         </div>
                         
                         <div>
@@ -220,6 +244,12 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                             </Select>
                         </div>
                     </div>
+
+                    {formError && (
+                        <Alert variant="destructive">
+                            <AlertDescription>{formError}</AlertDescription>
+                        </Alert>
+                    )}
                     
                     <Separator />
                     
@@ -490,7 +520,11 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                             Cancel
                         </Button>
-                        <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isSubmitting || !config.runName}>
+                        <Button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700"
+                            disabled={isSubmitting || !config.runName || !config.dataYaml.trim()}
+                        >
                             {isSubmitting ? "Starting Training..." : "Start Training"}
                         </Button>
                     </div>

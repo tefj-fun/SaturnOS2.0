@@ -46,7 +46,7 @@ import LoadingOverlay from "../components/projects/LoadingOverlay";
 import ProjectMembersDialog from "../components/projects/ProjectMembersDialog";
 import PermissionGate, { useProjectPermissions } from "../components/rbac/PermissionGate";
 
-// Normalize project created date across legacy/Base44 and Supabase fields
+// Normalize project created date across legacy and Supabase fields
 const getCreatedDate = (project) =>
   project.created_at ||
   project.created_date ||
@@ -796,7 +796,7 @@ function ProjectCard({
 function ProjectActionsDropdown({ project, onEdit, onDelete, isDeleting }) {
   const { hasPermission, isLoading } = useProjectPermissions(project.id);
   // In local/dev (auth disabled), show actions by default so the menu isn't empty.
-  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_BASE44_REQUIRE_AUTH !== 'true';
+  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_SUPABASE_REQUIRE_AUTH !== 'true';
   const canEdit = bypassPermissions || hasPermission("edit_project");
   const canDelete = bypassPermissions || hasPermission("delete_project");
   const noActions = !canEdit && !canDelete && !isLoading;

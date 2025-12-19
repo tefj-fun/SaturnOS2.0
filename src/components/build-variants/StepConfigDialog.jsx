@@ -41,7 +41,11 @@ export default function StepConfigDialog({
     try {
       const [logicRules, trainingRuns] = await Promise.all([
         LogicRule.filter({ step_id: step.id }),
-        TrainingRun.filter({ step_id: step.id, status: "completed" })
+        TrainingRun.filter({
+          step_id: step.id,
+          project_id: step.project_id,
+          status: "completed"
+        })
       ]);
       
       setAvailableLogicRules(logicRules);

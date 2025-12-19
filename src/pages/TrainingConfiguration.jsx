@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Project } from '@/api/entities';
 import { SOPStep } from '@/api/entities';
 import { TrainingRun } from '@/api/entities';
+import { TrainerWorker } from '@/api/entities';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -22,6 +24,7 @@ import {
   Info,
   Loader2,
   Clock,
+  WifiOff,
   Rocket
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
@@ -49,6 +52,12 @@ export default function TrainingConfigurationPage() {
     const [selectedStepId, setSelectedStepId] = useState(null);
     const [selectedStep, setSelectedStep] = useState(null);
     const [trainingRuns, setTrainingRuns] = useState([]);
+    const [trainerStatus, setTrainerStatus] = useState({
+        state: "checking",
+        running: 0,
+        queued: 0,
+        workersOnline: 0,
+    });
 
     const [isLoading, setIsLoading] = useState(true);
     const [showStartTrainingDialog, setShowStartTrainingDialog] = useState(false);
@@ -58,14 +67,63 @@ export default function TrainingConfigurationPage() {
         const projectId = urlParams.get('projectId');
         const stepId = urlParams.get('stepId');
         
-        loadAllProjects().then(() => {
+        loadAllProjects().then((projects) => {
             if (projectId) {
+                const isValidProject = projects.some(project => project.id === projectId);
+                if (!isValidProject) {
+                    setSelectedProjectId(null);
+                    setSelectedProject(null);
+                    setSelectedStepId(null);
+                    setSelectedStep(null);
+                    setProjectSteps([]);
+                    setTrainingRuns([]);
+                    setIsLoading(false);
+                    navigate(createPageUrl('TrainingConfiguration'));
+                    return;
+                }
                 loadProjectData(projectId, stepId);
             } else {
                 setIsLoading(false);
             }
         });
     }, [location.search]);
+
+    const HEARTBEAT_TIMEOUT_MS = 60000;
+
+    const loadTrainerStatus = useCallback(async () => {
+        try {
+            const [activeRuns, workers] = await Promise.all([
+                TrainingRun.filter({ status: ['running', 'queued'] }, '-created_date'),
+                TrainerWorker.list('-last_seen'),
+            ]);
+            const running = activeRuns.filter(run => run.status === 'running').length;
+            const queued = activeRuns.filter(run => run.status === 'queued').length;
+            const now = Date.now();
+            const activeWorkers = (workers || []).filter((worker) => {
+                if (!worker?.last_seen) return false;
+                const lastSeen = new Date(worker.last_seen).getTime();
+                return Number.isFinite(lastSeen) && (now - lastSeen) <= HEARTBEAT_TIMEOUT_MS;
+            });
+            const workersOnline = activeWorkers.length;
+            const state = running > 0
+                ? 'busy'
+                : queued > 0
+                    ? 'queued'
+                    : workersOnline === 0
+                        ? 'offline'
+                        : 'idle';
+            setTrainerStatus({ state, running, queued, workersOnline });
+        } catch (error) {
+            console.error('Error loading trainer status:', error);
+            setTrainerStatus({ state: 'unknown', running: 0, queued: 0, workersOnline: 0 });
+        }
+    }, []);
+
+    useEffect(() => {
+        loadTrainerStatus();
+        const interval = setInterval(loadTrainerStatus, 15000);
+        return () => clearInterval(interval);
+    }, [loadTrainerStatus]);
 
     const groupedRuns = useMemo(() => {
         const groups = { running: [], queued: [], completed: [], history: [] };
@@ -87,7 +145,9 @@ export default function TrainingConfigurationPage() {
         try {
             const projects = await Project.list();
             setAllProjects(projects);
+            return projects;
         } catch (error) { console.error('Error loading projects:', error); }
+        return [];
     };
     
     const loadProjectData = async (projectId, stepId = null) => {
@@ -125,7 +185,10 @@ export default function TrainingConfigurationPage() {
         setSelectedStepId(stepId);
         setSelectedStep(step);
 
-        const runs = await TrainingRun.filter({ step_id: stepId }, '-created_date');
+        const runs = await TrainingRun.filter(
+            { step_id: stepId, project_id: step.project_id },
+            '-created_date'
+        );
         setTrainingRuns(runs);
     };
     
@@ -140,6 +203,23 @@ export default function TrainingConfigurationPage() {
         navigate(url);
         loadStepData(stepId);
     };
+
+    useEffect(() => {
+        if (!selectedStepId) return;
+        const hasActiveRuns = trainingRuns.some(run => ['running', 'queued'].includes(run.status));
+        if (!hasActiveRuns) return;
+
+        const interval = setInterval(() => {
+            TrainingRun.filter(
+                { step_id: selectedStepId, project_id: selectedProjectId },
+                '-created_date'
+            )
+                .then(setTrainingRuns)
+                .catch(error => console.error('Error refreshing training runs:', error));
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [selectedStepId, selectedProjectId, trainingRuns]);
 
     const handleStartTraining = async (trainingConfig) => {
         if (!selectedProjectId || !selectedStepId) return;
@@ -167,6 +247,16 @@ export default function TrainingConfigurationPage() {
         loadStepData(selectedStepId);
     };
 
+    const trainerStatusConfig = {
+        checking: { label: 'Checking trainer...', color: 'bg-gray-100 text-gray-700', icon: <Loader2 className="w-3 h-3 mr-1 animate-spin" /> },
+        busy: { label: 'Trainer busy', color: 'bg-amber-100 text-amber-800', icon: <Cpu className="w-3 h-3 mr-1" /> },
+        queued: { label: 'Trainer queued', color: 'bg-blue-100 text-blue-800', icon: <Clock className="w-3 h-3 mr-1" /> },
+        idle: { label: 'Trainer available', color: 'bg-green-100 text-green-800', icon: <CheckCircle className="w-3 h-3 mr-1" /> },
+        offline: { label: 'Trainer offline', color: 'bg-red-100 text-red-800', icon: <WifiOff className="w-3 h-3 mr-1" /> },
+        unknown: { label: 'Trainer status unknown', color: 'bg-red-100 text-red-800', icon: <Info className="w-3 h-3 mr-1" /> },
+    };
+    const currentTrainerStatus = trainerStatusConfig[trainerStatus.state] || trainerStatusConfig.unknown;
+
     if (isLoading && !allProjects.length) {
         return <LoadingOverlay isLoading={true} text="Loading projects..." />;
     }
@@ -174,24 +264,35 @@ export default function TrainingConfigurationPage() {
     return (
         <div className="h-full flex flex-col">
             <div className="max-w-7xl mx-auto p-6 w-full">
-                <div className="flex items-center justify-between mb-8">
-                    <div className="flex items-center gap-4">
-                        <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0">
-                            <ArrowLeft className="w-4 h-4" />
-                        </Button>
-                        <div>
-                            <h1 className="text-3xl font-bold text-gray-900">AI Model Training Hub</h1>
-                            <p className="text-gray-600 mt-1">
-                                {selectedProject?.name}
-                                {selectedStep && <span className="text-blue-600 font-medium"> • Step: {selectedStep.title}</span>}
-                            </p>
+                    <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-4">
+                            <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0">
+                                <ArrowLeft className="w-4 h-4" />
+                            </Button>
+                            <div>
+                                <h1 className="text-3xl font-bold text-gray-900">AI Model Training Hub</h1>
+                                <p className="text-gray-600 mt-1">
+                                    {selectedProject?.name}
+                                    {selectedStep && <span className="text-blue-600 font-medium"> • Step: {selectedStep.title}</span>}
+                                </p>
+                            </div>
                         </div>
+                    <div className="flex items-center gap-4">
+                        <div className="flex flex-col items-end gap-1">
+                            <Badge className={`${currentTrainerStatus.color} border-0 font-medium`}>
+                                {currentTrainerStatus.icon}
+                                <span>{currentTrainerStatus.label}</span>
+                            </Badge>
+                            <span className="text-xs text-gray-500">
+                                running: {trainerStatus.running}, queued: {trainerStatus.queued}, workers: {trainerStatus.workersOnline}
+                            </span>
+                        </div>
+                        {selectedStep && (
+                            <Button onClick={() => setShowStartTrainingDialog(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-6">
+                                <PlayCircle className="w-4 h-4 mr-2" /> Start New Training Run
+                            </Button>
+                        )}
                     </div>
-                    {selectedStep && (
-                        <Button onClick={() => setShowStartTrainingDialog(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-6">
-                            <PlayCircle className="w-4 h-4 mr-2" /> Start New Training Run
-                        </Button>
-                    )}
                 </div>
 
                 {!selectedProjectId && (
@@ -273,6 +374,7 @@ export default function TrainingConfigurationPage() {
                 onSubmit={handleStartTraining}
                 stepId={selectedStepId}
                 stepTitle={selectedStep?.title}
+                stepData={selectedStep}
                 existingRuns={trainingRuns}
             />
         </div>

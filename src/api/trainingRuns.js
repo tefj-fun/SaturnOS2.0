@@ -12,6 +12,12 @@ function mapColumn(key) {
   return columnAliases[key] || key;
 }
 
+function getMissingColumn(error) {
+  const message = error?.message || "";
+  const match = message.match(/column [^.]+\\.([a-zA-Z0-9_]+) does not exist/i);
+  return match ? match[1] : null;
+}
+
 function normalizeRun(run) {
   if (!run) return run;
   return {
@@ -31,6 +37,16 @@ function applyOrder(query, orderBy) {
 }
 
 export const TrainingRun = {
+  async executeFilter(filters = {}, orderBy) {
+    let query = supabase.from(TABLE).select("*");
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+      query = query.eq(mapColumn(key), value);
+    });
+    query = applyOrder(query, orderBy);
+    return query;
+  },
+
   async list(orderBy) {
     let query = supabase.from(TABLE).select("*");
     query = applyOrder(query, orderBy);
@@ -40,12 +56,24 @@ export const TrainingRun = {
   },
 
   async filter(filters = {}, orderBy) {
-    let query = supabase.from(TABLE).select("*");
-    Object.entries(filters).forEach(([key, value]) => {
-      query = query.eq(mapColumn(key), value);
-    });
-    query = applyOrder(query, orderBy);
-    const { data, error } = await query;
+    let query = await this.executeFilter(filters, orderBy);
+    let { data, error } = await query;
+    if (error) {
+      const missingColumn = getMissingColumn(error);
+      if (missingColumn && Object.prototype.hasOwnProperty.call(filters, missingColumn)) {
+        const fallbackFilters = { ...filters };
+        delete fallbackFilters[missingColumn];
+        console.warn(
+          `TrainingRun.filter: missing column "${missingColumn}". ` +
+          "Apply migration 0007_update_training_runs.sql to restore full filtering."
+        );
+        if (Object.keys(fallbackFilters).length === 0) {
+          return [];
+        }
+        query = await this.executeFilter(fallbackFilters, orderBy);
+        ({ data, error } = await query);
+      }
+    }
     if (error) throw error;
     return (data || []).map(normalizeRun);
   },
@@ -55,22 +83,55 @@ export const TrainingRun = {
       created_by: payload.created_by || FALLBACK_CREATED_BY,
       ...payload,
     };
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from(TABLE)
       .insert(insertPayload)
       .select()
       .single();
+    if (error) {
+      const missingColumn = getMissingColumn(error);
+      if (missingColumn && Object.prototype.hasOwnProperty.call(insertPayload, missingColumn)) {
+        const fallbackPayload = { ...insertPayload };
+        delete fallbackPayload[missingColumn];
+        console.warn(
+          `TrainingRun.create: missing column "${missingColumn}". ` +
+          "Apply migration 0007_update_training_runs.sql to store all fields."
+        );
+        ({ data, error } = await supabase
+          .from(TABLE)
+          .insert(fallbackPayload)
+          .select()
+          .single());
+      }
+    }
     if (error) throw error;
     return normalizeRun(data);
   },
 
   async update(id, updates) {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from(TABLE)
       .update(updates)
       .eq("id", id)
       .select()
       .single();
+    if (error) {
+      const missingColumn = getMissingColumn(error);
+      if (missingColumn && Object.prototype.hasOwnProperty.call(updates, missingColumn)) {
+        const fallbackUpdates = { ...updates };
+        delete fallbackUpdates[missingColumn];
+        console.warn(
+          `TrainingRun.update: missing column "${missingColumn}". ` +
+          "Apply migration 0007_update_training_runs.sql to store all fields."
+        );
+        ({ data, error } = await supabase
+          .from(TABLE)
+          .update(fallbackUpdates)
+          .eq("id", id)
+          .select()
+          .single());
+      }
+    }
     if (error) throw error;
     return normalizeRun(data);
   },

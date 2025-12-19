@@ -1,6 +1,6 @@
 import { invokeLLM } from "@/api/llm";
 
-// Base44 integrations replaced with GPT + Supabase helpers.
+// GPT + Supabase helpers for app integrations.
 export const InvokeLLM = async ({ prompt, response_json_schema, temperature, max_tokens, model }) =>
   invokeLLM({
     prompt,
@@ -11,7 +11,7 @@ export const InvokeLLM = async ({ prompt, response_json_schema, temperature, max
   });
 
 export const UploadFile = async () => {
-  throw new Error("Base44 UploadFile is disabled. Use uploadToSupabaseStorage in src/api/storage.js.");
+  throw new Error("UploadFile is disabled. Use uploadToSupabaseStorage in src/api/storage.js.");
 };
 
 

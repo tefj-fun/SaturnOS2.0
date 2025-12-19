@@ -152,13 +152,6 @@ const MOCK_STEP_VARIANT_CONFIGS = [
   { id: 'config4', sop_step_id: 'step3', build_variant_id: 'variant3', active_classes: ['Dropdown', 'Label'] }, // Tablet for step3 uses Dropdown and Label
 ];
 
-// Mocking entity `list` methods for local data
-Project.list = () => Promise.resolve(MOCK_PROJECTS);
-LabelLibrary.list = () => Promise.resolve(MOCK_LABEL_DATA);
-SOPStep.list = () => Promise.resolve(MOCK_SOP_STEPS);
-BuildVariant.list = () => Promise.resolve(MOCK_BUILD_VARIANTS);
-StepVariantConfig.list = () => Promise.resolve(MOCK_STEP_VARIANT_CONFIGS);
-
 const CATEGORY_COLORS = {
   'UI Element': 'bg-blue-100 text-blue-800 border-blue-200',
   'Form Control': 'bg-green-100 text-green-800 border-green-200',
@@ -340,7 +333,11 @@ export default function LabelLibraryPage() {
       
     } catch (error) {
       console.error('Error loading label library data:', error);
-      // Optionally set an error state here
+      setLabels(MOCK_LABEL_DATA);
+      setProjects(MOCK_PROJECTS);
+      setSteps(MOCK_SOP_STEPS);
+      setBuildVariants(MOCK_BUILD_VARIANTS);
+      setStepVariantConfigs(MOCK_STEP_VARIANT_CONFIGS);
     } finally {
       setIsLoading(false);
     }

@@ -1,6 +1,39 @@
 import { supabase } from "./supabaseClient";
 
 const DEFAULT_BUCKET = "sops";
+const CONTENT_TYPE_BY_EXT = {
+  ".yaml": "text/plain",
+  ".yml": "text/plain",
+  ".txt": "text/plain",
+  ".names": "text/plain",
+  ".json": "application/json",
+  ".csv": "text/csv",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+};
+
+const guessContentType = (file, path, options) => {
+  if (options?.contentType) return options.contentType;
+  if (file?.type) return file.type;
+  const name = (path || file?.name || "").toLowerCase();
+  const ext = name.includes(".") ? `.${name.split(".").pop()}` : "";
+  return CONTENT_TYPE_BY_EXT[ext] || "application/octet-stream";
+};
+
+const withContentType = (file, contentType, fallbackName) => {
+  if (!contentType || typeof Blob === "undefined" || !(file instanceof Blob)) return file;
+  const existingType = file.type || "";
+  if (existingType && existingType !== "application/octet-stream") return file;
+  if (typeof File !== "undefined" && file instanceof File) {
+    return new File([file], file.name || fallbackName, { type: contentType });
+  }
+  return new Blob([file], { type: contentType });
+};
 
 export function getStoragePathFromUrl(url, bucket) {
   if (!url || !bucket) return null;
@@ -40,16 +73,31 @@ export async function createSignedImageUrl(bucket, path, { expiresIn = 3600, tra
   return data?.signedUrl || null;
 }
 
-export async function uploadToSupabaseStorage(file, path, bucket = DEFAULT_BUCKET) {
+export async function uploadToSupabaseStorage(file, path, bucketOrOptions = DEFAULT_BUCKET) {
   if (!file) throw new Error("No file provided");
+  let bucket = DEFAULT_BUCKET;
+  let options = {};
+  if (typeof bucketOrOptions === "string") {
+    bucket = bucketOrOptions;
+  } else if (bucketOrOptions && typeof bucketOrOptions === "object") {
+    bucket = bucketOrOptions.bucket || DEFAULT_BUCKET;
+    options = bucketOrOptions;
+  }
   // Avoid leading slashes so Supabase doesn't treat it as absolute
   const cleanPath = path?.replace(/^\/+/, "");
-  const objectPath = cleanPath || `${Date.now()}-${file.name}`;
+  const fallbackName = file?.name || "upload.bin";
+  const objectPath = cleanPath || `${Date.now()}-${fallbackName}`;
+  const contentType = guessContentType(file, objectPath, options);
+  const uploadBody = withContentType(file, contentType, fallbackName);
+  const uploadOptions = { upsert: true, cacheControl: "3600" };
+  if (contentType) {
+    uploadOptions.contentType = contentType;
+  }
 
   // Upload with upsert to allow replacing
   const { data, error } = await supabase.storage
     .from(bucket)
-    .upload(objectPath, file, { upsert: true, cacheControl: "3600" });
+    .upload(objectPath, uploadBody, uploadOptions);
 
   if (error) throw error;
 

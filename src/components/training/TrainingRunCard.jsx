@@ -1,12 +1,11 @@
 
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Link } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 import { motion } from 'framer-motion';
-import { MoreVertical, PlayCircle, Clock, CheckCircle, AlertTriangle, XCircle, Brain, Target, BarChart3, Trash2, Eye, StopCircle, Rocket, Loader2, Square } from 'lucide-react';
+import { Clock, CheckCircle, AlertTriangle, XCircle, Target, BarChart3, Trash2, Rocket, Loader2, Square } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 import { TrainingRun } from '@/api/entities';
 
@@ -19,12 +18,17 @@ const statusConfig = {
 };
 
 export default function TrainingRunCard({ run, onStop, onDelete }) {
-  const navigate = useNavigate();
   const [isDeploying, setIsDeploying] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
 
   const config = statusConfig[run.status] || statusConfig.stopped;
   const isOptimizing = run.status === 'running' && run.configuration?.optimizationStrategy === 'bayesian';
+  const formatMetric = (value) => {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric.toFixed(3);
+    return 'N/A';
+  };
+  const createdAtLabel = run.created_date ? new Date(run.created_date).toLocaleString() : 'Unknown';
+  const startedAtLabel = run.started_at ? new Date(run.started_at).toLocaleString() : null;
 
   const handleDeploy = async () => {
     setIsDeploying(true);
@@ -54,22 +58,7 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
     setIsDeploying(false);
   };
 
-  const handleStartTraining = async () => {
-    setIsStarting(true);
-    
-    try {
-      await TrainingRun.update(run.id, {
-        status: 'running'
-      });
-      
-      // Navigate to training status page
-      navigate(createPageUrl(`TrainingStatus?runId=${run.id}`));
-      
-    } catch (error) {
-      console.error('Failed to start training:', error);
-      setIsStarting(false); // Only set to false if an error prevents navigation
-    }
-  };
+
 
   return (
     <motion.div
@@ -103,35 +92,24 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
           {run.status === 'queued' && (
             <div className="space-y-3 mb-4">
               <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-center">
-                <p className="text-sm font-medium text-amber-800">⏳ Training Queued</p>
-                <p className="text-xs text-amber-600 mt-1">Waiting for available resources</p>
+                <p className="text-sm font-medium text-amber-800">Training Queued</p>
+                <p className="text-xs text-amber-600 mt-1">Waiting for the trainer service to pick up the run.</p>
               </div>
-              
-              <Button 
-                onClick={handleStartTraining}
-                disabled={isStarting}
-                size="sm" 
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                {isStarting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Starting...
-                  </>
-                ) : (
-                  <>
-                    <PlayCircle className="w-4 h-4 mr-2" />
-                    Start Training Now
-                  </>
-                )}
-              </Button>
             </div>
           )}
-
           {run.status === 'running' && (
-            <div className="space-y-2 mb-4">
-              <Progress value={Math.floor(Math.random() * 80) + 10} className="h-2" />
-              <p className="text-xs text-gray-500 text-center">Epoch 12 of 100</p>
+            <div className="space-y-2 mb-4 text-xs text-gray-500">
+              <div className="flex items-center justify-between">
+                <span>Worker</span>
+                <span className="font-medium text-gray-700">{run.worker_id || 'Pending assignment'}</span>
+              </div>
+              {startedAtLabel && (
+                <div className="flex items-center justify-between">
+                  <span>Started</span>
+                  <span className="font-medium text-gray-700">{startedAtLabel}</span>
+                </div>
+              )}
+              <p className="text-[11px] text-gray-400">Progress updates are posted once training completes.</p>
             </div>
           )}
           
@@ -140,22 +118,22 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
               {run.results ? (
                 <div className="flex justify-around items-center bg-gray-50 p-3 rounded-lg">
                   <div className="text-center">
-                    <p className="font-bold text-lg">{run.results.mAP || '0.847'}</p>
+                    <p className="font-bold text-lg">{formatMetric(run.results.mAP)}</p>
                     <p className="text-xs text-gray-500">mAP</p>
                   </div>
                   <div className="text-center">
-                    <p className="font-bold text-lg">{run.results.precision || '0.823'}</p>
+                    <p className="font-bold text-lg">{formatMetric(run.results.precision)}</p>
                     <p className="text-xs text-gray-500">Precision</p>
                   </div>
                   <div className="text-center">
-                    <p className="font-bold text-lg">{run.results.recall || '0.856'}</p>
+                    <p className="font-bold text-lg">{formatMetric(run.results.recall)}</p>
                     <p className="text-xs text-gray-500">Recall</p>
                   </div>
                 </div>
               ) : (
                 <div className="bg-green-50 border border-green-200 p-3 rounded-lg text-center">
-                  <p className="text-sm font-medium text-green-800">✅ Training Completed Successfully</p>
-                  <p className="text-xs text-green-600 mt-1">Click "View Results" to see validation metrics</p>
+                  <p className="text-sm font-medium text-green-800">Training Completed Successfully</p>
+                  <p className="text-xs text-green-600 mt-1">Click "View Results" to see metrics and artifacts.</p>
                 </div>
               )}
               
@@ -170,6 +148,12 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
                   View Validation Results
                 </Link>
               </Button>
+            </div>
+          )}
+          
+          {run.status === 'failed' && run.error_message && (
+            <div className="bg-red-50 border border-red-200 p-3 rounded-lg text-xs text-red-700 mb-3">
+              {run.error_message}
             </div>
           )}
 
@@ -227,7 +211,7 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
               Delete
             </Button>
           </div>
-          <p className="text-xs text-gray-400 mt-4">Created: {new Date(run.created_date).toLocaleString()}</p>
+          <p className="text-xs text-gray-400 mt-4">Created: {createdAtLabel}</p>
         </CardContent>
       </Card>
     </motion.div>

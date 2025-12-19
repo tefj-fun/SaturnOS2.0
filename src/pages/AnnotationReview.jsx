@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { TrainingRun } from '@/api/entities';
 import { PredictedAnnotation } from '@/api/entities';
 import { StepImage } from '@/api/entities';
 import { LogicRule } from '@/api/entities';
+import { SOPStep } from '@/api/entities';
+import { createSignedImageUrl, getStoragePathFromUrl } from '@/api/storage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,148 +32,226 @@ import {
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 
-// Mock data for demonstration
-const MOCK_VALIDATION_IMAGES = [
-  { id: 'img1', image_url: 'https://images.unsplash.com/photo-1588336142586-3642324c2f48?w=800', name: 'dashboard_001.jpg' },
-  { id: 'img2', image_url: 'https://images.unsplash.com/photo-1563520239483-199b95d87c33?w=800', name: 'dashboard_002.jpg' },
-  { id: 'img3', image_url: 'https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=800', name: 'dashboard_003.jpg' },
-  { id: 'img4', image_url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800', name: 'dashboard_004.jpg' },
-  { id: 'img5', image_url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800', name: 'dashboard_005.jpg' },
-];
+const BACKGROUND_CLASS = "Background";
+const IOU_THRESHOLD = 0.5;
+const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
 
-const MOCK_PREDICTIONS = {
-  img1: [
-    { id: 'p1', bounding_box: { x: 50, y: 100, width: 120, height: 80 }, predicted_class: 'Button', confidence_score: 0.92, match: 'true_positive' },
-    { id: 'p2', bounding_box: { x: 200, y: 250, width: 100, height: 70 }, predicted_class: 'Label', confidence_score: 0.85, match: 'true_positive' },
-    { id: 'p3', bounding_box: { x: 350, y: 150, width: 90, height: 60 }, predicted_class: 'Checkbox', confidence_score: 0.76, match: 'false_positive' },
-  ],
-  img2: [
-    { id: 'p4', bounding_box: { x: 100, y: 120, width: 150, height: 100 }, predicted_class: 'Input Field', confidence_score: 0.88, match: 'true_positive' },
-    { id: 'p5', bounding_box: { x: 300, y: 200, width: 80, height: 60 }, predicted_class: 'Button', confidence_score: 0.65, match: 'false_positive' },
-  ],
-  img3: [
-    { id: 'p6', bounding_box: { x: 150, y: 180, width: 120, height: 90 }, predicted_class: 'Label', confidence_score: 0.72, match: 'false_positive' },
-  ],
-  img4: [
-    { id: 'p7', bounding_box: { x: 80, y: 150, width: 100, height: 70 }, predicted_class: 'Input Field', confidence_score: 0.81, match: 'true_positive' },
-  ],
-  img5: [
-    { id: 'p8', bounding_box: { x: 120, y: 100, width: 110, height: 80 }, predicted_class: 'Checkbox', confidence_score: 0.89, match: 'true_positive' },
-  ],
-};
-
-const MOCK_GROUND_TRUTH = {
-  img1: [
-    { id: 'gt1', bounding_box: { x: 55, y: 105, width: 120, height: 80 }, class: 'Button' },
-    { id: 'gt2', bounding_box: { x: 205, y: 255, width: 100, height: 70 }, class: 'Label' },
-  ],
-  img2: [
-    { id: 'gt3', bounding_box: { x: 105, y: 125, width: 150, height: 100 }, class: 'Input Field' },
-  ],
-  img3: [
-    { id: 'gt4', bounding_box: { x: 80, y: 200, width: 110, height: 90 }, class: 'Button', match: 'false_negative' },
-  ],
-  img4: [
-    { id: 'gt5', bounding_box: { x: 85, y: 155, width: 100, height: 70 }, class: 'Input Field' },
-  ],
-  img5: [
-    { id: 'gt6', bounding_box: { x: 125, y: 105, width: 110, height: 80 }, class: 'Checkbox' },
-  ],
-};
-
-// Mock logic rule validation results
-const MOCK_LOGIC_RESULTS = [
-  {
-    id: 'rule1',
-    rule_name: 'Exactly 2 Buttons Required',
-    rule_type: 'quantity',
-    condition: 'Button',
-    operator: 'equals',
-    value: '2',
-    pass_rate: 0.60, // 60% of images passed this rule
-    failed_images: ['img2', 'img3'], // Images that failed this rule
-    details: 'Failed because model detected wrong number of buttons'
-  },
-  {
-    id: 'rule2', 
-    rule_name: 'Input Field Must Exist',
-    rule_type: 'quantity',
-    condition: 'Input Field',
-    operator: 'exists',
-    value: '',
-    pass_rate: 0.80,
-    failed_images: ['img3'],
-    details: 'Model missed input fields in some images'
-  },
-  {
-    id: 'rule3',
-    rule_name: 'Label Within Form Area',
-    rule_type: 'spatial',
-    subject_class: 'Label',
-    relationship: 'is_within',
-    target_class: 'Form',
-    coverage: 80,
-    pass_rate: 0.40,
-    failed_images: ['img1', 'img2', 'img5'],
-    details: 'Spatial relationship detection needs improvement'
+const toAnnotationArray = (value) => {
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return toAnnotationArray(parsed);
+    } catch (error) {
+      return [];
+    }
   }
-];
-
-// Generate confusion matrix data with image references
-const generateConfusionMatrixWithImages = () => {
-  const classes = ['Button', 'Input Field', 'Label', 'Checkbox', 'Dropdown'];
-  const confusionData = [];
-  
-  classes.forEach(actualClass => {
-    classes.forEach(predictedClass => {
-      const isCorrect = actualClass === predictedClass;
-      const count = isCorrect ? Math.floor(Math.random() * 25) + 15 : Math.floor(Math.random() * 8) + 1;
-      
-      // Generate mock image references for incorrect predictions
-      const incorrectImages = [];
-      if (!isCorrect && count > 0) {
-        const numIncorrectImages = Math.min(count, 3); // Show up to 3 example images
-        for (let i = 0; i < numIncorrectImages; i++) {
-          incorrectImages.push({
-            id: MOCK_VALIDATION_IMAGES[i % MOCK_VALIDATION_IMAGES.length].id,
-            url: MOCK_VALIDATION_IMAGES[i % MOCK_VALIDATION_IMAGES.length].image_url,
-            name: MOCK_VALIDATION_IMAGES[i % MOCK_VALIDATION_IMAGES.length].name,
-            confidence: Math.random() * 0.4 + 0.3 // Low confidence for incorrect predictions
-          });
-        }
-      }
-      
-      confusionData.push({
-        actual: actualClass,
-        predicted: predictedClass,
-        count,
-        isCorrect,
-        incorrectImages
-      });
-    });
-  });
-  
-  return confusionData;
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value.annotations)) return value.annotations;
+  if (Array.isArray(value.data)) return value.data;
+  return [];
 };
 
-const BoundingBox = ({ box, color, label }) => (
-  <div
-    className={`absolute border-2 ${color}`}
-    style={{
-      left: `${box.x}px`,
-      top: `${box.y}px`,
-      width: `${box.width}px`,
-      height: `${box.height}px`,
-    }}
-  >
-    <div className={`absolute -top-6 left-0 text-xs px-1 rounded-sm ${color.replace('border-', 'bg-').replace('text-white', '')} text-white`}>
-      {label}
+const resolveClassName = (annotation, stepClasses) => {
+  if (!annotation) return "Unlabeled";
+  const direct =
+    annotation.class ??
+    annotation.label ??
+    annotation.predicted_class ??
+    annotation.class_name ??
+    annotation.name;
+  if (direct !== undefined && direct !== null && direct !== "") {
+    return String(direct);
+  }
+  const rawId =
+    annotation.class_id ??
+    annotation.classId ??
+    annotation.classIndex ??
+    annotation.category_id ??
+    annotation.categoryId;
+  const numericId = Number(rawId);
+  if (Number.isFinite(numericId) && Array.isArray(stepClasses)) {
+    return stepClasses[numericId] ?? `Class ${numericId}`;
+  }
+  if (rawId !== undefined && rawId !== null && rawId !== "") {
+    return `Class ${rawId}`;
+  }
+  return "Unlabeled";
+};
+
+const normalizeBoundingBox = (annotation) => {
+  if (!annotation) return null;
+  const bbox = annotation.bounding_box ?? annotation.bbox;
+  if (bbox) {
+    if (Array.isArray(bbox) && bbox.length >= 4) {
+      return { x: bbox[0], y: bbox[1], width: bbox[2], height: bbox[3] };
+    }
+    if (typeof bbox === "object") {
+      const x = bbox.x ?? bbox.left;
+      const y = bbox.y ?? bbox.top;
+      const width = bbox.width ?? bbox.w;
+      const height = bbox.height ?? bbox.h;
+      if ([x, y, width, height].every((value) => Number.isFinite(Number(value)))) {
+        return { x: Number(x), y: Number(y), width: Number(width), height: Number(height) };
+      }
+    }
+  }
+  const hasBoxValues = ["x", "y", "width", "height"].every((key) => annotation[key] !== undefined);
+  if (hasBoxValues) {
+    return {
+      x: Number(annotation.x),
+      y: Number(annotation.y),
+      width: Number(annotation.width),
+      height: Number(annotation.height),
+    };
+  }
+  const points = annotation.points ?? annotation.polygon ?? annotation.segmentation;
+  if (Array.isArray(points) && points.length > 0) {
+    const coords = points.flatMap((point) => {
+      if (Array.isArray(point)) return [{ x: point[0], y: point[1] }];
+      if (point && typeof point === "object") return [point];
+      return [];
+    });
+    if (coords.length) {
+      const xs = coords.map((point) => Number(point.x)).filter(Number.isFinite);
+      const ys = coords.map((point) => Number(point.y)).filter(Number.isFinite);
+      if (xs.length && ys.length) {
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs);
+        const maxY = Math.max(...ys);
+        return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      }
+    }
+  }
+  return null;
+};
+
+const normalizePrediction = (annotation, index, stepClasses, prefix) => {
+  const className = resolveClassName(annotation, stepClasses);
+  const confidence =
+    annotation.confidence ?? annotation.confidence_score ?? annotation.score ?? annotation.probability;
+  const numericConfidence = Number.isFinite(Number(confidence)) ? Number(confidence) : null;
+  const boundingBox = normalizeBoundingBox(annotation);
+  if (!boundingBox) return null;
+  return {
+    id: annotation.id ?? `${prefix}-pred-${index}`,
+    bounding_box: boundingBox,
+    predicted_class: className,
+    confidence_score: numericConfidence ?? 0,
+  };
+};
+
+const normalizeGroundTruth = (annotation, index, stepClasses, prefix) => {
+  const className = resolveClassName(annotation, stepClasses);
+  const boundingBox = normalizeBoundingBox(annotation);
+  if (!boundingBox) return null;
+  return {
+    id: annotation.id ?? `${prefix}-gt-${index}`,
+    bounding_box: boundingBox,
+    class: className,
+  };
+};
+
+const computeIoU = (boxA, boxB) => {
+  if (!boxA || !boxB) return 0;
+  const xA = Math.max(boxA.x, boxB.x);
+  const yA = Math.max(boxA.y, boxB.y);
+  const xB = Math.min(boxA.x + boxA.width, boxB.x + boxB.width);
+  const yB = Math.min(boxA.y + boxA.height, boxB.y + boxB.height);
+  const interWidth = Math.max(0, xB - xA);
+  const interHeight = Math.max(0, yB - yA);
+  const interArea = interWidth * interHeight;
+  const boxAArea = Math.max(0, boxA.width) * Math.max(0, boxA.height);
+  const boxBArea = Math.max(0, boxB.width) * Math.max(0, boxB.height);
+  const union = boxAArea + boxBArea - interArea;
+  if (union <= 0) return 0;
+  return interArea / union;
+};
+
+const evaluateImage = (predictions, groundTruths) => {
+  const preds = predictions.map((pred) => ({ ...pred }));
+  const gts = groundTruths.map((gt) => ({ ...gt }));
+  const matchedGroundTruths = new Set();
+
+  preds.forEach((pred) => {
+    let bestMatchIndex = -1;
+    let bestIoU = 0;
+    gts.forEach((gt, idx) => {
+      if (matchedGroundTruths.has(idx)) return;
+      const iou = computeIoU(pred.bounding_box, gt.bounding_box);
+      if (iou > bestIoU) {
+        bestIoU = iou;
+        bestMatchIndex = idx;
+      }
+    });
+
+    if (bestMatchIndex >= 0 && bestIoU >= IOU_THRESHOLD) {
+      const matchedGt = gts[bestMatchIndex];
+      matchedGroundTruths.add(bestMatchIndex);
+      pred.matched_ground_truth = matchedGt;
+      pred.match =
+        pred.predicted_class === matchedGt.class ? "true_positive" : "false_positive";
+      matchedGt.matched_prediction = pred;
+      matchedGt.match =
+        pred.predicted_class === matchedGt.class ? "true_positive" : "false_negative";
+    } else {
+      pred.match = "false_positive";
+    }
+  });
+
+  gts.forEach((gt) => {
+    if (!gt.match) {
+      gt.match = "false_negative";
+    }
+  });
+
+  return { predictions: preds, groundTruths: gts };
+};
+
+const resolveImageUrl = async (image) => {
+  if (!image) return null;
+  const fallbackUrl = image.display_url || image.image_url || image.thumbnail_url || "";
+  if (!fallbackUrl) return null;
+  const path = getStoragePathFromUrl(fallbackUrl, STEP_IMAGES_BUCKET);
+  if (!path) return fallbackUrl;
+  try {
+    const signed = await createSignedImageUrl(STEP_IMAGES_BUCKET, path, { expiresIn: 3600 });
+    return signed || fallbackUrl;
+  } catch (error) {
+    return fallbackUrl;
+  }
+};
+
+const BoundingBox = ({ box, color, label, scaleX = 1, scaleY = 1 }) => {
+  const scaled = {
+    x: box.x * scaleX,
+    y: box.y * scaleY,
+    width: box.width * scaleX,
+    height: box.height * scaleY,
+  };
+  return (
+    <div
+      className={`absolute border-2 ${color}`}
+      style={{
+        left: `${scaled.x}px`,
+        top: `${scaled.y}px`,
+        width: `${scaled.width}px`,
+        height: `${scaled.height}px`,
+      }}
+    >
+      <div className={`absolute -top-6 left-0 text-xs px-1 rounded-sm ${color.replace('border-', 'bg-').replace('text-white', '')} text-white`}>
+        {label}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const InteractiveConfusionMatrix = ({ data, classes, onCellClick }) => {
-  const maxCount = Math.max(...data.map(d => d.count));
+  if (!classes.length) {
+    return <p className="text-sm text-gray-500 text-center">No classification data available yet.</p>;
+  }
+  const maxCount = Math.max(1, ...data.map(d => d.count));
   
   return (
     <div className="w-full">
@@ -270,28 +350,43 @@ const ImageErrorDialog = ({ cell, open, onClose }) => {
   );
 };
 
-const LogicRuleCard = ({ rule }) => {
-  const passRate = Math.round(rule.pass_rate * 100);
-  const isGoodPerformance = passRate >= 80;
-  const isOkPerformance = passRate >= 60;
+const LogicRuleCard = ({ rule, imageLookup, totalImages }) => {
+  const passRateValue = Number.isFinite(Number(rule.pass_rate))
+    ? Number(rule.pass_rate)
+    : null;
+  const passRate = passRateValue === null ? null : Math.round(passRateValue * 100);
+  const isGoodPerformance = passRate !== null && passRate >= 80;
+  const isOkPerformance = passRate !== null && passRate >= 60;
+  const failedImages = Array.isArray(rule.failed_images) ? rule.failed_images : [];
+  const totalCount = Number.isFinite(Number(totalImages)) ? Number(totalImages) : 0;
+  const summaryLabel = passRate === null ? "Not evaluated" : `${passRate}% Pass Rate`;
+  const ruleDetails =
+    rule.details ||
+    rule.description ||
+    rule.condition ||
+    rule.operator ||
+    rule.rule_type ||
+    "No evaluation data available yet.";
   
   return (
     <Card className={`border-l-4 ${
       isGoodPerformance ? 'border-l-green-500 bg-green-50' : 
       isOkPerformance ? 'border-l-yellow-500 bg-yellow-50' : 
-      'border-l-red-500 bg-red-50'
+      passRate === null ? 'border-l-slate-400 bg-slate-50' : 'border-l-red-500 bg-red-50'
     }`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold">{rule.rule_name}</CardTitle>
           <div className="flex items-center gap-2">
-            {isGoodPerformance ? (
+            {passRate === null ? (
+              <AlertTriangle className="w-5 h-5 text-slate-500" />
+            ) : isGoodPerformance ? (
               <CheckCircle2 className="w-5 h-5 text-green-600" />
             ) : (
               <XCircle className="w-5 h-5 text-red-600" />
             )}
             <Badge variant={isGoodPerformance ? "default" : "destructive"} className="bg-white">
-              {passRate}% Pass Rate
+              {summaryLabel}
             </Badge>
           </div>
         </div>
@@ -300,35 +395,37 @@ const LogicRuleCard = ({ rule }) => {
         <div className="space-y-3">
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Performance</span>
-            <span className={`font-medium ${isGoodPerformance ? 'text-green-700' : isOkPerformance ? 'text-yellow-700' : 'text-red-700'}`}>
-              {rule.failed_images.length}/{MOCK_VALIDATION_IMAGES.length} images failed
+            <span className={`font-medium ${isGoodPerformance ? 'text-green-700' : isOkPerformance ? 'text-yellow-700' : passRate === null ? 'text-slate-600' : 'text-red-700'}`}>
+              {passRate === null ? "Not evaluated" : `${failedImages.length}/${totalCount} images failed`}
             </span>
           </div>
-          <Progress 
-            value={passRate} 
-            className={`h-2 ${
-              isGoodPerformance ? '[&>div]:bg-green-600' : 
-              isOkPerformance ? '[&>div]:bg-yellow-600' : 
-              '[&>div]:bg-red-600'
-            }`} 
-          />
-          <p className="text-sm text-gray-600">{rule.details}</p>
+          {passRate !== null && (
+            <Progress 
+              value={passRate} 
+              className={`h-2 ${
+                isGoodPerformance ? '[&>div]:bg-green-600' : 
+                isOkPerformance ? '[&>div]:bg-yellow-600' : 
+                '[&>div]:bg-red-600'
+              }`} 
+            />
+          )}
+          <p className="text-sm text-gray-600">{ruleDetails}</p>
           
-          {rule.failed_images.length > 0 && (
+          {failedImages.length > 0 && (
             <div className="mt-3">
               <p className="text-sm font-medium text-gray-700 mb-2">Failed on images:</p>
               <div className="flex flex-wrap gap-1">
-                {rule.failed_images.slice(0, 3).map(imageId => {
-                  const image = MOCK_VALIDATION_IMAGES.find(img => img.id === imageId);
+                {failedImages.slice(0, 3).map(imageId => {
+                  const image = imageLookup[imageId];
                   return image ? (
                     <Badge key={imageId} variant="outline" className="text-xs">
                       {image.name}
                     </Badge>
                   ) : null;
                 })}
-                {rule.failed_images.length > 3 && (
+                {failedImages.length > 3 && (
                   <Badge variant="outline" className="text-xs">
-                    +{rule.failed_images.length - 3} more
+                    +{failedImages.length - 3} more
                   </Badge>
                 )}
               </div>
@@ -342,6 +439,7 @@ const LogicRuleCard = ({ rule }) => {
 
 export default function AnnotationReviewPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [trainingRun, setTrainingRun] = useState(null);
   const [validationImages, setValidationImages] = useState([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -349,30 +447,224 @@ export default function AnnotationReviewPage() {
   const [groundTruths, setGroundTruths] = useState({});
   const [logicResults, setLogicResults] = useState([]);
   const [confusionMatrix, setConfusionMatrix] = useState([]);
+  const [confusionClasses, setConfusionClasses] = useState([]);
   const [selectedCell, setSelectedCell] = useState(null);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const imageRef = useRef(null);
+  const [imageScale, setImageScale] = useState({
+    naturalWidth: 0,
+    naturalHeight: 0,
+    displayWidth: 0,
+    displayHeight: 0,
+  });
+
+  const runId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('runId');
+  }, [location.search]);
 
   useEffect(() => {
-    // In a real app, you would fetch this data based on the runId from the URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const runId = urlParams.get('runId');
-    if (runId) {
-      // Simulate fetching run data
-      TrainingRun.filter({ id: runId }).then(runs => {
-        if (runs.length > 0) setTrainingRun(runs[0]);
-      });
-      // Set mock data
-      setValidationImages(MOCK_VALIDATION_IMAGES);
-      setPredictions(MOCK_PREDICTIONS);
-      setGroundTruths(MOCK_GROUND_TRUTH);
-      setLogicResults(MOCK_LOGIC_RESULTS);
-      setConfusionMatrix(generateConfusionMatrixWithImages());
-    }
-  }, []);
+    let cancelled = false;
+
+    const loadReviewData = async () => {
+      if (!runId) {
+        setLoadError("Missing training run id.");
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setLoadError(null);
+
+      try {
+        const runs = await TrainingRun.filter({ id: runId });
+        if (!runs.length) {
+          throw new Error("Training run not found.");
+        }
+        const run = runs[0];
+        const [steps, stepImages, predictedRows, logicRules] = await Promise.all([
+          SOPStep.filter({ id: run.step_id }),
+          StepImage.filter({ step_id: run.step_id }),
+          PredictedAnnotation.filter({ run_id: runId }),
+          LogicRule.filter({ step_id: run.step_id }),
+        ]);
+
+        const stepRecord = steps[0] || null;
+        const stepClasses = Array.isArray(stepRecord?.classes) ? stepRecord.classes : [];
+
+        const sortedImages = [...(stepImages || [])].sort((a, b) => {
+          const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return aTime - bTime;
+        });
+
+        const isValidationGroup = (group) => {
+          const normalized = String(group || "").toLowerCase();
+          if (!normalized) return false;
+          return normalized !== "training" && normalized !== "train";
+        };
+
+        let validationSet = sortedImages.filter((image) => isValidationGroup(image.image_group));
+        if (!validationSet.length) {
+          validationSet = sortedImages;
+        }
+        const validationSetWithUrls = await Promise.all(
+          validationSet.map(async (image) => {
+            const resolved_url = await resolveImageUrl(image);
+            return {
+              ...image,
+              resolved_url,
+            };
+          })
+        );
+
+        const predictionsByImage = {};
+        (predictedRows || []).forEach((row) => {
+          if (!row?.step_image_id) return;
+          const rawList = toAnnotationArray(row.annotations);
+          const normalized = rawList
+            .map((annotation, index) => normalizePrediction(annotation, index, stepClasses, row.id))
+            .filter(Boolean);
+          if (!predictionsByImage[row.step_image_id]) {
+            predictionsByImage[row.step_image_id] = [];
+          }
+          predictionsByImage[row.step_image_id].push(...normalized);
+        });
+
+        const groundTruthByImage = {};
+        validationSetWithUrls.forEach((image) => {
+          const rawList = toAnnotationArray(image.annotations);
+          groundTruthByImage[image.id] = rawList
+            .map((annotation, index) => normalizeGroundTruth(annotation, index, stepClasses, image.id))
+            .filter(Boolean);
+        });
+
+        const evaluatedPredictions = {};
+        const evaluatedGroundTruths = {};
+        const classSet = new Set();
+        const confusionCounts = new Map();
+        let hasBackground = false;
+
+        const addConfusionEntry = (actual, predicted, image, confidence) => {
+          const key = `${actual}||${predicted}`;
+          const entry = confusionCounts.get(key) || {
+            actual,
+            predicted,
+            count: 0,
+            incorrectImages: [],
+          };
+          entry.count += 1;
+          if (actual !== predicted && image && entry.incorrectImages.length < 3) {
+              entry.incorrectImages.push({
+                id: image.id,
+                url: image.resolved_url || image.display_url || image.image_url || image.thumbnail_url,
+                name: image.image_name || image.name || image.image_url?.split("/").pop(),
+                confidence: Number.isFinite(Number(confidence)) ? Number(confidence) : 0,
+              });
+            }
+          confusionCounts.set(key, entry);
+        };
+
+        validationSetWithUrls.forEach((image) => {
+          const preds = predictionsByImage[image.id] || [];
+          const gts = groundTruthByImage[image.id] || [];
+          const { predictions: matchedPreds, groundTruths: matchedGts } = evaluateImage(preds, gts);
+
+          evaluatedPredictions[image.id] = matchedPreds;
+          evaluatedGroundTruths[image.id] = matchedGts;
+
+          matchedPreds.forEach((pred) => {
+            const actual = pred.matched_ground_truth ? pred.matched_ground_truth.class : BACKGROUND_CLASS;
+            const predicted = pred.predicted_class;
+            if (!pred.matched_ground_truth) {
+              hasBackground = true;
+            }
+            if (!predicted) return;
+            classSet.add(predicted);
+            if (actual) classSet.add(actual);
+            addConfusionEntry(actual, predicted, image, pred.confidence_score);
+          });
+
+          matchedGts.forEach((gt) => {
+            if (gt.match === "false_negative") {
+              hasBackground = true;
+              classSet.add(gt.class);
+              addConfusionEntry(gt.class, BACKGROUND_CLASS, image, 0);
+            }
+          });
+        });
+
+        if (hasBackground) {
+          classSet.add(BACKGROUND_CLASS);
+        }
+
+        const classes = Array.from(classSet).filter(Boolean);
+        if (classes.includes(BACKGROUND_CLASS)) {
+          classes.sort((a, b) => (a === BACKGROUND_CLASS ? 1 : b === BACKGROUND_CLASS ? -1 : a.localeCompare(b)));
+        } else {
+          classes.sort((a, b) => a.localeCompare(b));
+        }
+
+        const confusionData = [];
+        classes.forEach((actual) => {
+          classes.forEach((predicted) => {
+            const entry = confusionCounts.get(`${actual}||${predicted}`);
+            confusionData.push({
+              actual,
+              predicted,
+              count: entry ? entry.count : 0,
+              isCorrect: actual === predicted,
+              incorrectImages: entry ? entry.incorrectImages : [],
+            });
+          });
+        });
+
+        const normalizedLogicRules = (logicRules || []).map((rule) => ({
+          ...rule,
+          pass_rate: Number.isFinite(Number(rule.pass_rate)) ? Number(rule.pass_rate) : null,
+          failed_images: Array.isArray(rule.failed_images) ? rule.failed_images : [],
+        }));
+
+        if (cancelled) return;
+        setTrainingRun(run);
+        setValidationImages(validationSetWithUrls);
+        setPredictions(evaluatedPredictions);
+        setGroundTruths(evaluatedGroundTruths);
+        setLogicResults(normalizedLogicRules);
+        setConfusionMatrix(confusionData);
+        setConfusionClasses(classes);
+        setCurrentImageIndex(0);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to load validation data:", error);
+          setLoadError("Unable to load validation data.");
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    loadReviewData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
 
   const currentImage = validationImages[currentImageIndex];
   const currentPredictions = currentImage ? predictions[currentImage.id] || [] : [];
   const currentGroundTruths = currentImage ? groundTruths[currentImage.id] || [] : [];
+  const imageLookup = useMemo(() => (
+    validationImages.reduce((acc, image) => {
+      acc[image.id] = {
+        id: image.id,
+        name: image.image_name || image.name || image.image_url?.split("/").pop() || image.id,
+      };
+      return acc;
+    }, {})
+  ), [validationImages]);
 
   const goToNextImage = () => setCurrentImageIndex(prev => Math.min(prev + 1, validationImages.length - 1));
   const goToPrevImage = () => setCurrentImageIndex(prev => Math.max(prev - 1, 0));
@@ -384,12 +676,83 @@ export default function AnnotationReviewPage() {
     }
   };
 
-  const overallLogicPassRate = logicResults.length > 0 
-    ? Math.round((logicResults.reduce((sum, rule) => sum + rule.pass_rate, 0) / logicResults.length) * 100)
-    : 0;
+  const evaluatedLogicRules = logicResults.filter((rule) =>
+    Number.isFinite(Number(rule.pass_rate))
+  );
+  const overallLogicPassRate = evaluatedLogicRules.length > 0
+    ? Math.round(
+        (evaluatedLogicRules.reduce((sum, rule) => sum + Number(rule.pass_rate), 0) / evaluatedLogicRules.length) *
+          100
+      )
+    : null;
 
-  if (!trainingRun || !currentImage) {
+  const currentImageUrl = currentImage
+    ? (currentImage.resolved_url || currentImage.display_url || currentImage.image_url || currentImage.thumbnail_url)
+    : "";
+  const scaleX = imageScale.naturalWidth ? imageScale.displayWidth / imageScale.naturalWidth : 1;
+  const scaleY = imageScale.naturalHeight ? imageScale.displayHeight / imageScale.naturalHeight : 1;
+  const updateImageScale = useCallback(() => {
+    if (!imageRef.current) return;
+    const rect = imageRef.current.getBoundingClientRect();
+    setImageScale((prev) => ({
+      ...prev,
+      displayWidth: rect.width,
+      displayHeight: rect.height,
+    }));
+  }, []);
+  const handleImageLoad = useCallback((event) => {
+    const { naturalWidth, naturalHeight } = event.currentTarget;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setImageScale({
+      naturalWidth,
+      naturalHeight,
+      displayWidth: rect.width,
+      displayHeight: rect.height,
+    });
+  }, []);
+
+  useEffect(() => {
+    updateImageScale();
+  }, [currentImageUrl, updateImageScale]);
+
+  useEffect(() => {
+    const handleResize = () => updateImageScale();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [updateImageScale]);
+
+  if (isLoading) {
     return <div className="flex items-center justify-center h-screen">Loading validation results...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center space-y-3">
+          <p className="text-sm text-gray-600">{loadError}</p>
+          <Button onClick={() => navigate(createPageUrl('TrainingConfiguration'))}>
+            Back to Training
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!trainingRun) {
+    return <div className="flex items-center justify-center h-screen">Training run not found.</div>;
+  }
+
+  if (!currentImage) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center space-y-2">
+          <p className="text-sm text-gray-600">No validation images available for this run.</p>
+          <Button onClick={() => navigate(createPageUrl(`TrainingStatus?runId=${trainingRun.id}`))}>
+            Back to Training Status
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const truePositives = currentPredictions.filter(p => p.match === 'true_positive').length;
@@ -399,7 +762,7 @@ export default function AnnotationReviewPage() {
   const precision = (truePositives + falsePositives) > 0 ? (truePositives / (truePositives + falsePositives)) * 100 : 0;
   const recall = totalGroundTruth > 0 ? (truePositives / totalGroundTruth) * 100 : 0;
 
-  const classes = ['Button', 'Input Field', 'Label', 'Checkbox', 'Dropdown'];
+  const classes = confusionClasses.length ? confusionClasses : [BACKGROUND_CLASS];
 
   return (
     <div className="h-screen w-full flex flex-col bg-gray-100">
@@ -420,8 +783,16 @@ export default function AnnotationReviewPage() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <Badge className={`${overallLogicPassRate >= 80 ? 'bg-green-100 text-green-800' : overallLogicPassRate >= 60 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-              Logic Compliance: {overallLogicPassRate}%
+            <Badge className={`${
+              overallLogicPassRate === null
+                ? 'bg-slate-100 text-slate-700'
+                : overallLogicPassRate >= 80
+                  ? 'bg-green-100 text-green-800'
+                  : overallLogicPassRate >= 60
+                    ? 'bg-yellow-100 text-yellow-800'
+                    : 'bg-red-100 text-red-800'
+            }`}>
+              Logic Compliance: {overallLogicPassRate === null ? 'N/A' : `${overallLogicPassRate}%`}
             </Badge>
             <Button
               onClick={() => navigate(createPageUrl(`AnnotationStudio?projectId=${trainingRun.project_id}`))}
@@ -467,7 +838,12 @@ export default function AnnotationReviewPage() {
               <ScrollArea className="flex-1">
                 <div className="space-y-4 pr-4">
                   {logicResults.map((rule) => (
-                    <LogicRuleCard key={rule.id} rule={rule} />
+                    <LogicRuleCard
+                      key={rule.id}
+                      rule={rule}
+                      imageLookup={imageLookup}
+                      totalImages={validationImages.length}
+                    />
                   ))}
                   
                   {logicResults.length === 0 && (
@@ -521,11 +897,24 @@ export default function AnnotationReviewPage() {
                   </Button>
                 </div>
                 
-                <div className="relative">
-                  <img src={currentImage.image_url} alt="Validation" className="max-h-[85vh] max-w-[70vw] object-contain rounded" />
+                <div className="relative inline-block">
+                  <img
+                    ref={imageRef}
+                    src={currentImageUrl}
+                    alt="Validation"
+                    onLoad={handleImageLoad}
+                    className="max-h-[85vh] max-w-[70vw] object-contain rounded"
+                  />
                   {/* Ground Truth Boxes */}
                   {currentGroundTruths.map(gt => (
-                    <BoundingBox key={gt.id} box={gt.bounding_box} color="border-green-500" label={`GT: ${gt.class}`} />
+                    <BoundingBox
+                      key={gt.id}
+                      box={gt.bounding_box}
+                      color="border-green-500"
+                      label={`GT: ${gt.class}`}
+                      scaleX={scaleX}
+                      scaleY={scaleY}
+                    />
                   ))}
                   {/* Prediction Boxes */}
                   {currentPredictions.map(p => (
@@ -534,6 +923,8 @@ export default function AnnotationReviewPage() {
                       box={p.bounding_box}
                       color={p.match === 'true_positive' ? 'border-blue-500' : 'border-red-500'}
                       label={`Pred: ${p.predicted_class} (${(p.confidence_score * 100).toFixed(0)}%)`}
+                      scaleX={scaleX}
+                      scaleY={scaleY}
                     />
                   ))}
                 </div>
