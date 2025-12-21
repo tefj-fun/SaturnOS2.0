@@ -6,7 +6,6 @@ import { BuildVariant, StepVariantConfig } from "@/api/entities";
 import { createSignedImageUrl, getStoragePathFromUrl } from "@/api/storage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -17,12 +16,15 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   ArrowLeft,
   PenTool,
@@ -73,15 +75,22 @@ export default function AnnotationStudioPage() {
   const [logicRules, setLogicRules] = useState([]);
   const [stepImages, setStepImages] = useState([]);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [hasLoadedImages, setHasLoadedImages] = useState(false);
+  const [isInitialImageReady, setIsInitialImageReady] = useState(false);
   const [showStepsPopup, setShowStepsPopup] = useState(false);
   const [brushSize, setBrushSize] = useState(10);
   const canvasRef = useRef(null);
   const initialStepAppliedRef = useRef(false);
   const initialImageAppliedRef = useRef(false);
+  const classPromptedStepsRef = useRef(new Set());
+  const [showClassImportPrompt, setShowClassImportPrompt] = useState(false);
+  const [pendingClassNames, setPendingClassNames] = useState([]);
 
   const [selectedBuildVariant, setSelectedBuildVariant] = useState(null);
   const [buildVariants, setBuildVariants] = useState([]);
   const [currentStepConfig, setCurrentStepConfig] = useState(null);
+  const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
+  const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
   const isCopilotAllowed = activeTab !== 'images' && activeTab !== 'insights';
   const sopFilename = useMemo(() => {
     if (!project?.sop_file_url) return "sop.pdf";
@@ -105,6 +114,25 @@ export default function AnnotationStudioPage() {
       ? image.annotations
       : (image?.annotations?.annotations || []);
     return imageAnnotations.length > 0;
+  }, []);
+
+  const inferClassesFromImages = useCallback((images) => {
+    const seen = new Set();
+    const inferred = [];
+    images.forEach((image) => {
+      const annotations = Array.isArray(image?.annotations)
+        ? image.annotations
+        : (image?.annotations?.annotations || []);
+      annotations.forEach((annotation) => {
+        if (!annotation || typeof annotation !== "object") return;
+        const rawName = annotation.class || annotation.label || annotation.class_name || annotation.name;
+        const name = typeof rawName === "string" ? rawName.trim() : "";
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        inferred.push(name);
+      });
+    });
+    return inferred;
   }, []);
 
   const imageProgress = useMemo(() => {
@@ -240,26 +268,36 @@ export default function AnnotationStudioPage() {
     setLogicRules([]);
   }, [currentStep]);
 
-  const loadStepImages = useCallback(async () => {
+  const loadStepImages = useCallback(async (options = {}) => {
     if (!currentStep) return;
+    const { preserveIndex = false, resetLoading = true } = options;
+    if (resetLoading) {
+      setHasLoadedImages(false);
+      setIsInitialImageReady(false);
+    }
     try {
       const images = await listStepImages(currentStep.id);
       const signedImages = await Promise.all(
         images.map(async (image) => {
           const baseUrl = image.image_url || image.display_url || image.thumbnail_url;
-          const path = getStoragePathFromUrl(baseUrl, "step-images");
+          let bucket = STEP_IMAGES_BUCKET;
+          let path = getStoragePathFromUrl(baseUrl, STEP_IMAGES_BUCKET);
+          if (!path) {
+            bucket = DATASET_BUCKET;
+            path = getStoragePathFromUrl(baseUrl, DATASET_BUCKET);
+          }
           if (!path) return image;
 
           const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
-            createSignedImageUrl("step-images", path, {
+            createSignedImageUrl(bucket, path, {
               expiresIn: 3600,
               transform: { width: 300, height: 300, resize: "cover" },
             }),
-            createSignedImageUrl("step-images", path, {
+            createSignedImageUrl(bucket, path, {
               expiresIn: 3600,
               transform: { width: 1200, resize: "contain" },
             }),
-            createSignedImageUrl("step-images", path, { expiresIn: 3600 }),
+            createSignedImageUrl(bucket, path, { expiresIn: 3600 }),
           ]);
 
           return {
@@ -273,12 +311,47 @@ export default function AnnotationStudioPage() {
       );
 
       setStepImages(signedImages);
-      setCurrentImageIndex(0);
+      if (preserveIndex) {
+        setCurrentImageIndex(prevIndex => {
+          if (!signedImages.length) return 0;
+          return Math.min(prevIndex, signedImages.length - 1);
+        });
+      } else {
+        setCurrentImageIndex(0);
+      }
+      setHasLoadedImages(true);
+      if (!signedImages.length) {
+        setIsInitialImageReady(true);
+      }
     } catch (error) {
       console.error("Error loading step images:", error);
       setStepImages([]);
+      setHasLoadedImages(true);
+      setIsInitialImageReady(true);
     }
   }, [currentStep]);
+
+  useEffect(() => {
+    const imageUrl = stepImages[currentImageIndex]?.image_url;
+    if (!imageUrl) {
+      if (stepImages.length > 0) {
+        setIsInitialImageReady(true);
+      }
+      return;
+    }
+    let isActive = true;
+    const image = new Image();
+    image.onload = () => {
+      if (isActive) setIsInitialImageReady(true);
+    };
+    image.onerror = () => {
+      if (isActive) setIsInitialImageReady(true);
+    };
+    image.src = imageUrl;
+    return () => {
+      isActive = false;
+    };
+  }, [stepImages, currentImageIndex]);
 
   const initializeAIGuidance = useCallback(async () => {
     if (!effectiveStepConfig || !effectiveStepConfig.classes) return;
@@ -443,6 +516,20 @@ export default function AnnotationStudioPage() {
   }, [currentStep, imageProgress]);
 
   useEffect(() => {
+    if (!currentStep || !stepImages.length) return;
+    const stepId = currentStep.id;
+    if (!stepId || classPromptedStepsRef.current.has(stepId)) return;
+    const currentClasses = (currentStep.classes || []).filter(Boolean);
+    if (currentClasses.length > 0) return;
+
+    const inferred = inferClassesFromImages(stepImages);
+    if (!inferred.length) return;
+    classPromptedStepsRef.current.add(stepId);
+    setPendingClassNames(inferred);
+    setShowClassImportPrompt(true);
+  }, [currentStep, stepImages, inferClassesFromImages]);
+
+  useEffect(() => {
     if (!projectId) return;
     const stepId = steps[currentStepIndex]?.id;
     const imageId = stepImages[currentImageIndex]?.id;
@@ -551,15 +638,38 @@ export default function AnnotationStudioPage() {
     await loadLogicRules();
   };
 
-  const handleImagesUpdate = async () => {
-    await loadStepImages();
-  };
+  const handleImagesUpdate = useCallback(async () => {
+    await loadStepImages({ preserveIndex: true, resetLoading: false });
+  }, [loadStepImages]);
 
   const handleImageSaved = useCallback((imageId, updates) => {
     setStepImages(prev =>
       prev.map(image => (image.id === imageId ? { ...image, ...updates } : image))
     );
   }, []);
+
+  const handleInitialImageLoaded = useCallback(() => {
+    setIsInitialImageReady(true);
+  }, []);
+
+  const handleImportClasses = useCallback(async () => {
+    if (!currentStep || !pendingClassNames.length) {
+      setShowClassImportPrompt(false);
+      return;
+    }
+    try {
+      await updateStep(currentStep.id, { classes: pendingClassNames });
+      setSteps(prev =>
+        prev.map(step =>
+          step.id === currentStep.id ? { ...step, classes: pendingClassNames } : step
+        )
+      );
+    } catch (error) {
+      console.error("Error importing classes:", error);
+    } finally {
+      setShowClassImportPrompt(false);
+    }
+  }, [currentStep, pendingClassNames]);
   
   const saveAndRun = async (action) => {
     if (canvasRef.current?.saveCurrentAnnotations) {
@@ -610,21 +720,23 @@ export default function AnnotationStudioPage() {
   }, [sopSignedUrl, project?.sop_file_url, isSopLoading, sopFilename]);
 
 
-  const getProgress = () => {
-    if (steps.length === 0) return 0;
-    const completedSteps = steps.filter(step => step.is_annotated).length;
-    return Math.round((completedSteps / steps.length) * 100);
-  };
-
   const currentImage = stepImages[currentImageIndex];
+  const shouldBlockInitialLoad =
+    steps.length > 0 && (!hasLoadedImages || (!isInitialImageReady && stepImages.length > 0));
+  const isInitialLoading = isLoading || shouldBlockInitialLoad;
+  const loadingTitle = isLoading ? "Loading annotation studio..." : "Loading first image...";
+  const loadingSubtitle = isLoading ? "Preparing project steps and images" : "Setting up the first canvas";
 
-  if (isLoading) {
+  if (isInitialLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-12 h-12 mx-auto mb-4 animate-spin">
-          <Target className="w-12 h-12 text-blue-600" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+            <Target className="w-8 h-8 animate-pulse text-blue-600" />
+          </div>
+          <p className="text-gray-700 font-medium">{loadingTitle}</p>
+          <p className="text-sm text-gray-500 mt-1">{loadingSubtitle}</p>
         </div>
-        <p className="text-gray-600">Loading annotation studio...</p>
       </div>
     );
   }
@@ -649,28 +761,6 @@ export default function AnnotationStudioPage() {
                 {project?.name} - Annotation Studio
               </h1>
               <div className="flex items-center gap-4 mt-1">
-                 {/* Build Variant Selector */}
-                 {buildVariants.length > 0 && (
-                    <Select 
-                      value={selectedBuildVariant?.id || ""} 
-                      onValueChange={(variantId) => {
-                        const variant = buildVariants.find(v => v.id === variantId);
-                        setSelectedBuildVariant(variant);
-                      }}
-                    >
-                      <SelectTrigger className="w-48 h-7">
-                        <SelectValue placeholder="Select build variant" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {buildVariants.map(variant => (
-                          <SelectItem key={variant.id} value={variant.id}>
-                            {variant.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                 )}
-                 
                  <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" className="h-7 w-7" onClick={goToPrevStep} disabled={currentStepIndex === 0}>
                         <ChevronLeft className="w-4 h-4" />
@@ -688,10 +778,6 @@ export default function AnnotationStudioPage() {
                     </Button>
                  </div>
 
-                <Progress value={getProgress()} className="w-32 h-2 [&>div]:bg-blue-600" />
-                <span className="text-sm font-medium text-gray-700">
-                  {getProgress()}%
-                </span>
                 
                 {/* Show active configuration info */}
                 {currentStepConfig && (
@@ -796,6 +882,7 @@ export default function AnnotationStudioPage() {
                         currentImage={currentImage}
                         annotationMode={annotationMode}
                         activeClass={activeClass}
+                        onActiveClassChange={setActiveClass}
                         projectId={projectId}
                         onNextImage={() => handleImageIndexChange(Math.min(currentImageIndex + 1, stepImages.length - 1))}
                         onPrevImage={() => handleImageIndexChange(Math.max(currentImageIndex - 1, 0))}
@@ -805,6 +892,7 @@ export default function AnnotationStudioPage() {
                         stepImages={stepImages}
                         onImageIndexChange={handleImageIndexChange}
                         onImageSaved={handleImageSaved}
+                        onImageLoaded={handleInitialImageLoaded}
                     />
                 </TabsContent>
                 <TabsContent value="logic" className="h-full m-0">
@@ -851,11 +939,8 @@ export default function AnnotationStudioPage() {
                   currentStep={effectiveStepConfig} // Used effective config
                   onAnnotationModeChange={setAnnotationMode}
                   annotationMode={annotationMode}
-                  activeClass={activeClass}
-                  onActiveClassChange={setActiveClass}
                   brushSize={brushSize}
                   onBrushSizeChange={setBrushSize}
-                  projectId={projectId}
                 />
               </motion.aside>
             )}
@@ -881,6 +966,23 @@ export default function AnnotationStudioPage() {
         </div>
       </DialogContent>
     </Dialog>
+    <AlertDialog open={showClassImportPrompt} onOpenChange={setShowClassImportPrompt}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Import classes from annotations?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This step has no classes configured, but annotations contain the following classes:
+            {pendingClassNames.length ? ` ${pendingClassNames.join(", ")}` : ""}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Not now</AlertDialogCancel>
+          <AlertDialogAction onClick={handleImportClasses}>
+            Add classes
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }

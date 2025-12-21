@@ -28,7 +28,11 @@ const callOpenAI = async ({
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`LLM proxy error ${response.status}: ${text}`);
+    const hint =
+      response.status === 404
+        ? " (LLM proxy not found. Run `netlify dev` or set VITE_OPENAI_PROXY_URL.)"
+        : "";
+    throw new Error(`LLM proxy error ${response.status}: ${text}${hint}`);
   }
 
   const data = await response.json();

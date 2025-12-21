@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,6 +8,8 @@ import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info, Sparkles, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,7 +18,7 @@ import { listStepImages } from '@/api/db';
 import { createSignedImageUrl, getStoragePathFromUrl, uploadToSupabaseStorage } from '@/api/storage';
 
 const TooltipLabel = ({ children, tooltipText }) => (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 mb-1.5">
         <Label>{children}</Label>
         <TooltipProvider delayDuration={100}>
             <Tooltip>
@@ -45,11 +47,66 @@ const computeOptions = [
   { value: 'cpu', label: 'CPU', description: 'Much slower, useful for debugging.' },
 ];
 
-export default function StartTrainingDialog({ open, onOpenChange, onSubmit, stepId, stepTitle, existingRuns, stepData }) {
+const presetOptions = [
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    description: 'Best overall tradeoff for most projects.',
+    summary: '100 epochs, batch 16, img 640, lr 0.001, Adam, GPU.',
+    config: { epochs: 100, batchSize: 16, imgSize: 640, learningRate: 0.001, optimizer: 'Adam', compute: 'gpu' }
+  },
+  {
+    value: 'fast',
+    label: 'Fast',
+    description: 'Shorter training, faster iteration.',
+    summary: '40 epochs, batch 32, img 640, lr 0.001, Adam, GPU.',
+    config: { epochs: 40, batchSize: 32, imgSize: 640, learningRate: 0.001, optimizer: 'Adam', compute: 'gpu' }
+  },
+  {
+    value: 'high_accuracy',
+    label: 'High Accuracy',
+    description: 'Longer training, higher accuracy targets.',
+    summary: '150 epochs, batch 16, img 1280, lr 0.0008, AdamW, GPU.',
+    config: { epochs: 150, batchSize: 16, imgSize: 1280, learningRate: 0.0008, optimizer: 'AdamW', compute: 'gpu' }
+  },
+  {
+    value: 'edge_cpu',
+    label: 'Edge/CPU',
+    description: 'CPU-friendly baseline for edge testing.',
+    summary: '60 epochs, batch 8, img 320, lr 0.001, SGD, CPU.',
+    config: { epochs: 60, batchSize: 8, imgSize: 320, learningRate: 0.001, optimizer: 'SGD', compute: 'cpu' }
+  },
+];
+
+const DATASET_EXPORT_CONCURRENCY = Math.max(
+    1,
+    Number(import.meta.env.VITE_DATASET_EXPORT_CONCURRENCY || import.meta.env.VITE_UPLOAD_CONCURRENCY) || 4
+);
+
+const runWithConcurrency = async (items, limit, worker) => {
+    if (!items.length) return;
+    let index = 0;
+    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (index < items.length) {
+            const currentIndex = index;
+            index += 1;
+            await worker(items[currentIndex], currentIndex);
+        }
+    });
+    await Promise.all(runners);
+};
+
+export default function StartTrainingDialog({ open, onOpenChange, onSubmit, stepId, stepTitle, existingRuns, stepData, trainerOffline }) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
     const [formError, setFormError] = useState("");
-    const [autoYamlSource, setAutoYamlSource] = useState("");
+    const [autoYamlSource, setAutoYamlSource] = useState({ path: "", display: "" });
+    const [datasetSummary, setDatasetSummary] = useState(null);
+    const [isCheckingDataset, setIsCheckingDataset] = useState(false);
+    const [datasetStatus, setDatasetStatus] = useState({ state: "idle", message: "", processed: 0, total: 0 });
+    const [selectedPreset, setSelectedPreset] = useState('balanced');
+    const hasInitializedRef = useRef(false);
+    const lastStepIdRef = useRef(null);
     const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
     const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
     
@@ -98,51 +155,57 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     }, []);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open) {
+            hasInitializedRef.current = false;
+            lastStepIdRef.current = null;
+            return;
+        }
+
+        const stepChanged = lastStepIdRef.current !== stepId;
+        if (hasInitializedRef.current && !stepChanged) {
+            return;
+        }
+
+        hasInitializedRef.current = true;
+        lastStepIdRef.current = stepId;
+
         let isMounted = true;
         const newVersion = (existingRuns?.length || 0) + 1;
         const safeTitle = stepTitle?.replace(/[^a-zA-Z0-9]/g, '_') || 'training';
-        const linkedYaml = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
+        const linkedYamlPath = stepData?.dataset_yaml_path || stepData?.dataset_yaml_url || "";
+        const linkedYamlDisplay = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
 
+        setFormError("");
+        setShowAdvancedSettings(false);
+        setDatasetStatus({ state: "idle", message: "", processed: 0, total: 0 });
+        setDatasetSummary(null);
+        setSelectedPreset('balanced');
+
+        const defaultPreset = presetOptions[0];
         setConfig(prev => ({
             ...prev,
+            ...defaultPreset.config,
             runName: `${safeTitle}_v${newVersion}`,
-            dataYaml: linkedYaml || prev.dataYaml
+            dataYaml: linkedYamlPath || prev.dataYaml
         }));
-        setAutoYamlSource(linkedYaml);
+        setAutoYamlSource({ path: linkedYamlPath, display: linkedYamlDisplay });
 
         const refreshYaml = async () => {
             if (!stepId) return;
             try {
                 const [freshStep] = await SOPStep.filter({ id: stepId });
                 if (!isMounted || !freshStep) return;
-                let freshYaml = freshStep.dataset_yaml_url || freshStep.dataset_yaml_path || "";
-                if (!freshYaml) {
-                    const projectId = freshStep.project_id || stepData?.project_id;
-                    if (projectId) {
-                        const yamlContent = buildDatasetYaml(freshStep.classes || []);
-                        const blob = new Blob([yamlContent], { type: "text/plain" });
-                        const storagePath = `${projectId}/${stepId}/data.yaml`;
-                        const { path, publicUrl } = await uploadToSupabaseStorage(blob, storagePath, {
-                            bucket: DATASET_BUCKET,
-                            contentType: "text/plain",
-                        });
-                        await SOPStep.update(stepId, {
-                            dataset_yaml_path: `storage:${DATASET_BUCKET}/${path}`,
-                            dataset_yaml_url: publicUrl,
-                            dataset_yaml_name: "data.yaml",
-                        });
-                        freshYaml = publicUrl;
-                    }
-                }
-                if (!freshYaml || freshYaml === linkedYaml) return;
+                let freshYamlPath = freshStep.dataset_yaml_path || freshStep.dataset_yaml_url || "";
+                let freshYamlDisplay = freshStep.dataset_yaml_url || freshStep.dataset_yaml_path || "";
+                await refreshDatasetSummary(freshStep);
+                if (!freshYamlPath || freshYamlPath === linkedYamlPath) return;
                 setConfig(prev => {
-                    if (prev.dataYaml && prev.dataYaml !== linkedYaml) {
+                    if (prev.dataYaml && prev.dataYaml !== linkedYamlPath) {
                         return prev;
                     }
-                    return { ...prev, dataYaml: freshYaml };
+                    return { ...prev, dataYaml: freshYamlPath };
                 });
-                setAutoYamlSource(freshYaml);
+                setAutoYamlSource({ path: freshYamlPath, display: freshYamlDisplay });
             } catch (error) {
                 console.warn("Failed to refresh dataset YAML:", error);
             }
@@ -156,17 +219,17 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     }, [open, stepId, stepTitle, existingRuns, stepData, buildDatasetYaml]);
 
     useEffect(() => {
-        if (!autoYamlSource) return;
-        setConfig(prev => (prev.dataYaml ? prev : { ...prev, dataYaml: autoYamlSource }));
+        if (!autoYamlSource.path) return;
+        setConfig(prev => (prev.dataYaml ? prev : { ...prev, dataYaml: autoYamlSource.path }));
     }, [autoYamlSource]);
 
     const dynamicModelOptions = useMemo(() => {
         const completedRuns = (existingRuns || []).filter(run => run.status === 'completed' && run.trained_model_url);
         if (completedRuns.length > 0) {
             return [
-                { label: "Pre-trained Models", options: modelOptions },
+                { label: "Pretrained models (recommended)", options: modelOptions },
                 {
-                    label: "Your Trained Models",
+                    label: "Fine-tune from your runs",
                     options: completedRuns.map(run => ({
                         value: run.id,
                         label: run.run_name,
@@ -175,8 +238,12 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 }
             ];
         }
-        return [{ label: "Pre-trained Models", options: modelOptions }];
+        return [{ label: "Pretrained models (recommended)", options: modelOptions }];
     }, [existingRuns]);
+
+    const activePreset = useMemo(() => {
+        return presetOptions.find(option => option.value === selectedPreset) || presetOptions[0];
+    }, [selectedPreset]);
 
     const handleConfigChange = (key, value) => setConfig(prev => ({ ...prev, [key]: value }));
     const handleBayesianConfigChange = (key, value) => setConfig(prev => ({ ...prev, bayesianConfig: { ...prev.bayesianConfig, [key]: value } }));
@@ -190,6 +257,15 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                     [param]: { ...prev.bayesianConfig.searchSpace[param], [field]: value }
                 }
             }
+        }));
+    };
+
+    const applyPreset = (presetValue) => {
+        const preset = presetOptions.find(option => option.value === presetValue);
+        if (!preset) return;
+        setConfig(prev => ({
+            ...prev,
+            ...preset.config,
         }));
     };
 
@@ -209,6 +285,54 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     const normalizeNumber = (value) => {
         if (!Number.isFinite(value)) return "0";
         return Number(value).toFixed(6);
+    };
+
+    const parseClassIndex = (value) => {
+        if (value === undefined || value === null) return null;
+        if (typeof value === "number" && Number.isInteger(value)) return value;
+        const text = String(value).trim();
+        if (!text) return null;
+        const numeric = Number(text);
+        if (Number.isInteger(numeric)) return numeric;
+        const match = text.match(/^class\s*(\d+)$/i);
+        return match ? Number(match[1]) : null;
+    };
+
+    const resolveAnnotationClassIndex = (annotation, classNames) => {
+        if (!annotation) return { index: null, reason: "missing" };
+        if (!Array.isArray(classNames) || classNames.length === 0) {
+            return { index: null, reason: "no-classes" };
+        }
+        const direct =
+            annotation.class ??
+            annotation.label ??
+            annotation.class_name ??
+            annotation.name ??
+            annotation.predicted_class;
+        if (direct !== undefined && direct !== null && String(direct).trim() !== "") {
+            const directText = String(direct).trim();
+            const directIndex = classNames.indexOf(directText);
+            if (directIndex >= 0) return { index: directIndex, reason: "name" };
+            const numeric = parseClassIndex(directText);
+            if (numeric !== null && classNames[numeric]) {
+                return { index: numeric, reason: "index" };
+            }
+            return { index: null, reason: "mismatch" };
+        }
+        const rawId =
+            annotation.class_id ??
+            annotation.classId ??
+            annotation.classIndex ??
+            annotation.category_id ??
+            annotation.categoryId;
+        const numericId = parseClassIndex(rawId);
+        if (numericId !== null && classNames[numericId]) {
+            return { index: numericId, reason: "index" };
+        }
+        if (classNames.length === 1) {
+            return { index: 0, reason: "default" };
+        }
+        return { index: null, reason: "missing" };
     };
 
     const extractAnnotations = (imageRow) => {
@@ -239,18 +363,29 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     const buildLabelContent = (imageRow, classNames) => {
         const annotations = extractAnnotations(imageRow);
         const size = getImageSize(imageRow);
-        if (!size || !size.width || !size.height) return { content: "", hasLabels: false };
+        if (!size || !size.width || !size.height) {
+            return { content: "", hasLabels: false, stats: { total: 0, missing: 0, mismatched: 0 } };
+        }
         const lines = [];
+        let total = 0;
+        let missing = 0;
+        let mismatched = 0;
         annotations.forEach((annotation) => {
             if (!annotation) return;
             if (annotation.status && ["deleted", "disabled", "archived"].includes(String(annotation.status))) {
                 return;
             }
             const type = annotation.type || annotation.shape;
-            const className = annotation.class || annotation.label;
-            if (!className) return;
-            const classIndex = classNames.indexOf(className);
-            if (classIndex < 0) return;
+            total += 1;
+            const { index: classIndex, reason } = resolveAnnotationClassIndex(annotation, classNames);
+            if (classIndex === null) {
+                if (reason === "mismatch") {
+                    mismatched += 1;
+                } else {
+                    missing += 1;
+                }
+                return;
+            }
 
             if (type === "bbox" || type === "rectangle") {
                 const width = annotation.width;
@@ -274,7 +409,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 return;
             }
 
-            if (type === "polygon" || type === "segmentation") {
+            if (type === "polygon" || type === "segmentation" || type === "brush") {
                 const points = annotation.points || annotation.vertices;
                 if (!Array.isArray(points) || points.length < 3) return;
                 const coords = points.flatMap((point) => {
@@ -285,7 +420,92 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 lines.push([classIndex, ...coords].join(" "));
             }
         });
-        return { content: lines.join("\n"), hasLabels: lines.length > 0 };
+        return { content: lines.join("\n"), hasLabels: lines.length > 0, stats: { total, missing, mismatched } };
+    };
+
+    const getAnnotationTypeCounts = (imageRow, classNames) => {
+        const annotations = extractAnnotations(imageRow);
+        if (!annotations.length) return { boxes: 0, segments: 0 };
+        let boxes = 0;
+        let segments = 0;
+        const enforceClasses = Array.isArray(classNames) && classNames.length > 0;
+        annotations.forEach((annotation) => {
+            if (!annotation) return;
+            if (annotation.status && ["deleted", "disabled", "archived"].includes(String(annotation.status))) {
+                return;
+            }
+            if (enforceClasses) {
+                const { index: classIndex } = resolveAnnotationClassIndex(annotation, classNames);
+                if (classIndex === null) return;
+            } else {
+                const className = annotation.class || annotation.label;
+                if (!className) return;
+            }
+            const type = annotation.type || annotation.shape;
+            if (type === "bbox" || type === "rectangle") {
+                boxes += 1;
+                return;
+            }
+            if (type === "polygon" || type === "segmentation" || type === "brush") {
+                segments += 1;
+            }
+        });
+        return { boxes, segments };
+    };
+
+    const getClassNames = (stepSnapshot) => {
+        return (stepSnapshot?.classes || stepData?.classes || []).filter(Boolean);
+    };
+
+    const refreshDatasetSummary = async (stepSnapshot) => {
+        if (!stepId) return;
+        setIsCheckingDataset(true);
+        try {
+            let activeStep = stepSnapshot;
+            if (!activeStep) {
+                const [freshStep] = await SOPStep.filter({ id: stepId });
+                activeStep = freshStep;
+            }
+            const classNames = getClassNames(activeStep);
+            const stepImages = await listStepImages(stepId);
+            const splits = { train: 0, val: 0, test: 0 };
+            let labeled = 0;
+            const labelTypes = { boxes: 0, segments: 0 };
+
+            stepImages.forEach((imageRow) => {
+                const splitName = getSplitName(imageRow.image_group);
+                if (splitName === "train") splits.train += 1;
+                if (splitName === "val") splits.val += 1;
+                if (splitName === "test") splits.test += 1;
+                const counts = getAnnotationTypeCounts(imageRow, classNames);
+                labelTypes.boxes += counts.boxes;
+                labelTypes.segments += counts.segments;
+
+                if (classNames.length > 0) {
+                    const { hasLabels } = buildLabelContent(imageRow, classNames);
+                    if (hasLabels) labeled += 1;
+                } else {
+                    const annotations = extractAnnotations(imageRow);
+                    if (annotations.length > 0) labeled += 1;
+                }
+            });
+
+            const total = stepImages.length;
+            const ready = total > 0 && labeled > 0 && classNames.length > 0;
+            setDatasetSummary({
+                total,
+                labeled,
+                splits,
+                classesCount: classNames.length,
+                labelTypes,
+                ready,
+            });
+        } catch (error) {
+            console.warn("Failed to load dataset summary:", error);
+            setDatasetSummary(null);
+        } finally {
+            setIsCheckingDataset(false);
+        }
     };
 
     const ensureDatasetExport = async ({ projectId, stepId: activeStepId, classNames }) => {
@@ -294,29 +514,69 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             setFormError("No images found for this step. Upload or annotate images before training.");
             return { ok: false };
         }
+        if (!Array.isArray(classNames) || classNames.length === 0) {
+            setFormError("Add at least one class before starting training.");
+            return { ok: false };
+        }
         const hasTestSplit = stepImages.some((imageRow) => getSplitName(imageRow.image_group) === "test");
         let hasAnyLabels = false;
+        let labeledCount = 0;
+        const total = stepImages.length;
+        const labelTypes = { boxes: 0, segments: 0 };
+        let missingLabels = 0;
+        let mismatchedLabels = 0;
+        let processed = 0;
+        setDatasetStatus(prev => ({
+            ...prev,
+            state: "preparing",
+            processed: 0,
+            total,
+            message: total ? `Preparing dataset 0/${total}` : "Preparing dataset..."
+        }));
 
-        for (const imageRow of stepImages) {
+        const updateProgress = () => {
+            processed += 1;
+            setDatasetStatus(prev => ({
+                ...prev,
+                state: "preparing",
+                processed,
+                total,
+                message: `Preparing dataset ${processed}/${total}`
+            }));
+        };
+
+        await runWithConcurrency(stepImages, DATASET_EXPORT_CONCURRENCY, async (imageRow) => {
             const splitName = getSplitName(imageRow.image_group);
-            const imageName = imageRow.image_name
+            const stepImagePath = getStoragePathFromUrl(imageRow.image_url, STEP_IMAGES_BUCKET);
+            const datasetImagePathFromUrl = getStoragePathFromUrl(imageRow.image_url, DATASET_BUCKET);
+            const storageImageName = (datasetImagePathFromUrl || stepImagePath)?.split("/").pop();
+            const imageName = storageImageName
+                || imageRow.image_name
                 || imageRow.file_name
                 || imageRow.name
-                || getStoragePathFromUrl(imageRow.image_url, STEP_IMAGES_BUCKET)?.split("/").pop()
-                || getStoragePathFromUrl(imageRow.image_url, DATASET_BUCKET)?.split("/").pop()
                 || `image-${imageRow.id || Date.now()}.jpg`;
 
             const datasetImagePath = `${projectId}/${activeStepId}/images/${splitName}/${imageName}`;
-            const existingDatasetPath = getStoragePathFromUrl(imageRow.image_url, DATASET_BUCKET);
+            const existingDatasetPath = datasetImagePathFromUrl;
             if (!existingDatasetPath || existingDatasetPath !== datasetImagePath) {
                 if (imageRow.image_url) {
                     let imageUrl = imageRow.image_url;
-                    const stepImagePath = getStoragePathFromUrl(imageRow.image_url, STEP_IMAGES_BUCKET);
+                    const signedCandidates = [];
+                    if (datasetImagePathFromUrl) {
+                        signedCandidates.push({ bucket: DATASET_BUCKET, path: datasetImagePathFromUrl });
+                    }
                     if (stepImagePath) {
+                        signedCandidates.push({ bucket: STEP_IMAGES_BUCKET, path: stepImagePath });
+                    }
+                    for (const candidate of signedCandidates) {
                         try {
-                            imageUrl = await createSignedImageUrl(STEP_IMAGES_BUCKET, stepImagePath, {
+                            const signed = await createSignedImageUrl(candidate.bucket, candidate.path, {
                                 expiresIn: 600,
                             });
+                            if (signed) {
+                                imageUrl = signed;
+                                break;
+                            }
                         } catch (error) {
                             console.warn("Failed to create signed image URL, falling back to raw URL.", error);
                         }
@@ -333,8 +593,16 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 }
             }
 
-            const { content, hasLabels } = buildLabelContent(imageRow, classNames);
+            const counts = getAnnotationTypeCounts(imageRow, classNames);
+            labelTypes.boxes += counts.boxes;
+            labelTypes.segments += counts.segments;
+            const { content, hasLabels, stats } = buildLabelContent(imageRow, classNames);
+            if (stats) {
+                missingLabels += stats.missing;
+                mismatchedLabels += stats.mismatched;
+            }
             hasAnyLabels = hasAnyLabels || hasLabels;
+            if (hasLabels) labeledCount += 1;
             const labelContent = content || "";
             const labelName = imageName.replace(/\.[^/.]+$/, "");
             const labelPath = `${projectId}/${activeStepId}/labels/${splitName}/${labelName}.txt`;
@@ -343,20 +611,28 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 bucket: DATASET_BUCKET,
                 contentType: "text/plain",
             });
-        }
+            updateProgress();
+        });
 
         if (!hasAnyLabels) {
-            setFormError("No annotations found for this step. Add labels in the annotation studio before training.");
+            if (mismatchedLabels > 0) {
+                setFormError("Annotations use classes that are not in this step. Update the class list or relabel.");
+            } else if (missingLabels > 0) {
+                setFormError("Annotations are missing class labels. Assign labels or add a single class to auto-assign.");
+            } else {
+                setFormError("No annotations found for this step. Add labels in the annotation studio before training.");
+            }
             return { ok: false };
         }
 
-        return { ok: true, hasTestSplit };
+        return { ok: true, hasTestSplit, labeledCount, total, labelTypes };
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        let dataYamlValue = (config.dataYaml || autoYamlSource || "").trim();
+        let dataYamlValue = (config.dataYaml || autoYamlSource.path || "").trim();
         setFormError("");
+        setDatasetStatus({ state: "preparing", message: "Preparing dataset...", processed: 0, total: 0 });
         setIsSubmitting(true);
         
         try {
@@ -366,6 +642,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 const classNames = (freshStep?.classes || stepData?.classes || []).filter(Boolean);
                 if (!projectId) {
                     setFormError("Missing project information for this step.");
+                    setDatasetStatus({ state: "error", message: "Missing project information.", processed: 0, total: 0 });
                     return;
                 }
                 const exportResult = await ensureDatasetExport({
@@ -374,8 +651,23 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                     classNames,
                 });
                 if (!exportResult?.ok) {
+                    setDatasetStatus({ state: "error", message: "Dataset not ready. Add images and labels, then try again.", processed: 0, total: 0 });
                     return;
                 }
+                setDatasetStatus({
+                    state: "ready",
+                    message: "Dataset prepared and ready for training.",
+                    processed: exportResult.total,
+                    total: exportResult.total
+                });
+                setDatasetSummary(prev => ({
+                    total: exportResult.total,
+                    labeled: exportResult.labeledCount,
+                    splits: prev?.splits || { train: 0, val: 0, test: 0 },
+                    classesCount: prev?.classesCount || classNames.length,
+                    labelTypes: exportResult.labelTypes || prev?.labelTypes || { boxes: 0, segments: 0 },
+                    ready: classNames.length > 0 && exportResult.total > 0 && exportResult.labeledCount > 0,
+                }));
                 if (!dataYamlValue) {
                     const yamlContent = buildDatasetYaml(classNames);
                     const blob = new Blob([yamlContent], { type: "text/plain" });
@@ -389,9 +681,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         dataset_yaml_url: publicUrl,
                         dataset_yaml_name: "data.yaml",
                     });
-                    dataYamlValue = publicUrl;
-                    setConfig(prev => ({ ...prev, dataYaml: publicUrl }));
-                    setAutoYamlSource(publicUrl);
+                    dataYamlValue = `storage:${DATASET_BUCKET}/${path}`;
+                    setConfig(prev => ({ ...prev, dataYaml: dataYamlValue }));
+                    setAutoYamlSource({ path: dataYamlValue, display: publicUrl });
                 }
             }
             if (!dataYamlValue && stepId) {
@@ -410,13 +702,14 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         dataset_yaml_url: publicUrl,
                         dataset_yaml_name: "data.yaml",
                     });
-                    dataYamlValue = publicUrl;
-                    setConfig(prev => ({ ...prev, dataYaml: publicUrl }));
-                    setAutoYamlSource(publicUrl);
+                    dataYamlValue = `storage:${DATASET_BUCKET}/${path}`;
+                    setConfig(prev => ({ ...prev, dataYaml: dataYamlValue }));
+                    setAutoYamlSource({ path: dataYamlValue, display: publicUrl });
                 }
             }
             if (!dataYamlValue) {
                 setFormError("Dataset YAML is not linked to this step. Upload images or attach a dataset YAML before starting training.");
+                setDatasetStatus({ state: "error", message: "Dataset YAML missing.", processed: 0, total: 0 });
                 return;
             }
             await onSubmit({
@@ -434,56 +727,236 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         } catch (error) {
             console.error('Error starting training:', error);
             setFormError("Failed to start training. Please try again.");
+            setDatasetStatus({ state: "error", message: "Failed to prepare dataset.", processed: 0, total: 0 });
         } finally {
             setIsSubmitting(false);
         }
     };
 
+    const datasetReady = !datasetSummary || datasetSummary.ready;
+    const datasetStatusLabel = datasetSummary
+        ? (datasetSummary.ready ? "Ready" : "Needs attention")
+        : "Not checked";
+    const datasetStatusClass = datasetSummary
+        ? (datasetSummary.ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800")
+        : "bg-gray-100 text-gray-700";
+    const labelTypes = datasetSummary?.labelTypes || { boxes: 0, segments: 0 };
+    const hasMixedLabels = labelTypes.boxes > 0 && labelTypes.segments > 0;
+    const annotationTypeLabel = datasetSummary
+        ? (hasMixedLabels
+            ? "Mixed (boxes + polygons)"
+            : labelTypes.segments > 0
+                ? "Polygons only"
+                : labelTypes.boxes > 0
+                    ? "Boxes only"
+                    : "None")
+        : "n/a";
+    const fieldBaseClass = "bg-white/95 border-amber-200 text-slate-900 placeholder:text-slate-500 shadow-md shadow-amber-100/60 focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:border-amber-400 hover:border-amber-300";
+    const selectContentClass = "border-amber-200 bg-white/95 text-slate-900 shadow-lg shadow-amber-100/60";
+    const selectItemClass = "focus:bg-amber-50 focus:text-amber-900 data-[state=checked]:bg-amber-100 data-[state=checked]:text-amber-900";
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-3xl glass-effect border-0">
-                <DialogHeader>
-                    <DialogTitle className="text-2xl font-bold flex items-center gap-3">
-                        <Sparkles className="w-6 h-6 text-blue-600" />
-                        Start New Training Run
-                    </DialogTitle>
-                    <DialogDescription>Configure and launch a new model training job for step: "{stepTitle}"</DialogDescription>
-                </DialogHeader>
+            <DialogContent className="sm:max-w-3xl glass-effect border-0 p-0 overflow-hidden">
+                <div className="relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-teal-50 px-8 pt-6 pb-5">
+                    <div className="absolute -top-20 -left-16 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl" />
+                    <div className="absolute -bottom-24 right-0 h-64 w-64 rounded-full bg-teal-200/40 blur-3xl" />
+                    <DialogHeader className="relative space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <DialogTitle className="text-2xl font-semibold text-slate-900 flex items-center gap-3">
+                                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 shadow-sm">
+                                        <Sparkles className="w-5 h-5" />
+                                    </span>
+                                    Start New Training Run
+                                </DialogTitle>
+                                <DialogDescription className="text-sm text-slate-600">
+                                    Configure and launch a new model training job for step: "{stepTitle}"
+                                </DialogDescription>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <Badge className="bg-slate-900 text-white">Training Studio</Badge>
+                                <Badge variant="outline" className="border-amber-200 bg-white/70 text-amber-700">
+                                    {trainerOffline ? "Queue Mode" : "Live Trainer"}
+                                </Badge>
+                                <Badge variant="outline" className="border-teal-200 bg-white/70 text-teal-700">
+                                    Dataset {datasetStatusLabel}
+                                </Badge>
+                            </div>
+                        </div>
+                    </DialogHeader>
+                </div>
                 
-                <form onSubmit={handleSubmit} className="space-y-6 mt-4 max-h-[70vh] overflow-y-auto pr-4">
-                    {/* Step 1: Basic Configuration */}
+                <form onSubmit={handleSubmit} className="space-y-6 max-h-[70vh] overflow-y-auto px-8 pb-6 pt-4">
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-4">
-                            <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold">1</div>
-                            <h3 className="font-semibold text-gray-900">Basic Configuration</h3>
-                        </div>
-                        
-                        <div>
-                            <TooltipLabel tooltipText="Give your model version a unique, descriptive name so you can easily identify it later.">Model Version Name</TooltipLabel>
-                            <Input id="runName" value={config.runName} onChange={e => handleConfigChange('runName', e.target.value)} placeholder="e.g., Button_Detection_v1"/>
+                            <h3 className="font-semibold text-gray-900">Dataset status</h3>
+                            <Badge variant="secondary" className={datasetStatusClass}>
+                                {datasetStatusLabel}
+                            </Badge>
                         </div>
 
-                        {autoYamlSource ? (
-                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                                Dataset YAML linked from step: {autoYamlSource}
+                        {trainerOffline && (
+                            <Alert className="border-amber-300 bg-amber-50">
+                                <AlertTitle className="text-amber-900">Trainer offline</AlertTitle>
+                                <AlertDescription className="text-amber-800">
+                                    Runs will stay queued until a trainer worker is online. You can still queue this run now.
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
+                        <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-amber-100/60 backdrop-blur">
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-1 text-sm text-slate-700">
+                                    <p><span className="font-medium">Images:</span> {datasetSummary ? datasetSummary.total : (isCheckingDataset ? "Checking..." : "Not checked")}</p>
+                                    <p><span className="font-medium">Labeled images:</span> {datasetSummary ? datasetSummary.labeled : "n/a"}</p>
+                                    <p><span className="font-medium">Splits:</span> train {datasetSummary?.splits?.train ?? "n/a"} / val {datasetSummary?.splits?.val ?? "n/a"} / test {datasetSummary?.splits?.test ?? "n/a"}</p>
+                                    <p><span className="font-medium">Classes:</span> {datasetSummary ? datasetSummary.classesCount : "n/a"}</p>
+                                    <p><span className="font-medium">Annotation types:</span> {annotationTypeLabel}</p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => refreshDatasetSummary()}
+                                    disabled={isCheckingDataset || isSubmitting || !stepId}
+                                    className="border-amber-200 text-amber-700 hover:bg-amber-50"
+                                >
+                                    {isCheckingDataset ? "Refreshing..." : "Refresh"}
+                                </Button>
                             </div>
-                        ) : null}
-                        {!autoYamlSource && (
-                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                Dataset YAML missing. It will be generated automatically when you start training.
+
+                            <div className="mt-3 text-xs text-slate-600">
+                                {autoYamlSource.path ? (
+                                    <span>Dataset YAML linked: {autoYamlSource.display || autoYamlSource.path}</span>
+                                ) : (
+                                    <span>Dataset YAML missing. It will be generated when training starts.</span>
+                                )}
+                            </div>
+
+                            {datasetSummary?.classesCount === 0 && (
+                                <div className="mt-3 text-xs text-amber-700">
+                                    No classes defined for this step. Add class names before training.
+                                </div>
+                            )}
+
+                            {datasetSummary?.total === 0 && (
+                                <div className="mt-3 text-xs text-amber-700">
+                                    No images found for this step. Upload images before training.
+                                </div>
+                            )}
+
+                            {datasetSummary?.total > 0 && datasetSummary?.labeled === 0 && (
+                                <div className="mt-3 text-xs text-amber-700">
+                                    No labeled images found. Add annotations to produce meaningful training results.
+                                </div>
+                            )}
+
+                            {hasMixedLabels && (
+                                <div className="mt-3 text-xs text-amber-700">
+                                    Mixed box and polygon labels detected. Use only boxes for detection or only polygons for segmentation.
+                                </div>
+                            )}
+                        </div>
+
+                        {datasetStatus.state === "preparing" && (
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                                <div className="flex items-center justify-between text-sm text-blue-900">
+                                    <span>Preparing dataset...</span>
+                                    <span>{datasetStatus.processed}/{datasetStatus.total}</span>
+                                </div>
+                                <Progress value={datasetStatus.total ? (datasetStatus.processed / datasetStatus.total) * 100 : 0} className="mt-2" />
+                                {datasetStatus.message && (
+                                    <p className="text-xs text-blue-800 mt-2">{datasetStatus.message}</p>
+                                )}
+                            </div>
+                        )}
+
+                        {datasetStatus.state === "ready" && datasetStatus.message && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                {datasetStatus.message}
+                            </div>
+                        )}
+
+                        {datasetStatus.state === "error" && datasetStatus.message && (
+                            <Alert variant="destructive">
+                                <AlertDescription>{datasetStatus.message}</AlertDescription>
+                            </Alert>
+                        )}
+                    </div>
+
+                    {formError && (
+                        <Alert variant="destructive">
+                            <AlertDescription>{formError}</AlertDescription>
+                        </Alert>
+                    )}
+
+                    <Separator />
+
+                    <Tabs defaultValue="fast" className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                            <TabsTrigger value="fast">Fast Start</TabsTrigger>
+                            <TabsTrigger value="advanced">Advanced</TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="fast" className="space-y-6 mt-4">
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <h3 className="font-semibold text-gray-900">Basic configuration</h3>
+                                </div>
+                        
+                        <div>
+                            <TooltipLabel tooltipText="Give your model version a unique, descriptive name so you can easily identify it later.">Run name</TooltipLabel>
+                            <Input
+                                id="runName"
+                                value={config.runName}
+                                onChange={e => handleConfigChange('runName', e.target.value)}
+                                placeholder="e.g., Button_Detection_v1"
+                                className={fieldBaseClass}
+                            />
+                        </div>
+
+                        <div>
+                            <TooltipLabel tooltipText="Presets apply recommended training settings for speed or accuracy.">Preset</TooltipLabel>
+                            <Select
+                                value={selectedPreset}
+                                onValueChange={(value) => {
+                                    setSelectedPreset(value);
+                                    applyPreset(value);
+                                }}
+                            >
+                                <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                <SelectContent className={selectContentClass}>
+                                    {presetOptions.map(option => (
+                                        <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                                            <div className="flex flex-col">
+                                                <span>{option.label}</span>
+                                                <span className="text-gray-500 text-xs">{option.description}</span>
+                                            </div>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {activePreset && (
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                                <p className="font-medium">{activePreset.label} preset</p>
+                                <p className="text-xs text-blue-800 mt-1">{activePreset.summary}</p>
+                                <p className="text-xs text-blue-700 mt-2">Advanced edits override preset values.</p>
                             </div>
                         )}
                         
                         <div>
-                            <TooltipLabel tooltipText="Choose a pre-trained model as your starting point. YOLOv8s offers the best balance of speed and accuracy for most tasks.">Base Model</TooltipLabel>
+                            <TooltipLabel tooltipText="Choose a starting checkpoint. Pretrained models are best for first runs, while your runs let you fine-tune further.">Base model</TooltipLabel>
                             <Select value={config.baseModel} onValueChange={value => handleConfigChange('baseModel', value)}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
+                                <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                <SelectContent className={selectContentClass}>
                                     {dynamicModelOptions.map((group, index) => (
                                         <SelectGroup key={group.label || `group-${index}`}>
                                             <SelectLabel className="px-2 py-1.5 text-xs font-semibold">{group.label}</SelectLabel>
                                             {group.options.map(opt => (
-                                                <SelectItem key={opt.value} value={opt.value}>
+                                                <SelectItem key={opt.value} value={opt.value} className={selectItemClass}>
                                                     <div className="flex flex-col">
                                                         <span>{opt.label}</span>
                                                         <span className="text-gray-500 text-xs">{opt.description}</span>
@@ -497,24 +970,12 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         </div>
                         
                         <div>
-                            <TooltipLabel tooltipText="The optimization algorithm. Adam is highly recommended as it works well for most tasks and is very reliable.">Optimizer</TooltipLabel>
-                            <Select value={config.optimizer} onValueChange={value => handleConfigChange('optimizer', value)}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Adam">✅ Adam (Recommended - Works great for most tasks)</SelectItem>
-                                    <SelectItem value="AdamW">AdamW (Advanced - Better for large models)</SelectItem>
-                                    <SelectItem value="SGD">SGD (Classic - Requires careful tuning)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        
-                        <div>
-                            <TooltipLabel tooltipText="Choose your training hardware. Standard GPU is cost-effective and suitable for most projects.">Compute Resources</TooltipLabel>
+                            <TooltipLabel tooltipText="Choose your training hardware. Standard GPU is cost-effective and suitable for most projects.">Compute</TooltipLabel>
                             <Select value={config.compute} onValueChange={value => handleConfigChange('compute', value)}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
+                                <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                <SelectContent className={selectContentClass}>
                                     {computeOptions.map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
+                                        <SelectItem key={opt.value} value={opt.value} className={selectItemClass}>
                                             <div className="flex flex-col">
                                                 <span>{opt.label}</span>
                                                 <span className="text-gray-500 text-xs">{opt.description}</span>
@@ -526,20 +987,12 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         </div>
                     </div>
 
-                    {formError && (
-                        <Alert variant="destructive">
-                            <AlertDescription>{formError}</AlertDescription>
-                        </Alert>
-                    )}
-                    
                     <Separator />
                     
-                    {/* Step 2: Recommended Settings */}
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-4">
-                            <div className="w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-bold">2</div>
-                            <h3 className="font-semibold text-gray-900">Recommended Training Settings</h3>
-                            <Badge variant="secondary" className="bg-green-100 text-green-800">Good defaults for beginners</Badge>
+                            <h3 className="font-semibold text-gray-900">Training settings</h3>
+                            <Badge variant="secondary" className="bg-green-100 text-green-800">Defaults</Badge>
                         </div>
                         
                         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -548,8 +1001,8 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     <CheckCircle className="w-3 h-3 text-white" />
                                 </div>
                                 <div>
-                                    <h4 className="font-medium text-green-900 mb-1">💡 Beginner Tip</h4>
-                                    <p className="text-sm text-green-800">These settings work well for most annotation projects. Train your first model with these defaults, then use Advanced Optimization (Step 3) to fine-tune if needed.</p>
+                                    <h4 className="font-medium text-green-900 mb-1">Beginner Tip</h4>
+                                    <p className="text-sm text-green-800">These settings work well for most annotation projects. Train your first model with these defaults, then use the Advanced tab to fine-tune if needed.</p>
                                 </div>
                             </div>
                         </div>
@@ -561,7 +1014,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     type="number" 
                                     value={config.epochs} 
                                     onChange={e => handleConfigChange('epochs', parseInt(e.target.value))} 
-                                    className={config.epochs === 100 ? "border-green-500" : ""} 
+                                    className={`${fieldBaseClass} ${config.epochs === 100 ? "border-green-500" : ""}`} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.epochs.enabled}
                                 />
                             </div>
@@ -572,14 +1025,14 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     onValueChange={value => handleConfigChange('batchSize', parseInt(value))} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.batchSize.enabled}
                                 >
-                                    <SelectTrigger className={config.batchSize === 16 ? "border-green-500" : ""}>
+                                    <SelectTrigger className={`${fieldBaseClass} ${config.batchSize === 16 ? "border-green-500" : ""}`}>
                                         <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="8">8 (Slower, less memory)</SelectItem>
-                                        <SelectItem value="16">16 (Recommended)</SelectItem>
-                                        <SelectItem value="32">32 (Faster, more memory)</SelectItem>
-                                        <SelectItem value="64">64 (Advanced)</SelectItem>
+                                    <SelectContent className={selectContentClass}>
+                                        <SelectItem value="8" className={selectItemClass}>8 (Slower, less memory)</SelectItem>
+                                        <SelectItem value="16" className={selectItemClass}>16 (Recommended)</SelectItem>
+                                        <SelectItem value="32" className={selectItemClass}>32 (Faster, more memory)</SelectItem>
+                                        <SelectItem value="64" className={selectItemClass}>64 (Advanced)</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -593,13 +1046,13 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     onValueChange={value => handleConfigChange('imgSize', parseInt(value))} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.imgSize.enabled}
                                 >
-                                    <SelectTrigger className={config.imgSize === 640 ? "border-green-500" : ""}>
+                                    <SelectTrigger className={`${fieldBaseClass} ${config.imgSize === 640 ? "border-green-500" : ""}`}>
                                         <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="320">320px (Fastest)</SelectItem>
-                                        <SelectItem value="640">640px (Recommended)</SelectItem>
-                                        <SelectItem value="1280">1280px (High detail)</SelectItem>
+                                    <SelectContent className={selectContentClass}>
+                                        <SelectItem value="320" className={selectItemClass}>320px (Fastest)</SelectItem>
+                                        <SelectItem value="640" className={selectItemClass}>640px (Recommended)</SelectItem>
+                                        <SelectItem value="1280" className={selectItemClass}>1280px (High detail)</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -610,27 +1063,37 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     step="0.0001" 
                                     value={config.learningRate} 
                                     onChange={e => handleConfigChange('learningRate', parseFloat(e.target.value))} 
-                                    className={config.learningRate === 0.001 ? "border-green-500" : ""} 
+                                    className={`${fieldBaseClass} ${config.learningRate === 0.001 ? "border-green-500" : ""}`} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.learningRate.enabled}
                                 />
                             </div>
                         </div>
                     </div>
-                    
-                    <Separator />
-                    
-                    {/* Step 3: Advanced Optimization */}
-                    <div className="space-y-4">
-                        <div className="flex items-center gap-2 mb-4">
-                            <div className="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-sm font-bold">3</div>
-                            <h3 className="font-semibold text-gray-900">Advanced Hyperparameter Optimization</h3>
-                            <Badge variant="secondary" className="bg-purple-100 text-purple-800">For experienced users</Badge>
-                        </div>
+                        </TabsContent>
+
+                        <TabsContent value="advanced" className="space-y-6 mt-4">
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <h3 className="font-semibold text-gray-900">Advanced optimization</h3>
+                                    <Badge variant="secondary" className="bg-purple-100 text-purple-800">For experienced users</Badge>
+                                </div>
+
+                                <div>
+                                    <TooltipLabel tooltipText="The optimization algorithm. Adam is highly recommended as it works well for most tasks and is very reliable.">Optimizer</TooltipLabel>
+                                    <Select value={config.optimizer} onValueChange={value => handleConfigChange('optimizer', value)}>
+                                        <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                        <SelectContent className={selectContentClass}>
+                                            <SelectItem value="Adam" className={selectItemClass}>Adam (Recommended - Works great for most tasks)</SelectItem>
+                                            <SelectItem value="AdamW" className={selectItemClass}>AdamW (Advanced - Better for large models)</SelectItem>
+                                            <SelectItem value="SGD" className={selectItemClass}>SGD (Classic - Requires careful tuning)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                         
                         <div className="flex items-center justify-between p-4 bg-purple-50 border border-purple-200 rounded-lg">
                             <div className="flex-1">
-                                <h4 className="font-medium text-purple-900 mb-1">Automatic Parameter Tuning</h4>
-                                <p className="text-sm text-purple-800">Use AI to automatically find the best hyperparameters. Only recommended after training your first model with the defaults above.</p>
+                                <h4 className="font-medium text-purple-900 mb-1">Automatic parameter tuning</h4>
+                                <p className="text-sm text-purple-800">Use Bayesian optimization to search for better hyperparameters after your first baseline run.</p>
                             </div>
                             <Switch checked={showAdvancedSettings} onCheckedChange={setShowAdvancedSettings}/>
                         </div>
@@ -645,12 +1108,12 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     className="overflow-hidden space-y-6 pt-4 border-t border-purple-200"
                                 >
                                     <div>
-                                        <TooltipLabel tooltipText="Choose 'Manual' to set hyperparameters yourself, or 'Bayesian' to let the system automatically find the optimal settings.">Optimization Strategy</TooltipLabel>
+                                        <TooltipLabel tooltipText="Choose 'Manual' to set hyperparameters yourself, or 'Bayesian' to let the system automatically find the optimal settings.">Optimization strategy</TooltipLabel>
                                         <Select value={config.optimizationStrategy} onValueChange={value => handleConfigChange('optimizationStrategy', value)}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="manual">Manual Tuning</SelectItem>
-                                                <SelectItem value="bayesian">Bayesian Optimization</SelectItem>
+                                            <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                            <SelectContent className={selectContentClass}>
+                                                <SelectItem value="manual" className={selectItemClass}>Manual tuning</SelectItem>
+                                                <SelectItem value="bayesian" className={selectItemClass}>Bayesian optimization</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -658,9 +1121,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     {config.optimizationStrategy === 'manual' && (
                                         <Alert className="border-blue-300 bg-blue-50">
                                             <Info className="h-4 w-4 text-blue-600" />
-                                            <AlertTitle className="text-blue-800">Manual Tuning Active</AlertTitle>
+                                            <AlertTitle className="text-blue-800">Manual tuning active</AlertTitle>
                                             <AlertDescription className="text-blue-700">
-                                                You can now adjust the parameters in <strong>Step 2: Recommended Training Settings</strong>. The values you set there will be used for the training run.
+                                                Use the settings in the Fast Start tab for this run.
                                             </AlertDescription>
                                         </Alert>
                                     )}
@@ -669,51 +1132,53 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                         <div className="space-y-6">
                                             <Alert className="border-purple-300 bg-purple-50">
                                                 <Info className="h-4 w-4 text-purple-600" />
-                                                <AlertTitle className="text-purple-800">Bayesian Optimization Active</AlertTitle>
+                                                <AlertTitle className="text-purple-800">Bayesian optimization active</AlertTitle>
                                                 <AlertDescription className="text-purple-700">
-                                                    The system will automatically try different parameter combinations to find the best settings. Enable specific parameters below to include them in the search.
+                                                    Enable specific parameters below to include them in the search.
                                                 </AlertDescription>
                                             </Alert>
                                             
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div>
-                                                    <TooltipLabel tooltipText="Objective function to optimize during training.">Optimization Objective</TooltipLabel>
+                                                    <TooltipLabel tooltipText="Objective function to optimize during training.">Optimization objective</TooltipLabel>
                                                     <Select value={config.bayesianConfig.objective} onValueChange={value => handleBayesianConfigChange('objective', value)}>
-                                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="maximize_mAP">Maximize mAP (Recommended)</SelectItem>
-                                                            <SelectItem value="minimize_loss">Minimize Training Loss</SelectItem>
-                                                            <SelectItem value="maximize_precision">Maximize Precision</SelectItem>
-                                                            <SelectItem value="maximize_recall">Maximize Recall</SelectItem>
+                                                        <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                                        <SelectContent className={selectContentClass}>
+                                                            <SelectItem value="maximize_mAP" className={selectItemClass}>Maximize mAP (Recommended)</SelectItem>
+                                                            <SelectItem value="minimize_loss" className={selectItemClass}>Minimize Training Loss</SelectItem>
+                                                            <SelectItem value="maximize_precision" className={selectItemClass}>Maximize Precision</SelectItem>
+                                                            <SelectItem value="maximize_recall" className={selectItemClass}>Maximize Recall</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
                                                 
                                                 <div>
-                                                    <TooltipLabel tooltipText="Number of different parameter combinations to try.">Number of Trials</TooltipLabel>
+                                                    <TooltipLabel tooltipText="Number of different parameter combinations to try.">Number of trials</TooltipLabel>
                                                     <Input 
                                                         type="number" 
                                                         value={config.bayesianConfig.numTrials} 
                                                         onChange={e => handleBayesianConfigChange('numTrials', parseInt(e.target.value))} 
                                                         min="5" 
                                                         max="100"
+                                                        className={fieldBaseClass}
                                                     />
                                                 </div>
                                             </div>
 
                                             <div>
-                                                <TooltipLabel tooltipText="Maximum time to spend on optimization (in hours).">Max Duration (hours)</TooltipLabel>
+                                            <TooltipLabel tooltipText="Maximum time to spend on optimization (in hours).">Max duration (hours)</TooltipLabel>
                                                 <Input 
                                                     type="number" 
                                                     value={config.bayesianConfig.maxDuration} 
                                                     onChange={e => handleBayesianConfigChange('maxDuration', parseInt(e.target.value))} 
                                                     min="1" 
                                                     max="48"
+                                                    className={fieldBaseClass}
                                                 />
                                             </div>
                                             
                                             <div className="space-y-4">
-                                                <h4 className="font-medium text-gray-900">Parameter Search Space</h4>
+                                                <h4 className="font-medium text-gray-900">Parameter search space</h4>
                                                 <p className="text-sm text-gray-600">Enable parameters you want the optimizer to tune automatically:</p>
                                                 
                                                 {/* Epochs */}
@@ -734,14 +1199,14 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                                                 type="number" 
                                                                 value={config.bayesianConfig.searchSpace.epochs.min} 
                                                                 onChange={e => handleSearchSpaceChange('epochs', 'min', parseInt(e.target.value))}
-                                                                className="w-16 h-8 text-xs"
+                                                                className={`${fieldBaseClass} w-16 h-8 text-xs`}
                                                                 placeholder="Min"
                                                             />
                                                             <Input 
                                                                 type="number" 
                                                                 value={config.bayesianConfig.searchSpace.epochs.max} 
                                                                 onChange={e => handleSearchSpaceChange('epochs', 'max', parseInt(e.target.value))}
-                                                                className="w-16 h-8 text-xs"
+                                                                className={`${fieldBaseClass} w-16 h-8 text-xs`}
                                                                 placeholder="Max"
                                                             />
                                                         </div>
@@ -796,6 +1261,8 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                             )}
                         </AnimatePresence>
                     </div>
+                        </TabsContent>
+                    </Tabs>
 
                     <div className="flex justify-end gap-3 pt-4">
                         <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
@@ -803,10 +1270,12 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         </Button>
                         <Button
                             type="submit"
-                            className="bg-blue-600 hover:bg-blue-700"
-                        disabled={isSubmitting || !config.runName || !stepId}
-                    >
-                            {isSubmitting ? "Starting Training..." : "Start Training"}
+                            className="bg-slate-900 text-white hover:bg-slate-800"
+                            disabled={isSubmitting || !config.runName || !stepId || !datasetReady}
+                        >
+                            {isSubmitting
+                                ? (trainerOffline ? "Queueing..." : "Starting Training...")
+                                : (trainerOffline ? "Queue Training" : "Start Training")}
                         </Button>
                     </div>
                 </form>

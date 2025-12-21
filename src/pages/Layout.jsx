@@ -10,8 +10,7 @@ import {
   Database,
   BarChart3,
   Settings,
-  Orbit,
-  Package // Added Package icon
+  Package,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,7 +31,7 @@ import {
 const defaultFeatureVisibility = {
   dashboard: true,
   projects: true,
-  buildVariants: false,
+  buildVariants: true,
   training: true,
   labelLibrary: true,
   results: false,
@@ -53,7 +52,7 @@ const navigationItems = [
   featureKey: "projects",
 },
 {
-  title: "Build Variants", // New navigation item
+  title: "Build Variants",
   url: createPageUrl("BuildVariants"),
   icon: Package,
   featureKey: "buildVariants",

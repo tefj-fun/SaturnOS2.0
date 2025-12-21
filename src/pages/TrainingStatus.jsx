@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -38,7 +37,6 @@ import {
   BarChart3,
   StopCircle,
   Download,
-  Share2,
   Eye,
   Loader2,
   XCircle,
@@ -47,14 +45,14 @@ import {
 import { createPageUrl } from '@/utils';
 
 const trainingTips = [
-  "💡 Did you know? Your model learns by looking at thousands of examples!",
-  "🚀 Neural networks are inspired by how our brains work!",
-  "⚡ Each epoch means the model has seen your entire dataset once.",
-  "🎯 The loss going down means your model is getting smarter!",
-  "🧠 Your model is building patterns from your annotations right now.",
-  "📊 Lower validation loss = better performance on new images!",
-  "🔥 GPU training can be 100x faster than CPU training!",
-  "✨ Transfer learning helps your model learn faster by starting with pre-trained knowledge."
+  "Did you know? Your model learns by looking at thousands of examples.",
+  "Neural networks are inspired by how our brains work.",
+  "Each epoch means the model has seen your entire dataset once.",
+  "When loss goes down, your model is improving.",
+  "Your model is building patterns from your annotations right now.",
+  "Lower validation loss usually means better performance on new images.",
+  "GPU training can be much faster than CPU training.",
+  "Transfer learning helps your model learn faster by starting with pretrained knowledge."
 ];
 
 const TrainingAnimation = ({ isTraining, progress }) => {
@@ -91,6 +89,49 @@ const TrainingAnimation = ({ isTraining, progress }) => {
           style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
         />
       </svg>
+    </div>
+  );
+};
+
+const trainingPhases = [
+  { key: 'prep', label: 'Prep' },
+  { key: 'queue', label: 'Queue' },
+  { key: 'training', label: 'Training' },
+  { key: 'validation', label: 'Validation' },
+  { key: 'complete', label: 'Complete' },
+];
+
+const TrainingTimeline = ({ currentIndex, status }) => {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {trainingPhases.map((phase, index) => {
+        const isActive = index === currentIndex;
+        const isComplete = index < currentIndex;
+        const isFailed = ['failed', 'canceled', 'stopped'].includes(status) && index === currentIndex;
+        const dotClass = isFailed
+          ? 'bg-red-500'
+          : isComplete
+            ? 'bg-green-500'
+            : isActive
+              ? 'bg-blue-500'
+              : 'bg-gray-300';
+        const textClass = isFailed
+          ? 'text-red-600'
+          : isComplete
+            ? 'text-green-700'
+            : isActive
+              ? 'text-blue-600'
+              : 'text-gray-400';
+        return (
+          <div key={phase.key} className="flex items-center gap-2">
+            <div className={`h-2 w-2 rounded-full ${dotClass}`} />
+            <span className={`text-xs font-medium ${textClass}`}>{phase.label}</span>
+            {index < trainingPhases.length - 1 && (
+              <div className={`h-px w-6 ${isComplete ? 'bg-green-300' : 'bg-gray-300'}`} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -349,16 +390,38 @@ export default function TrainingStatusPage() {
     toNumber(results.recall) !== null ||
     artifacts.length > 0
   );
+  const phaseIndex = isCompleted
+    ? 4
+    : isQueued
+      ? 1
+      : isTraining
+        ? 2
+        : 2;
+  const currentPhaseLabel = trainingPhases[phaseIndex]?.label || "Prep";
 
   // Content for the left column / Training Progress tab
+  const progressTitleConfig = isCompleted
+    ? { icon: <CheckCircle className="w-5 h-5 text-green-600" />, title: "Training Complete" }
+    : isFailed
+      ? { icon: <XCircle className="w-5 h-5 text-red-600" />, title: "Training Failed" }
+      : isCanceled
+        ? { icon: <StopCircle className="w-5 h-5 text-red-600" />, title: "Training Canceled" }
+        : isStopped
+          ? { icon: <StopCircle className="w-5 h-5 text-red-600" />, title: "Training Stopped" }
+          : isCanceling
+            ? { icon: <Clock className="w-5 h-5 text-amber-600" />, title: "Canceling Training" }
+            : isQueued
+              ? { icon: <Clock className="w-5 h-5 text-amber-600" />, title: "Training Queued" }
+              : { icon: <Sparkles className="w-5 h-5 text-purple-600" />, title: "Your AI Model is Learning" };
+
   const trainingProgressContent = (
     <div className="lg:col-span-2 space-y-6">
       {/* Training Animation Card */}
       <Card className="glass-effect border-0 shadow-xl">
         <CardHeader className="text-center">
           <CardTitle className="flex items-center justify-center gap-2">
-            <Sparkles className="w-5 h-5 text-purple-600" />
-            Your AI Model is Learning
+            {progressTitleConfig.icon}
+            {progressTitleConfig.title}
           </CardTitle>
         </CardHeader>
         <CardContent className="text-center">
@@ -416,35 +479,37 @@ export default function TrainingStatusPage() {
       </div>
 
       {/* Fun Tip Card */}
-      <Card className="glass-effect border-0 shadow-lg bg-gradient-to-r from-yellow-50 to-orange-50">
-        <CardContent className="p-6">
-          <div className="flex items-center gap-3">
-            <Coffee className="w-6 h-6 text-orange-600" />
-            <div>
-              <h3 className="font-semibold text-orange-900">While You Wait...</h3>
-              <AnimatePresence mode="wait">
-                <motion.p
-                  key={currentTip}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.5 }}
-                  className="text-orange-800 mt-1"
-                >
-                  {trainingTips[currentTip]}
-                </motion.p>
-              </AnimatePresence>
+      {(isTraining || isQueued || isCanceling) && (
+        <Card className="glass-effect border-0 shadow-lg bg-gradient-to-r from-yellow-50 to-orange-50">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3">
+              <Coffee className="w-6 h-6 text-orange-600" />
+              <div>
+                <h3 className="font-semibold text-orange-900">While You Wait...</h3>
+                <AnimatePresence mode="wait">
+                  <motion.p
+                    key={currentTip}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.5 }}
+                    className="text-orange-800 mt-1"
+                  >
+                    {trainingTips[currentTip]}
+                  </motion.p>
+                </AnimatePresence>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Completion/Stopped Alert */}
       {isCompleted && (
         <Alert className="border-green-300 bg-green-50">
           <CheckCircle className="h-4 w-4 text-green-600" />
           <AlertDescription className="text-green-800">
-            🎉 Congratulations! Your model has been trained successfully. You can now use it to make predictions on new images.
+            Congratulations! Your model has been trained successfully. You can now use it to make predictions on new images.
           </AlertDescription>
         </Alert>
       )}
@@ -665,7 +730,7 @@ export default function TrainingStatusPage() {
             )}
               </h1>
               <p className="text-gray-600 mt-1">
-                {project?.name} • {step?.title} • {trainingRun.run_name}
+                {project?.name} / {step?.title} / {trainingRun.run_name}
               </p>
             </div>
           </div>
@@ -706,14 +771,25 @@ export default function TrainingStatusPage() {
                     Export Model
                   </Button>
                 )}
-                <Button variant="outline" size="sm" className="glass-effect">
-                  <Share2 className="w-4 h-4 mr-2" />
-                  Share Results
-                </Button>
               </div>
             )}
           </div>
         </div>
+
+        <Card className="glass-effect border-0 shadow-lg mb-6">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs text-gray-500">Current phase</p>
+                <p className="text-sm font-semibold text-gray-900">{currentPhaseLabel}</p>
+              </div>
+              <div className="text-xs text-gray-500">Status: {trainingRun.status}</div>
+            </div>
+            <div className="mt-4">
+              <TrainingTimeline currentIndex={phaseIndex} status={trainingRun.status} />
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Content Tabs for Completed Models */}
         {isCompleted && hasResults ? (
@@ -905,16 +981,12 @@ export default function TrainingStatusPage() {
                         </Link>
                       )}
 
-                      {/* Existing action buttons */}
-                      <Button variant="outline">
-                        <Download className="w-4 h-4 mr-2" />
-                        Export Model
-                      </Button>
-
-                      <Button variant="outline">
-                        <Share2 className="w-4 h-4 mr-2" />
-                        Share Results
-                      </Button>
+                      <Link to={createPageUrl('Results')}>
+                        <Button variant="outline">
+                          <BarChart3 className="w-4 h-4 mr-2" />
+                          Compare Runs
+                        </Button>
+                      </Link>
                     </div>
 
                     {/* Deployment Info */}

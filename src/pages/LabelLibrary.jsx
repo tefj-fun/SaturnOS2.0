@@ -7,6 +7,7 @@ import { StepImage } from '@/api/entities'; // Not used in this file but part of
 import { LabelLibrary } from '@/api/entities';
 import { StepVariantConfig } from "@/api/entities";
 import { BuildVariant } from "@/api/entities";
+import { createSignedImageUrl, getStoragePathFromUrl } from "@/api/storage";
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +41,10 @@ import {
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const useMockData = import.meta.env.VITE_USE_MOCK_LABEL_LIBRARY === "true";
+const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
+const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
 
 // Mock data - in real implementation, this would be generated from actual annotation data
 const MOCK_LABEL_DATA = [
@@ -152,6 +157,9 @@ const MOCK_STEP_VARIANT_CONFIGS = [
   { id: 'config4', sop_step_id: 'step3', build_variant_id: 'variant3', active_classes: ['Dropdown', 'Label'] }, // Tablet for step3 uses Dropdown and Label
 ];
 
+const DEFAULT_LABEL_COLOR = '#64748B';
+const DEFAULT_LABEL_CATEGORY = 'Other';
+
 const CATEGORY_COLORS = {
   'UI Element': 'bg-blue-100 text-blue-800 border-blue-200',
   'Form Control': 'bg-green-100 text-green-800 border-green-200',
@@ -160,6 +168,57 @@ const CATEGORY_COLORS = {
   'Layout': 'bg-pink-100 text-pink-800 border-pink-200',
   'Interactive': 'bg-indigo-100 text-indigo-800 border-indigo-200',
   'Other': 'bg-gray-100 text-gray-800 border-gray-200'
+};
+
+const normalizeLabel = (label) => {
+  if (!label) return label;
+  const projectsUsed = Array.isArray(label.projects_used) ? label.projects_used : [];
+  const sampleImages = Array.isArray(label.sample_images) ? label.sample_images : [];
+  const averageConfidence = typeof label.average_confidence === 'number'
+    ? label.average_confidence
+    : Number(label.average_confidence) || 0;
+
+  return {
+    ...label,
+    label_name: label.label_name || 'Unnamed Label',
+    projects_used: projectsUsed,
+    sample_images: sampleImages,
+    total_annotations: Number(label.total_annotations) || 0,
+    average_confidence: averageConfidence,
+    category: label.category || DEFAULT_LABEL_CATEGORY,
+    color_hex: label.color_hex || DEFAULT_LABEL_COLOR,
+    description: label.description || '',
+    last_used: label.last_used || label.updated_date || label.created_date || null,
+  };
+};
+
+const formatDate = (value) => {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString();
+};
+
+const resolveSignedThumbnail = async (url) => {
+  if (!url || typeof url !== "string") return url;
+  if (url.startsWith("blob:") || url.startsWith("data:")) return url;
+
+  let bucket = STEP_IMAGES_BUCKET;
+  let path = getStoragePathFromUrl(url, STEP_IMAGES_BUCKET);
+  if (!path) {
+    bucket = DATASET_BUCKET;
+    path = getStoragePathFromUrl(url, DATASET_BUCKET);
+  }
+  if (!path) return url;
+
+  try {
+    return await createSignedImageUrl(bucket, path, {
+      expiresIn: 3600,
+      transform: { width: 300, height: 300, resize: "cover" },
+    });
+  } catch (error) {
+    console.warn("Failed to sign label thumbnail URL:", error);
+    return url;
+  }
 };
 
 const StatCard = ({ icon, title, value, subtitle, color = 'blue' }) => (
@@ -185,6 +244,7 @@ const LabelCard = ({ label, onSelect, isSelected, viewMode }) => {
     if (confidence >= 0.8) return 'text-yellow-600 bg-yellow-50';
     return 'text-red-600 bg-red-50';
   };
+  const categoryClass = CATEGORY_COLORS[label.category] || CATEGORY_COLORS[DEFAULT_LABEL_CATEGORY];
 
   if (viewMode === 'list') {
     return (
@@ -219,7 +279,7 @@ const LabelCard = ({ label, onSelect, isSelected, viewMode }) => {
             <Badge className={`text-xs ${getConfidenceColor(label.average_confidence)}`}>
               {Math.round(label.average_confidence * 100)}%
             </Badge>
-            <Badge className={`text-xs ${CATEGORY_COLORS[label.category]}`}>
+            <Badge className={`text-xs ${categoryClass}`}>
               {label.category}
             </Badge>
           </div>
@@ -248,7 +308,7 @@ const LabelCard = ({ label, onSelect, isSelected, viewMode }) => {
               />
               <CardTitle className="text-lg">{label.label_name}</CardTitle>
             </div>
-            <Badge className={`text-xs ${CATEGORY_COLORS[label.category]}`}>
+            <Badge className={`text-xs ${categoryClass}`}>
               {label.category}
             </Badge>
           </div>
@@ -299,6 +359,7 @@ export default function LabelLibraryPage() {
   const [steps, setSteps] = useState([]); // New state for SOPSteps
   const [buildVariants, setBuildVariants] = useState([]); // New state for BuildVariants
   const [stepVariantConfigs, setStepVariantConfigs] = useState([]); // New state for StepVariantConfigs
+  const [loadError, setLoadError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
@@ -312,6 +373,7 @@ export default function LabelLibraryPage() {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const [labelsData, projectsData, stepsData, variantsData, configsData] = await Promise.all([
         LabelLibrary.list(),
@@ -321,7 +383,14 @@ export default function LabelLibraryPage() {
         StepVariantConfig.list()
       ]);
       
-      setLabels(labelsData);
+      const signedLabels = await Promise.all(
+        labelsData.map(async (label) => {
+          const sampleImages = Array.isArray(label.sample_images) ? label.sample_images : [];
+          const signedImages = await Promise.all(sampleImages.map(resolveSignedThumbnail));
+          return normalizeLabel({ ...label, sample_images: signedImages });
+        })
+      );
+      setLabels(signedLabels);
       setProjects(projectsData);
       setSteps(stepsData);
       setBuildVariants(variantsData);
@@ -333,11 +402,27 @@ export default function LabelLibraryPage() {
       
     } catch (error) {
       console.error('Error loading label library data:', error);
-      setLabels(MOCK_LABEL_DATA);
-      setProjects(MOCK_PROJECTS);
-      setSteps(MOCK_SOP_STEPS);
-      setBuildVariants(MOCK_BUILD_VARIANTS);
-      setStepVariantConfigs(MOCK_STEP_VARIANT_CONFIGS);
+      if (useMockData) {
+        const signedMockLabels = await Promise.all(
+          MOCK_LABEL_DATA.map(async (label) => {
+            const sampleImages = Array.isArray(label.sample_images) ? label.sample_images : [];
+            const signedImages = await Promise.all(sampleImages.map(resolveSignedThumbnail));
+            return normalizeLabel({ ...label, sample_images: signedImages });
+          })
+        );
+        setLabels(signedMockLabels);
+        setProjects(MOCK_PROJECTS);
+        setSteps(MOCK_SOP_STEPS);
+        setBuildVariants(MOCK_BUILD_VARIANTS);
+        setStepVariantConfigs(MOCK_STEP_VARIANT_CONFIGS);
+      } else {
+        setLoadError(error?.message || 'Failed to load label library data.');
+        setLabels([]);
+        setProjects([]);
+        setSteps([]);
+        setBuildVariants([]);
+        setStepVariantConfigs([]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -418,6 +503,7 @@ export default function LabelLibraryPage() {
     if (!label) return null;
 
     const labelUsage = getLabelUsage(label.label_name);
+    const categoryClass = CATEGORY_COLORS[label.category] || CATEGORY_COLORS[DEFAULT_LABEL_CATEGORY];
 
     return (
       <Dialog open={!!label} onOpenChange={() => onClose()}>
@@ -429,7 +515,7 @@ export default function LabelLibraryPage() {
                 style={{ backgroundColor: label.color_hex || '#3B82F6' }}
               />
               {label.label_name}
-              <Badge className={`${CATEGORY_COLORS[label.category]}`}>
+              <Badge className={`${categoryClass}`}>
                 {label.category}
               </Badge>
             </DialogTitle>
@@ -456,13 +542,13 @@ export default function LabelLibraryPage() {
                 <div className="flex justify-between">
                   <span className="text-gray-600">Created</span>
                   <span className="font-semibold">
-                    {new Date(label.created_date).toLocaleDateString()}
+                    {formatDate(label.created_date)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Last Used</span>
                   <span className="font-semibold">
-                    {new Date(label.last_used).toLocaleDateString()}
+                    {formatDate(label.last_used)}
                   </span>
                 </div>
               </div>
@@ -568,6 +654,12 @@ export default function LabelLibraryPage() {
             </p>
           </div>
         </div>
+
+        {loadError && (
+          <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {loadError}
+          </div>
+        )}
 
         {/* Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

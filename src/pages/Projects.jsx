@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from "react";
-import { listProjects, createProject, updateProject, deleteProject, listStepsByProject, deleteStepsByProject } from "@/api/db";
+import { listProjects, createProject, updateProject, deleteProject, deleteProjects, listStepsByProject } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +44,7 @@ import DeleteProjectDialog from "../components/projects/DeleteProjectDialog";
 import ReviewOnPhoneDialog from "../components/projects/ReviewOnPhoneDialog";
 import LoadingOverlay from "../components/projects/LoadingOverlay";
 import ProjectMembersDialog from "../components/projects/ProjectMembersDialog";
-import PermissionGate, { useProjectPermissions } from "../components/rbac/PermissionGate";
+import { useProjectPermissions } from "../components/rbac/PermissionGate";
 
 // Normalize project created date across legacy and Supabase fields
 const getCreatedDate = (project) =>
@@ -205,17 +205,9 @@ export default function ProjectsPage() {
     loadProjects();
   };
 
-  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
   const handleDeleteProject = async (projectId) => {
     setIsDeleting(true);
     try {
-      const steps = await listStepsByProject(projectId);
-      if (steps.length > 0) {
-        await deleteStepsByProject(projectId);
-        await delay(300);
-      }
-
       await deleteProject(projectId);
       setDeletingProject(null);
 
@@ -255,23 +247,7 @@ export default function ProjectsPage() {
     setShowBulkDeleteAlert(false);
     try {
       const projectsToDelete = Array.from(selectedProjects);
-
-      for (let i = 0; i < projectsToDelete.length; i++) {
-        const projectId = projectsToDelete[i];
-
-        const steps = await listStepsByProject(projectId);
-
-        if (steps.length > 0) {
-          await deleteStepsByProject(projectId);
-          await delay(300);
-        }
-
-        await deleteProject(projectId);
-
-        if (i < projectsToDelete.length - 1) {
-          await delay(600);
-        }
-      }
+      await deleteProjects(projectsToDelete);
 
       setSelectedProjects(new Set());
       loadProjects();
@@ -662,6 +638,16 @@ function ProjectCard({
   const [progress, setProgress] = useState(0);
   const statusConfig = getStatusConfig(project.status);
   const StatusIcon = statusConfig.icon;
+  const { hasPermission, isLoading } = useProjectPermissions(project.id);
+  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_SUPABASE_REQUIRE_AUTH !== 'true';
+  const permissionsLoading = !bypassPermissions && isLoading;
+  const actionReady = !permissionsLoading;
+  const canAccess = (permission) => bypassPermissions || hasPermission(permission);
+  const visibleActions = actionReady
+    ? projectActions.filter((action) => !action.permission || canAccess(action.permission))
+    : [];
+  const canEdit = canAccess("edit_project");
+  const canDelete = canAccess("delete_project");
 
   useEffect(() => {
     if (project.status === 'annotation_in_progress' || project.status === 'completed') {
@@ -724,67 +710,68 @@ function ProjectCard({
           </div>
 
           <div className="flex flex-wrap gap-2 mb-4">
-            {projectActions.map((action, index) => (
-              <PermissionGate
-                key={index}
-                projectId={project.id}
-                permission={action.permission}
-                fallback={null}
-              >
-                <Button
-                  variant={action.variant}
-                  onClick={action.action}
-                  disabled={isDeleting}
-                  className={`flex-1 ${action.customColor || ''} shadow-md hover:shadow-lg transition-all duration-300`}
-                  size="sm"
-                >
-                  {action.icon && <span className="mr-2">{action.icon}</span>}
-                  {action.label}
-                </Button>
-              </PermissionGate>
-            ))}
+            {actionReady && (
+              <>
+                {visibleActions.map((action, index) => (
+                  <Button
+                    key={index}
+                    variant={action.variant}
+                    onClick={action.action}
+                    disabled={isDeleting}
+                    className={`flex-1 ${action.customColor || ''} shadow-md hover:shadow-lg transition-all duration-300`}
+                    size="sm"
+                  >
+                    {action.icon && <span className="mr-2">{action.icon}</span>}
+                    {action.label}
+                  </Button>
+                ))}
 
-            <PermissionGate projectId={project.id} permission="view_project">
-              <Link to={createPageUrl(`StepManagement?projectId=${project.id}`)} className={isDeleting ? 'pointer-events-none' : ''}>
+                {canAccess("view_project") && (
+                  <Link to={createPageUrl(`StepManagement?projectId=${project.id}`)} className={isDeleting ? 'pointer-events-none' : ''}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isDeleting}
+                      className="px-3"
+                    >
+                      <Layers className="w-4 h-4" />
+                    </Button>
+                  </Link>
+                )}
+
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => onReview(project)}
                   disabled={isDeleting}
                   className="px-3"
                 >
-                  <Layers className="w-4 h-4" />
+                  Review
                 </Button>
-              </Link>
-            </PermissionGate>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onReview(project)}
-              disabled={isDeleting}
-              className="px-3"
-            >
-              Review
-            </Button>
+                {canAccess("manage_members") && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onMembers(project)}
+                    disabled={isDeleting}
+                    className="px-3"
+                  >
+                    <Users className="w-4 h-4" />
+                  </Button>
+                )}
 
-            <PermissionGate projectId={project.id} permission="manage_members">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onMembers(project)}
-                disabled={isDeleting}
-                className="px-3"
-              >
-                <Users className="w-4 h-4" />
-              </Button>
-            </PermissionGate>
-
-            <ProjectActionsDropdown
-              project={project}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              isDeleting={isDeleting}
-            />
+                <ProjectActionsDropdown
+                  canEdit={canEdit}
+                  canDelete={canDelete}
+                  isLoading={permissionsLoading}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  project={project}
+                  isDeleting={isDeleting}
+                />
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -793,12 +780,7 @@ function ProjectCard({
 }
 
 // Project actions dropdown component
-function ProjectActionsDropdown({ project, onEdit, onDelete, isDeleting }) {
-  const { hasPermission, isLoading } = useProjectPermissions(project.id);
-  // In local/dev (auth disabled), show actions by default so the menu isn't empty.
-  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_SUPABASE_REQUIRE_AUTH !== 'true';
-  const canEdit = bypassPermissions || hasPermission("edit_project");
-  const canDelete = bypassPermissions || hasPermission("delete_project");
+function ProjectActionsDropdown({ project, onEdit, onDelete, isDeleting, canEdit, canDelete, isLoading }) {
   const noActions = !canEdit && !canDelete && !isLoading;
 
   return (

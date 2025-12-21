@@ -41,6 +41,7 @@ export default function ModelStatusCard({ projectId, currentStep }) {
   const latestRun = trainingRuns.length > 0 ? trainingRuns[0] : null;
   const completedRuns = trainingRuns.filter(run => run.status === 'completed');
   const activeRun = trainingRuns.find(run => ['queued', 'running'].includes(run.status));
+  const latestCompletedRun = completedRuns.length > 0 ? completedRuns[0] : null;
 
   const getStatusInfo = () => {
     if (isLoading) {
@@ -87,8 +88,25 @@ export default function ModelStatusCard({ projectId, currentStep }) {
 
   const statusInfo = getStatusInfo();
 
+  const stepId = currentStep?.id || currentStep;
+
+  const getTrainingConfigUrl = () => {
+    if (stepId) {
+      return createPageUrl(`TrainingConfiguration?projectId=${projectId}&stepId=${stepId}`);
+    }
+    return createPageUrl(`TrainingConfiguration?projectId=${projectId}`);
+  };
+
   const handleTrainModel = () => {
-    navigate(createPageUrl(`TrainingConfiguration?projectId=${projectId}`));
+    navigate(getTrainingConfigUrl());
+  };
+
+  const handleViewRun = (run) => {
+    if (run?.id) {
+      navigate(createPageUrl(`TrainingStatus?runId=${run.id}`));
+      return;
+    }
+    handleTrainModel();
   };
 
   return (
@@ -162,7 +180,7 @@ export default function ModelStatusCard({ projectId, currentStep }) {
             {statusInfo.status === 'ready' && (
               <>
                 <Button 
-                  onClick={handleTrainModel}
+                  onClick={() => handleViewRun(latestCompletedRun || latestRun)}
                   variant="outline"
                   size="sm"
                   className="flex-1"
@@ -183,7 +201,7 @@ export default function ModelStatusCard({ projectId, currentStep }) {
 
             {statusInfo.status === 'training' && (
               <Button 
-                onClick={handleTrainModel}
+                onClick={() => handleViewRun(activeRun)}
                 variant="outline"
                 size="sm"
                 className="flex-1"

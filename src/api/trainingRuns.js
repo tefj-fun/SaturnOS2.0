@@ -41,7 +41,12 @@ export const TrainingRun = {
     let query = supabase.from(TABLE).select("*");
     Object.entries(filters).forEach(([key, value]) => {
       if (value === undefined || value === null) return;
-      query = query.eq(mapColumn(key), value);
+      const column = mapColumn(key);
+      if (Array.isArray(value)) {
+        query = query.in(column, value);
+        return;
+      }
+      query = query.eq(column, value);
     });
     query = applyOrder(query, orderBy);
     return query;

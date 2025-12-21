@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Switch } from '@/components/ui/switch';
 import { 
   ArrowLeft, 
   ChevronLeft, 
@@ -35,6 +36,7 @@ import { createPageUrl } from '@/utils';
 const BACKGROUND_CLASS = "Background";
 const IOU_THRESHOLD = 0.5;
 const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
+const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
 
 const toAnnotationArray = (value) => {
   if (!value) return [];
@@ -213,14 +215,22 @@ const resolveImageUrl = async (image) => {
   if (!image) return null;
   const fallbackUrl = image.display_url || image.image_url || image.thumbnail_url || "";
   if (!fallbackUrl) return null;
-  const path = getStoragePathFromUrl(fallbackUrl, STEP_IMAGES_BUCKET);
-  if (!path) return fallbackUrl;
-  try {
-    const signed = await createSignedImageUrl(STEP_IMAGES_BUCKET, path, { expiresIn: 3600 });
-    return signed || fallbackUrl;
-  } catch (error) {
-    return fallbackUrl;
-  }
+
+  const trySignedUrl = async (bucket) => {
+    const path = getStoragePathFromUrl(fallbackUrl, bucket);
+    if (!path) return null;
+    try {
+      const signed = await createSignedImageUrl(bucket, path, { expiresIn: 3600 });
+      return signed || fallbackUrl;
+    } catch (error) {
+      return fallbackUrl;
+    }
+  };
+
+  const stepImageUrl = await trySignedUrl(STEP_IMAGES_BUCKET);
+  if (stepImageUrl) return stepImageUrl;
+  const datasetUrl = await trySignedUrl(DATASET_BUCKET);
+  return datasetUrl || fallbackUrl;
 };
 
 const BoundingBox = ({ box, color, label, scaleX = 1, scaleY = 1 }) => {
@@ -252,37 +262,55 @@ const InteractiveConfusionMatrix = ({ data, classes, onCellClick }) => {
     return <p className="text-sm text-gray-500 text-center">No classification data available yet.</p>;
   }
   const maxCount = Math.max(1, ...data.map(d => d.count));
-  
+  const gridTemplateColumns = `minmax(140px, auto) repeat(${classes.length}, minmax(0, 1fr))`;
+  const getCellStyle = (cell, isCorrect) => {
+    if (!cell || cell.count === 0) {
+      return {
+        backgroundColor: "#f9fafb",
+        color: "#9ca3af",
+      };
+    }
+    const intensity = Math.min(1, cell.count / maxCount);
+    const baseColor = isCorrect ? { r: 34, g: 197, b: 94 } : { r: 239, g: 68, b: 68 };
+    const alpha = 0.2 + intensity * 0.6;
+    return {
+      backgroundColor: `rgba(${baseColor.r}, ${baseColor.g}, ${baseColor.b}, ${alpha})`,
+      color: isCorrect ? "#14532d" : "#7f1d1d",
+    };
+  };
+
   return (
     <div className="w-full">
       <div className="text-center mb-4">
         <p className="text-sm text-gray-600">Click on any cell to see example images</p>
       </div>
-      <div className="grid grid-cols-6 gap-1 text-xs">
-        <div className="text-center font-bold text-gray-700 p-2">Actual →<br/>Predicted ↓</div>
-        {classes.map(cls => (
-          <div key={cls} className="text-center font-medium text-gray-600 p-2 rotate-45 origin-center">{cls}</div>
+      <div className="grid gap-1 text-xs" style={{ gridTemplateColumns }}>
+        <div className="text-center font-semibold text-gray-700 p-2 leading-tight">
+          <div>Actual</div>
+          <div className="text-xs font-normal text-gray-500">Predicted</div>
+        </div>
+        {classes.map((cls) => (
+          <div key={cls} className="text-center font-medium text-gray-600 p-2 rotate-45 origin-center">
+            {cls}
+          </div>
         ))}
-        {classes.map((predictedClass, i) => (
+        {classes.map((predictedClass) => (
           <React.Fragment key={predictedClass}>
-            <div className="text-right font-medium text-gray-600 p-2 flex items-center justify-end">{predictedClass}</div>
-            {classes.map(actualClass => {
+            <div className="text-right font-medium text-gray-600 p-2 flex items-center justify-end">
+              {predictedClass}
+            </div>
+            {classes.map((actualClass) => {
               const cell = data.find(d => d.actual === actualClass && d.predicted === predictedClass);
-              const intensity = cell ? cell.count / maxCount : 0;
               const isCorrect = actualClass === predictedClass;
-              
+              const cellStyle = getCellStyle(cell, isCorrect);
               return (
                 <button
                   key={`${actualClass}-${predictedClass}`}
+                  type="button"
                   onClick={() => onCellClick(cell)}
-                  className={`aspect-square flex items-center justify-center text-xs font-medium rounded transition-all hover:scale-110 hover:shadow-lg cursor-pointer ${
-                    isCorrect 
-                      ? `bg-green-${Math.floor(intensity * 400) + 100} hover:bg-green-${Math.floor(intensity * 400) + 200} text-green-800` 
-                      : cell && cell.count > 0
-                        ? `bg-red-${Math.floor(intensity * 400) + 100} hover:bg-red-${Math.floor(intensity * 400) + 200} text-red-800`
-                        : 'bg-gray-50 hover:bg-gray-100 text-gray-400'
-                  }`}
-                  title={`${actualClass} → ${predictedClass}: ${cell ? cell.count : 0} cases${!isCorrect && cell && cell.count > 0 ? ' (Click to see examples)' : ''}`}
+                  className="aspect-square flex items-center justify-center text-xs font-medium rounded border border-gray-200 transition-transform hover:scale-105 hover:shadow-sm cursor-pointer"
+                  style={cellStyle}
+                  title={`${actualClass} -> ${predictedClass}: ${cell ? cell.count : 0} cases${!isCorrect && cell && cell.count > 0 ? ' (Click to see examples)' : ''}`}
                 >
                   {cell ? cell.count : 0}
                 </button>
@@ -304,7 +332,7 @@ const ImageErrorDialog = ({ cell, open, onClose }) => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-red-600" />
-            Classification Errors: {cell.actual} → {cell.predicted}
+            Classification Errors: {cell.actual} -> {cell.predicted}
           </DialogTitle>
           <DialogDescription>
             The model incorrectly predicted "{cell.predicted}" when the actual class was "{cell.actual}" in these {cell.count} cases.
@@ -452,6 +480,10 @@ export default function AnnotationReviewPage() {
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [showGroundTruth, setShowGroundTruth] = useState(true);
+  const [showPredictions, setShowPredictions] = useState(true);
+  const [isImageLoading, setIsImageLoading] = useState(true);
+  const [imageError, setImageError] = useState("");
   const imageRef = useRef(null);
   const [imageScale, setImageScale] = useState({
     naturalWidth: 0,
@@ -665,6 +697,26 @@ export default function AnnotationReviewPage() {
       return acc;
     }, {})
   ), [validationImages]);
+  const imageStats = useMemo(() => {
+    const truePositives = currentPredictions.filter(p => p.match === 'true_positive').length;
+    const falsePositives = currentPredictions.filter(p => p.match === 'false_positive').length;
+    const falseNegatives = currentGroundTruths.filter(gt => gt.match === 'false_negative').length;
+    const totalGroundTruth = currentGroundTruths.length;
+    const totalPredictions = currentPredictions.length;
+    const precision = (truePositives + falsePositives) > 0
+      ? (truePositives / (truePositives + falsePositives)) * 100
+      : null;
+    const recall = totalGroundTruth > 0 ? (truePositives / totalGroundTruth) * 100 : null;
+    return {
+      truePositives,
+      falsePositives,
+      falseNegatives,
+      totalGroundTruth,
+      totalPredictions,
+      precision,
+      recall,
+    };
+  }, [currentPredictions, currentGroundTruths]);
 
   const goToNextImage = () => setCurrentImageIndex(prev => Math.min(prev + 1, validationImages.length - 1));
   const goToPrevImage = () => setCurrentImageIndex(prev => Math.max(prev - 1, 0));
@@ -709,11 +761,28 @@ export default function AnnotationReviewPage() {
       displayWidth: rect.width,
       displayHeight: rect.height,
     });
+    setIsImageLoading(false);
+    setImageError("");
+  }, []);
+  const handleImageError = useCallback(() => {
+    setIsImageLoading(false);
+    setImageError("Failed to load this image.");
   }, []);
 
   useEffect(() => {
     updateImageScale();
   }, [currentImageUrl, updateImageScale]);
+
+  useEffect(() => {
+    setIsImageLoading(true);
+    setImageError("");
+    setImageScale({
+      naturalWidth: 0,
+      naturalHeight: 0,
+      displayWidth: 0,
+      displayHeight: 0,
+    });
+  }, [currentImageUrl]);
 
   useEffect(() => {
     const handleResize = () => updateImageScale();
@@ -722,7 +791,17 @@ export default function AnnotationReviewPage() {
   }, [updateImageScale]);
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-screen">Loading validation results...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+            <BarChart3 className="w-8 h-8 animate-pulse text-blue-600" />
+          </div>
+          <p className="text-gray-700 font-medium">Loading validation results...</p>
+          <p className="text-sm text-gray-500 mt-1">Preparing images, metrics, and logic checks</p>
+        </div>
+      </div>
+    );
   }
 
   if (loadError) {
@@ -754,13 +833,6 @@ export default function AnnotationReviewPage() {
       </div>
     );
   }
-
-  const truePositives = currentPredictions.filter(p => p.match === 'true_positive').length;
-  const falsePositives = currentPredictions.filter(p => p.match === 'false_positive').length;
-  const falseNegatives = currentGroundTruths.filter(gt => gt.match === 'false_negative').length;
-  const totalGroundTruth = currentGroundTruths.length;
-  const precision = (truePositives + falsePositives) > 0 ? (truePositives / (truePositives + falsePositives)) * 100 : 0;
-  const recall = totalGroundTruth > 0 ? (truePositives / totalGroundTruth) * 100 : 0;
 
   const classes = confusionClasses.length ? confusionClasses : [BACKGROUND_CLASS];
 
@@ -862,7 +934,7 @@ export default function AnnotationReviewPage() {
           <TabsContent value="confusion-matrix" className="flex-1 p-6 overflow-hidden">
             <div className="h-full flex flex-col">
               <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Classification Analysis</h2>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Confusion Matrix</h2>
                 <p className="text-gray-600 mb-4">
                   Click on any cell to see which specific images caused classification errors.
                 </p>
@@ -882,31 +954,60 @@ export default function AnnotationReviewPage() {
           
           <TabsContent value="image-viewer" className="flex-1 overflow-hidden">
             {/* Image Viewer Content - keeping existing implementation */}
-            <main className="flex-1 flex overflow-hidden">
+            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
               {/* Image Viewer */}
-              <div className="flex-1 flex items-center justify-center bg-gray-800 p-4 relative">
-                <div className="absolute top-4 left-4 flex items-center gap-2">
-                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={goToPrevImage} disabled={currentImageIndex === 0}>
+              <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center bg-gray-900 p-4 relative">
+                <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+                  <Button variant="outline" size="icon" className="h-8 w-8 bg-white/90" onClick={goToPrevImage} disabled={currentImageIndex === 0}>
                     <ChevronLeft className="w-4 h-4" />
                   </Button>
-                  <span className="text-sm font-medium text-white bg-black/50 px-2 py-1 rounded">
+                  <span className="text-sm font-medium text-white bg-black/60 px-2 py-1 rounded">
                     Image {currentImageIndex + 1} of {validationImages.length}
                   </span>
-                  <Button variant="outline" size="icon" className="h-8 w-8" onClick={goToNextImage} disabled={currentImageIndex === validationImages.length - 1}>
+                  <Button variant="outline" size="icon" className="h-8 w-8 bg-white/90" onClick={goToNextImage} disabled={currentImageIndex === validationImages.length - 1}>
                     <ChevronRight className="w-4 h-4" />
                   </Button>
                 </div>
                 
                 <div className="relative inline-block">
-                  <img
-                    ref={imageRef}
-                    src={currentImageUrl}
-                    alt="Validation"
-                    onLoad={handleImageLoad}
-                    className="max-h-[85vh] max-w-[70vw] object-contain rounded"
-                  />
-                  {/* Ground Truth Boxes */}
-                  {currentGroundTruths.map(gt => (
+                  {currentImageUrl ? (
+                    <img
+                      ref={imageRef}
+                      src={currentImageUrl}
+                      alt="Validation"
+                      onLoad={handleImageLoad}
+                      onError={handleImageError}
+                      className="max-h-[85vh] max-w-[70vw] object-contain rounded shadow-lg"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-6 py-8 text-white/80">
+                      <ImageIcon className="h-6 w-6" />
+                      <p className="text-sm">No image available for this entry.</p>
+                    </div>
+                  )}
+
+                  {isImageLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center rounded bg-black/40 text-sm font-medium text-white">
+                      Loading image...
+                    </div>
+                  )}
+
+                  {imageError && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded bg-black/60 px-6 text-center text-sm text-white">
+                      <p>{imageError}</p>
+                      {currentImageUrl && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => window.open(currentImageUrl, "_blank", "noopener,noreferrer")}
+                        >
+                          Open original
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  {!isImageLoading && !imageError && showGroundTruth && currentGroundTruths.map(gt => (
                     <BoundingBox
                       key={gt.id}
                       box={gt.bounding_box}
@@ -916,8 +1017,8 @@ export default function AnnotationReviewPage() {
                       scaleY={scaleY}
                     />
                   ))}
-                  {/* Prediction Boxes */}
-                  {currentPredictions.map(p => (
+
+                  {!isImageLoading && !imageError && showPredictions && currentPredictions.map(p => (
                     <BoundingBox
                       key={p.id}
                       box={p.bounding_box}
@@ -931,46 +1032,74 @@ export default function AnnotationReviewPage() {
               </div>
 
               {/* Side Panel */}
-              <aside className="w-80 bg-white border-l border-gray-200 p-6 flex flex-col">
+              <aside className="w-full lg:w-80 bg-white border-l border-gray-200 p-6 flex flex-col gap-4 overflow-y-auto">
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg">Image Performance</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-                      <div className="flex justify-between text-sm mb-1"><span>Precision</span><span>{precision.toFixed(1)}%</span></div>
-                      <Progress value={precision} />
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>Precision</span>
+                        <span>{imageStats.precision === null ? "N/A" : `${imageStats.precision.toFixed(1)}%`}</span>
+                      </div>
+                      <Progress value={imageStats.precision ?? 0} />
                     </div>
                     <div>
-                      <div className="flex justify-between text-sm mb-1"><span>Recall</span><span>{recall.toFixed(1)}%</span></div>
-                      <Progress value={recall} />
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>Recall</span>
+                        <span>{imageStats.recall === null ? "N/A" : `${imageStats.recall.toFixed(1)}%`}</span>
+                      </div>
+                      <Progress value={imageStats.recall ?? 0} />
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Predictions</span>
+                      <span>{imageStats.totalPredictions}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Ground truth</span>
+                      <span>{imageStats.totalGroundTruth}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Overlay Controls</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Ground truth boxes</span>
+                      <Switch checked={showGroundTruth} onCheckedChange={setShowGroundTruth} />
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Prediction boxes</span>
+                      <Switch checked={showPredictions} onCheckedChange={setShowPredictions} />
                     </div>
                   </CardContent>
                 </Card>
                 
-                <div className="mt-4 space-y-2">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between p-2 bg-green-50 rounded">
                     <span className="font-medium text-green-800">Correct Detections</span>
-                    <Badge variant="secondary">{truePositives}</Badge>
+                    <Badge variant="secondary">{imageStats.truePositives}</Badge>
                   </div>
                   <div className="flex items-center justify-between p-2 bg-red-50 rounded">
                     <span className="font-medium text-red-800">False Detections</span>
-                    <Badge variant="destructive">{falsePositives}</Badge>
+                    <Badge variant="destructive">{imageStats.falsePositives}</Badge>
                   </div>
                   <div className="flex items-center justify-between p-2 bg-yellow-50 rounded">
                     <span className="font-medium text-yellow-800">Missed Detections</span>
-                    <Badge className="bg-yellow-200 text-yellow-900">{falseNegatives}</Badge>
+                    <Badge className="bg-yellow-200 text-yellow-900">{imageStats.falseNegatives}</Badge>
                   </div>
                 </div>
                 
-                <div className="mt-auto">
-                  <Alert className="border-blue-300 bg-blue-50">
-                    <Wand2 className="h-4 w-4 text-blue-600" />
-                    <AlertDescription className="text-blue-800">
-                      Low recall? Add more examples of missed objects. High false detections? Add more negative examples.
-                    </AlertDescription>
-                  </Alert>
-                </div>
+                <Alert className="border-blue-300 bg-blue-50">
+                  <Wand2 className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-blue-800">
+                    Low recall? Add more examples of missed objects. High false detections? Add more negative examples.
+                  </AlertDescription>
+                </Alert>
               </aside>
             </main>
           </TabsContent>

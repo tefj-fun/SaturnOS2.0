@@ -24,6 +24,10 @@ export async function getProjectById(id) {
 export async function createProject(projectData) {
   const { data: authData } = await supabase.auth.getUser();
   const currentUser = authData?.user;
+  const requireAuth = import.meta.env.VITE_SUPABASE_REQUIRE_AUTH === "true";
+  if (!currentUser && requireAuth) {
+    throw new Error("Sign in required to create a project.");
+  }
   const payload = {
     ...projectData,
     created_by: currentUser?.id || null,
@@ -34,6 +38,9 @@ export async function createProject(projectData) {
     .select()
     .single();
   if (error) throw error;
+  if (!currentUser) {
+    return data;
+  }
   if (currentUser) {
     const ownerPermissions = getPermissionsForProjectRole("owner");
     const memberPayload = {
@@ -51,6 +58,9 @@ export async function createProject(projectData) {
       .from("project_members")
       .insert(memberPayload);
     if (memberError) {
+      if (requireAuth) {
+        throw memberError;
+      }
       console.error("Failed to create project owner membership:", memberError);
     }
   }
@@ -70,6 +80,15 @@ export async function deleteProject(projectId) {
     .from("projects")
     .delete()
     .eq("id", projectId);
+  if (error) throw error;
+}
+
+export async function deleteProjects(projectIds) {
+  if (!Array.isArray(projectIds) || projectIds.length === 0) return;
+  const { error } = await supabase
+    .from("projects")
+    .delete()
+    .in("id", projectIds);
   if (error) throw error;
 }
 
@@ -163,6 +182,15 @@ export async function createStepImage(imageData) {
   return data;
 }
 
+export async function createStepImages(imageData) {
+  if (!Array.isArray(imageData) || imageData.length === 0) return [];
+  const { error } = await supabase
+    .from("step_images")
+    .insert(imageData);
+  if (error) throw error;
+  return [];
+}
+
 export async function updateStepImage(imageId, updates) {
   const { error } = await supabase
     .from("step_images")
@@ -176,5 +204,14 @@ export async function deleteStepImage(imageId) {
     .from("step_images")
     .delete()
     .eq("id", imageId);
+  if (error) throw error;
+}
+
+export async function deleteStepImages(imageIds) {
+  if (!Array.isArray(imageIds) || imageIds.length === 0) return;
+  const { error } = await supabase
+    .from("step_images")
+    .delete()
+    .in("id", imageIds);
   if (error) throw error;
 }

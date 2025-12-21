@@ -444,25 +444,25 @@ export default function DashboardPage() {
                     </Link>
                   </div> :
 
-                <div className="space-y-4">
+                <div className="space-y-2">
                     {projects.slice(0, 4).map((project) => {
                     const statusConfig = getStatusConfig(project.status);
                     const progress = getProjectProgress(project);
 
                     return (
-                      <div key={project.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                      <div key={project.id} className="flex items-center justify-between px-4 py-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                           <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
+                            <div className="flex items-center gap-2 mb-1">
                               <h4 className="font-semibold text-gray-900">{project.name}</h4>
                               <Badge className={`${statusConfig.color} border-0 text-xs`}>
                                 {statusConfig.label}
                               </Badge>
                             </div>
                             {project.description &&
-                          <p className="text-sm text-gray-600 mb-2">{project.description}</p>
+                          <p className="text-sm text-gray-600 mb-1">{project.description}</p>
                           }
                             {(project.status === 'annotation_in_progress' || project.status === 'completed') &&
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
                                 <Progress value={progress} className="h-1 flex-1" />
                                 <span className="text-xs text-gray-500">{progress}%</span>
                               </div>

@@ -24,11 +24,23 @@ import Settings from "./Settings";
 
 import Dashboard from "./Dashboard";
 
-import BuildVariants from "./BuildVariants";
-
 import Welcome from "./Welcome";
 
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+
+function BuildVariantsComingSoon() {
+    return (
+        <div className="min-h-[60vh] flex items-center justify-center px-6 py-16">
+            <div className="text-center max-w-xl">
+                <p className="text-sm uppercase tracking-[0.3em] text-gray-400">Build Variants</p>
+                <h1 className="mt-3 text-3xl md:text-4xl font-semibold text-gray-900">Coming soon</h1>
+                <p className="mt-3 text-gray-600">
+                    We are polishing this experience. Check back soon.
+                </p>
+            </div>
+        </div>
+    );
+}
 
 const PAGES = {
     
@@ -56,7 +68,7 @@ const PAGES = {
     
     Dashboard: Dashboard,
     
-    BuildVariants: BuildVariants,
+    BuildVariants: BuildVariantsComingSoon,
     
 }
 
@@ -114,7 +126,8 @@ function PagesContent() {
                 
                 <Route path="/Dashboard" element={<Dashboard />} />
                 
-                <Route path="/BuildVariants" element={<BuildVariants />} />
+                
+                <Route path="/BuildVariants" element={<BuildVariantsComingSoon />} />
                 
             </Routes>
         </Layout>

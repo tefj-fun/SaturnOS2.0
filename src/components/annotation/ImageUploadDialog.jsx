@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import { uploadToSupabaseStorage } from "@/api/storage";
-import { createStepImage, updateStep } from "@/api/db";
+import { createStepImages, updateStep } from "@/api/db";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { UploadCloud, File, X, ChevronRight, ChevronLeft, Sprout, TestTube2, Folder, Loader2 } from "lucide-react";
+import { UploadCloud, File, X, ChevronRight, ChevronLeft, Sprout, TestTube2, Folder, Loader2, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Helper function to shuffle an array
@@ -34,9 +34,33 @@ const isClassFile = (file) => /\.(txt|names|ya?ml)$/i.test(file.name);
 const isYamlFile = (file) => /\.(ya?ml)$/i.test(file.name);
 const toSafeSegment = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
 const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
+const UPLOAD_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_UPLOAD_CONCURRENCY) || 6);
+const INSERT_BATCH_SIZE = Math.max(1, Number(import.meta.env.VITE_UPLOAD_INSERT_BATCH) || 25);
+const MAX_IMAGE_PREVIEWS = 24;
+const MAX_LABEL_PREVIEWS = 20;
 
 const stripInlineComment = (value) => value.split(/\s+#/)[0].trim();
 const stripQuotes = (value) => value.replace(/^['"]|['"]$/g, "");
+
+const resolveSplitName = (groupName) => {
+  const normalized = String(groupName || "").toLowerCase();
+  if (normalized === "training") return "train";
+  if (normalized === "inference" || normalized === "validation" || normalized === "val") return "val";
+  return "test";
+};
+
+const runWithConcurrency = async (items, limit, worker) => {
+  if (!items.length) return;
+  const queue = [...items];
+  const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) {
+      const next = queue.shift();
+      if (!next) return;
+      await worker(next);
+    }
+  });
+  await Promise.all(runners);
+};
 
 const parseClassListFromText = (content) => (
   content
@@ -195,6 +219,7 @@ export default function ImageUploadDialog({
   projectId,
 }) {
   const [step, setStep] = useState('select'); // 'select', 'split', 'uploading'
+  const [uploadMode, setUploadMode] = useState('guided'); // 'guided', 'training-only'
   const [files, setFiles] = useState([]);
   const [labelFiles, setLabelFiles] = useState([]);
   const [classFile, setClassFile] = useState(null);
@@ -284,16 +309,14 @@ export default function ImageUploadDialog({
     return { path, publicUrl };
   }, [projectId, currentStepId, classMapping, stepClasses]);
 
-  const uploadDatasetArtifact = useCallback(async ({ file, stem, labelContent, groupName }) => {
+  const uploadDatasetArtifact = useCallback(async ({ file, stem, labelContent, groupName, skipImageUpload = false }) => {
     if (!projectId || !currentStepId) return;
-    const safeName = toSafeSegment(file.name);
-    const splitName = groupName === "Training"
-      ? "train"
-      : groupName === "Inference"
-        ? "val"
-        : "test";
-    const imagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
-    await uploadToSupabaseStorage(file, imagePath, { bucket: DATASET_BUCKET });
+    const splitName = resolveSplitName(groupName);
+    if (!skipImageUpload && file) {
+      const safeName = toSafeSegment(file.name);
+      const imagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
+      await uploadToSupabaseStorage(file, imagePath, { bucket: DATASET_BUCKET });
+    }
     if (labelContent === undefined) {
       return;
     }
@@ -310,7 +333,7 @@ export default function ImageUploadDialog({
   const [splitType, setSplitType] = useState('auto'); // 'auto', 'manual'
   const [trainingRatio, setTrainingRatio] = useState(80);
   const [inferenceRatio, setInferenceRatio] = useState(20);
-  const [otherGroupName, setOtherGroupName] = useState("Validation");
+  const [otherGroupName, setOtherGroupName] = useState("Test");
 
   const otherRatio = useMemo(() => {
     const calculatedOther = 100 - trainingRatio - inferenceRatio;
@@ -320,6 +343,11 @@ export default function ImageUploadDialog({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadMessage, setUploadMessage] = useState("Preparing upload...");
+
+  const visibleImageFiles = useMemo(() => files.slice(0, MAX_IMAGE_PREVIEWS), [files]);
+  const hiddenImageCount = Math.max(0, files.length - visibleImageFiles.length);
+  const visibleLabelFiles = useMemo(() => labelFiles.slice(0, MAX_LABEL_PREVIEWS), [labelFiles]);
+  const hiddenLabelCount = Math.max(0, labelFiles.length - visibleLabelFiles.length);
 
   const handleFileSelect = (selectedFiles) => {
     const newFiles = Array.from(selectedFiles)
@@ -415,148 +443,215 @@ export default function ImageUploadDialog({
     };
   }, [files, labelFiles]);
 
+  const buildLabelContentByStem = async () => {
+    const labelContentByStem = new Map();
+    if (labelFiles.length === 0) return labelContentByStem;
+    const labelEntries = await Promise.all(
+      labelFiles.map(async (labelWrapper) => ({
+        stem: getFileStem(labelWrapper.file.name).toLowerCase(),
+        content: await labelWrapper.file.text(),
+      }))
+    );
+    labelEntries.forEach(({ stem, content }) => {
+      if (!labelContentByStem.has(stem)) {
+        labelContentByStem.set(stem, content);
+      }
+    });
+    return labelContentByStem;
+  };
+
   const handleClose = () => {
     // Reset state when closing dialog
     setFiles([]);
     setLabelFiles([]);
     setClassFile(null);
     setStep('select');
+    setUploadMode('guided');
     setSplitType('auto');
     setTrainingRatio(80);
     setInferenceRatio(20);
-    setOtherGroupName("Validation");
+    setOtherGroupName("Test");
     setIsUploading(false);
     setUploadProgress(0);
     setUploadMessage("Preparing upload...");
     onOpenChange(false);
   };
 
-  const startUploadProcess = async () => {
+  const startUploadProcess = async ({ mode = 'guided' } = {}) => {
     if (files.length === 0 || !currentStepId) return;
 
+    setUploadMode(mode);
+    setUploadMessage(mode === 'training-only' ? 'Preparing training upload...' : 'Preparing upload...');
     setStep('uploading');
     setIsUploading(true);
 
     const shuffledFiles = shuffleArray([...files]);
     const totalFiles = shuffledFiles.length;
-    const labelContentByStem = new Map();
-    for (const labelWrapper of labelFiles) {
-      const stem = getFileStem(labelWrapper.file.name).toLowerCase();
-      if (!labelContentByStem.has(stem)) {
-        labelContentByStem.set(stem, await labelWrapper.file.text());
-      }
-    }
+    const labelContentByStem = await buildLabelContentByStem();
 
-    let splits;
-    if (splitType === 'auto') {
-      splits = { Training: 0.8, Inference: 0.2 };
+    let assignments = {};
+    if (mode === 'training-only') {
+      assignments = { Training: shuffledFiles };
     } else {
-      const otherRatioValue = otherRatio > 0 ? otherRatio : 0;
-      splits = {
-        Training: trainingRatio / 100,
-        Inference: inferenceRatio / 100,
-      };
-      if (otherRatioValue > 0 && otherGroupName.trim()) {
-        splits[otherGroupName.trim()] = otherRatioValue / 100;
+      let splits;
+      if (splitType === 'auto') {
+        splits = { Training: 0.8, Validation: 0.2 };
+      } else {
+        const otherRatioValue = otherRatio > 0 ? otherRatio : 0;
+        splits = {
+          Training: trainingRatio / 100,
+          Validation: inferenceRatio / 100,
+        };
+        if (otherRatioValue > 0 && otherGroupName.trim()) {
+          splits[otherGroupName.trim()] = otherRatioValue / 100;
+        }
       }
-    }
 
-    // Ensure Training and Inference always exist as groups, even if empty
-    if (!splits.Training) splits.Training = 0;
-    if (!splits.Inference) splits.Inference = 0;
+      // Ensure Training and Validation always exist as groups, even if empty
+      if (!splits.Training) splits.Training = 0;
+      if (!splits.Validation) splits.Validation = 0;
 
-    const assignments = {};
-    let currentIndex = 0;
+      let currentIndex = 0;
 
-    // Distribute files based on calculated ratios
-    for (const [group, ratio] of Object.entries(splits)) {
-      if (ratio > 0) {
-        // Use Math.floor to avoid overallocating, we'll handle remainders later
-        const count = Math.floor(totalFiles * ratio);
-        assignments[group] = shuffledFiles.slice(currentIndex, currentIndex + count);
-        currentIndex += count;
+      // Distribute files based on calculated ratios
+      for (const [group, ratio] of Object.entries(splits)) {
+        if (ratio > 0) {
+          // Use Math.floor to avoid overallocating, we'll handle remainders later
+          const count = Math.floor(totalFiles * ratio);
+          assignments[group] = shuffledFiles.slice(currentIndex, currentIndex + count);
+          currentIndex += count;
+        }
       }
-    }
-    
-    // Distribute any remaining files (due to rounding) to the largest group
-    let assignedCount = Object.values(assignments).reduce((sum, arr) => sum + arr.length, 0);
-    if (assignedCount < totalFiles) {
-       const remainingFiles = shuffledFiles.slice(assignedCount);
-       if (Object.keys(assignments).length > 0) {
-         const largestGroup = Object.keys(assignments).reduce((a, b) => assignments[a].length > assignments[b].length ? a : b);
-         assignments[largestGroup].push(...remainingFiles);
-       } else if (remainingFiles.length > 0) {
-         // This case happens if all ratios are 0 or no groups were specified, assign all to 'Untagged'
-         assignments['Untagged'] = remainingFiles;
-       }
+      
+      // Distribute any remaining files (due to rounding) to the largest group
+      let assignedCount = Object.values(assignments).reduce((sum, arr) => sum + arr.length, 0);
+      if (assignedCount < totalFiles) {
+         const remainingFiles = shuffledFiles.slice(assignedCount);
+         if (Object.keys(assignments).length > 0) {
+           const largestGroup = Object.keys(assignments).reduce((a, b) => assignments[a].length > assignments[b].length ? a : b);
+           assignments[largestGroup].push(...remainingFiles);
+         } else if (remainingFiles.length > 0) {
+           // This case happens if all ratios are 0 or no groups were specified, assign all to 'Untagged'
+           assignments['Untagged'] = remainingFiles;
+         }
+      }
     }
 
     try {
-      let filesUploaded = 0;
+      const uploadTargets = [];
       for (const [groupName, groupFiles] of Object.entries(assignments)) {
         if (!groupFiles || groupFiles.length === 0) continue;
         for (const fileWrapper of groupFiles) {
-          filesUploaded++;
-          setUploadMessage(`Uploading to "${groupName}": ${fileWrapper.file.name}`);
-          setUploadProgress(Math.round((filesUploaded / totalFiles) * 100));
+          uploadTargets.push({ groupName, fileWrapper });
+        }
+      }
 
-          const uploadPath = `${currentStepId}/${fileWrapper.file.name}`;
-          const { publicUrl } = await uploadToSupabaseStorage(fileWrapper.file, uploadPath, "step-images");
+      const insertQueue = [];
+      let insertPromise = Promise.resolve();
 
-          let annotationPayload = null;
-          let noAnnotationsNeeded = false;
-          const stem = getFileStem(fileWrapper.file.name).toLowerCase();
-          const labelContent = labelContentByStem.get(stem);
-          if (labelContent !== undefined) {
-            try {
-              const imageSize = await loadImageDimensions(fileWrapper.file);
-              const annotations = parseYoloLabels(labelContent, imageSize, classMapping);
-              const trimmedLabel = labelContent.trim();
-              annotationPayload = {
-                annotations,
-                classColors: {},
-                image_natural_size: imageSize,
-                timestamp: new Date().toISOString(),
-              };
-              if (annotations.length === 0 && trimmedLabel.length === 0) {
-                noAnnotationsNeeded = true;
-              } else if (annotations.length === 0 && trimmedLabel.length > 0) {
-                console.warn(`No valid annotations found in ${fileWrapper.file.name} label file.`);
-              }
-            } catch (error) {
-              console.warn(`Failed to parse labels for ${fileWrapper.file.name}:`, error);
-            }
-          }
+      const scheduleInsert = (batch) => {
+        insertPromise = insertPromise.then(() => createStepImages(batch));
+      };
 
-          const payload = {
-            step_id: currentStepId,
-            image_url: publicUrl,
-            thumbnail_url: publicUrl,
-            display_url: publicUrl,
-            image_name: fileWrapper.file.name,
-            file_size: fileWrapper.file.size,
-            image_group: groupName, // Assign the calculated group name
-            processing_status: 'completed',
-            no_annotations_needed: noAnnotationsNeeded
-          };
+      const enqueueInsert = (payload) => {
+        insertQueue.push(payload);
+        if (insertQueue.length >= INSERT_BATCH_SIZE) {
+          const batch = insertQueue.splice(0, insertQueue.length);
+          scheduleInsert(batch);
+        }
+      };
 
-          if (annotationPayload) {
-            payload.annotations = annotationPayload;
-          }
+      const flushInserts = async () => {
+        if (insertQueue.length > 0) {
+          const batch = insertQueue.splice(0, insertQueue.length);
+          scheduleInsert(batch);
+        }
+        await insertPromise;
+      };
 
-          await createStepImage(payload);
-          await uploadDatasetArtifact({
+      let filesUploaded = 0;
+      const totalUploads = uploadTargets.length;
+      const uploadSingle = async ({ groupName, fileWrapper }) => {
+        setUploadMessage(`Uploading to "${groupName}": ${fileWrapper.file.name}`);
+        const stem = getFileStem(fileWrapper.file.name).toLowerCase();
+        const labelContent = labelContentByStem.get(stem);
+        const splitName = resolveSplitName(groupName);
+        const safeName = toSafeSegment(fileWrapper.file.name);
+        const datasetImagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
+        const uploadPromise = uploadToSupabaseStorage(fileWrapper.file, datasetImagePath, {
+          bucket: DATASET_BUCKET,
+        });
+        const imageSizePromise = labelContent !== undefined
+          ? loadImageDimensions(fileWrapper.file).catch((error) => {
+            console.warn(`Failed to load image size for ${fileWrapper.file.name}:`, error);
+            return null;
+          })
+          : Promise.resolve(null);
+        const labelUploadPromise = labelContent !== undefined
+          ? uploadDatasetArtifact({
             file: fileWrapper.file,
             stem,
             labelContent,
             groupName,
-          });
+            skipImageUpload: true,
+          })
+          : Promise.resolve();
+        const [{ publicUrl }, imageSize] = await Promise.all([uploadPromise, imageSizePromise]);
+
+        let annotationPayload = null;
+        let noAnnotationsNeeded = false;
+        if (labelContent !== undefined) {
+          const trimmedLabel = labelContent.trim();
+          if (imageSize) {
+            const annotations = parseYoloLabels(labelContent, imageSize, classMapping);
+            annotationPayload = {
+              annotations,
+              classColors: {},
+              image_natural_size: imageSize,
+              timestamp: new Date().toISOString(),
+            };
+            if (annotations.length === 0 && trimmedLabel.length === 0) {
+              noAnnotationsNeeded = true;
+            } else if (annotations.length === 0 && trimmedLabel.length > 0) {
+              console.warn(`No valid annotations found in ${fileWrapper.file.name} label file.`);
+            }
+          } else if (trimmedLabel.length === 0) {
+            noAnnotationsNeeded = true;
+          } else {
+            console.warn(`Skipping annotations for ${fileWrapper.file.name} because image size could not be read.`);
+          }
         }
-      }
+
+        const payload = {
+          step_id: currentStepId,
+          image_url: publicUrl,
+          thumbnail_url: publicUrl,
+          display_url: publicUrl,
+          image_name: fileWrapper.file.name,
+          file_size: fileWrapper.file.size,
+          image_group: groupName, // Assign the calculated group name
+          processing_status: 'completed',
+          no_annotations_needed: noAnnotationsNeeded
+        };
+
+        if (annotationPayload) {
+          payload.annotations = annotationPayload;
+        }
+
+        enqueueInsert(payload);
+        await labelUploadPromise;
+
+        filesUploaded += 1;
+        setUploadProgress(Math.round((filesUploaded / totalUploads) * 100));
+      };
+
+      await runWithConcurrency(uploadTargets, UPLOAD_CONCURRENCY, uploadSingle);
+      setUploadMessage("Finalizing image records...");
+      await flushInserts();
 
       if (!classFile || !isYamlFile(classFile.file)) {
         const hasTestSplit = Object.keys(assignments).some(
-          (name) => name !== "Training" && name !== "Inference"
+          (name) => name !== "Training" && name !== "Validation"
         );
         setYamlUploadStatus({ state: "uploading", message: "Generating dataset YAML..." });
         await generateDatasetYaml(hasTestSplit);
@@ -580,18 +675,19 @@ export default function ImageUploadDialog({
     if (type === 'training') {
       const newTraining = newValue;
       setTrainingRatio(newTraining);
-      // If training increases, inference might need to decrease to keep sum <= 100
+      // If training increases, validation might need to decrease to keep sum <= 100
       if (newTraining + inferenceRatio > 100) {
         setInferenceRatio(100 - newTraining);
       }
-    } else if (type === 'inference') {
+    } else if (type === 'validation') {
       const newInference = newValue;
-      // Max inference is 100 - current training ratio (as otherRatio is derived)
+      // Max validation is 100 - current training ratio (as otherRatio is derived)
       const maxAllowedInference = 100 - trainingRatio;
       setInferenceRatio(Math.min(newInference, maxAllowedInference));
     }
   }, [trainingRatio, inferenceRatio]);
 
+  const isTrainingOnlyUpload = uploadMode === 'training-only';
 
   const renderSelectStep = () => (
     <motion.div key="select" initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }}>
@@ -604,7 +700,7 @@ export default function ImageUploadDialog({
             <div>
               <p className="text-xs font-semibold tracking-[0.2em] text-amber-700 uppercase">Upload Studio</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-900">Bring your dataset to life</h2>
-              <p className="mt-2 text-sm text-slate-600">Drop images, then add YOLO labels and classes. We will auto-map and preview the results.</p>
+              <p className="mt-2 text-sm text-slate-600">Drop images, optionally add labels, then split or send everything to Training.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-slate-900 text-white">Step 1 of 3</Badge>
@@ -632,7 +728,7 @@ export default function ImageUploadDialog({
               >
                 <UploadCloud className="w-12 h-12 mx-auto text-amber-500" />
                 <p className="mt-3 text-base font-semibold text-slate-800">Drop images or click to browse</p>
-                <p className="text-sm text-slate-600">We will auto-split them in the next step.</p>
+                <p className="text-sm text-slate-600">Auto-split next, or send everything straight to Training.</p>
                 <Input
                   id="file-upload-input"
                   type="file"
@@ -649,9 +745,14 @@ export default function ImageUploadDialog({
                     <h4 className="text-sm font-semibold text-slate-800">Selected images</h4>
                     <Badge variant="outline" className="border-slate-200 text-slate-600">{files.length} files</Badge>
                   </div>
+                  {hiddenImageCount > 0 && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Showing first {visibleImageFiles.length} of {files.length} images.
+                    </p>
+                  )}
                   <ScrollArea className="mt-3 h-52 rounded-xl border border-slate-200/70 bg-white/70 p-3">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {files.map(fileWrapper => (
+                      {visibleImageFiles.map(fileWrapper => (
                         <div key={fileWrapper.id} className="group relative rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
                           <img src={fileWrapper.preview} alt="preview" className="h-20 w-full rounded-lg object-cover" />
                           <p className="mt-2 truncate text-xs font-medium text-slate-700">{fileWrapper.file.name}</p>
@@ -667,6 +768,11 @@ export default function ImageUploadDialog({
                       ))}
                     </div>
                   </ScrollArea>
+                  {hiddenImageCount > 0 && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      +{hiddenImageCount} more images selected.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -678,6 +784,9 @@ export default function ImageUploadDialog({
                   <p className="text-xs text-slate-500">Optional but recommended for pre-labeled sets.</p>
                 </div>
                 <Badge className="border border-teal-200 bg-teal-50 text-teal-700">Optional</Badge>
+              </div>
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800">
+                Validation images must be annotated before training, or metrics will be meaningless.
               </div>
 
               <div
@@ -745,9 +854,14 @@ export default function ImageUploadDialog({
                     <h4 className="text-sm font-semibold text-slate-800">Label files</h4>
                     <Badge variant="outline" className="border-slate-200 text-slate-600">{labelFiles.length}</Badge>
                   </div>
+                  {hiddenLabelCount > 0 && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Showing first {visibleLabelFiles.length} of {labelFiles.length} label files.
+                    </p>
+                  )}
                   <ScrollArea className="mt-2 h-32 rounded-xl border border-slate-200/70 bg-white/70 p-2">
                     <div className="space-y-2">
-                      {labelFiles.map(fileWrapper => (
+                      {visibleLabelFiles.map(fileWrapper => (
                         <div key={fileWrapper.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <File className="h-4 w-4 text-slate-500" />
                           <div className="flex-1 min-w-0">
@@ -761,6 +875,11 @@ export default function ImageUploadDialog({
                       ))}
                     </div>
                   </ScrollArea>
+                  {hiddenLabelCount > 0 && (
+                    <p className="mt-2 text-xs text-slate-500">
+                      +{hiddenLabelCount} more label files selected.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -798,9 +917,27 @@ export default function ImageUploadDialog({
 
           <DialogFooter className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Button variant="outline" onClick={handleClose}>Cancel</Button>
-            <Button onClick={() => setStep('split')} disabled={files.length === 0} className="bg-slate-900 text-white hover:bg-slate-800">
-              Next <ChevronRight className="w-4 h-4 ml-2" />
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button
+                variant="outline"
+                onClick={() => startUploadProcess({ mode: 'training-only' })}
+                disabled={files.length === 0}
+                className="border-emerald-200 bg-white/80 text-emerald-800 hover:bg-emerald-50"
+              >
+                <Sprout className="w-4 h-4 mr-2" />
+                Upload to Training
+              </Button>
+              <Button
+                onClick={() => {
+                  setUploadMode('guided');
+                  setStep('split');
+                }}
+                disabled={files.length === 0}
+                className="bg-slate-900 text-white hover:bg-slate-800"
+              >
+                Next <ChevronRight className="w-4 h-4 ml-2" />
+              </Button>
+            </div>
           </DialogFooter>
         </div>
       </div>
@@ -816,7 +953,7 @@ export default function ImageUploadDialog({
             <div>
               <p className="text-xs font-semibold tracking-[0.2em] text-emerald-700 uppercase">Split Configuration</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-900">Group your images</h2>
-              <p className="mt-2 text-sm text-slate-600">Balance training and inference sets. Manual mode lets you customize the split.</p>
+              <p className="mt-2 text-sm text-slate-600">Balance training and validation sets. Validation must be labeled to produce meaningful metrics.</p>
             </div>
             <Badge className="bg-slate-900 text-white">Step 2 of 3</Badge>
           </div>
@@ -840,11 +977,11 @@ export default function ImageUploadDialog({
                 <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <TestTube2 className="h-4 w-4 text-slate-600" /> Inference
+                      <TestTube2 className="h-4 w-4 text-slate-600" /> Validation
                     </div>
                     <Badge variant="outline" className="border-slate-200 text-slate-600">{inferenceRatio}%</Badge>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">Validation and preview set.</p>
+                  <p className="mt-2 text-xs text-slate-500">Metrics are computed here. Labels required.</p>
                 </div>
 
                 {otherRatio > 0 && (
@@ -862,10 +999,19 @@ export default function ImageUploadDialog({
             </div>
 
             <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-emerald-100/60 backdrop-blur">
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                  <AlertTriangle className="h-4 w-4" />
+                  Validation must be labeled
+                </div>
+                <p className="mt-1 text-xs text-amber-800/80">
+                  Training metrics are calculated only on the validation group. Unlabeled validation data makes results meaningless.
+                </p>
+              </div>
               <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-800">Automatic split</p>
-                  <p className="text-xs text-slate-500">80% training, 20% inference</p>
+                  <p className="text-xs text-slate-500">80% training, 20% validation</p>
                 </div>
                 <Switch
                   id="split-type-switch"
@@ -899,14 +1045,14 @@ export default function ImageUploadDialog({
                     <div className="rounded-xl border border-slate-200 bg-white/70 p-4">
                       <div className="mb-2 flex items-center gap-3">
                         <TestTube2 className="w-5 h-5 text-slate-600" />
-                        <h4 className="font-medium text-slate-800">Inference Group</h4>
+                        <h4 className="font-medium text-slate-800">Validation Group</h4>
                         <Badge variant="outline" className="ml-auto border-slate-200 text-slate-600">{inferenceRatio}%</Badge>
                       </div>
                       <Slider
                         value={[inferenceRatio]}
                         max={100}
                         step={1}
-                        onValueChange={(value) => handleSliderChange(value, 'inference')}
+                        onValueChange={(value) => handleSliderChange(value, 'validation')}
                       />
                     </div>
 
@@ -917,7 +1063,7 @@ export default function ImageUploadDialog({
                           <Input
                             value={otherGroupName}
                             onChange={(e) => setOtherGroupName(e.target.value)}
-                            placeholder="Other group name..."
+                            placeholder="Test group name..."
                             className="h-8 flex-1 bg-white"
                           />
                           <Badge variant="outline" className="ml-auto border-amber-200 text-amber-700">{otherRatio}%</Badge>
@@ -952,10 +1098,14 @@ export default function ImageUploadDialog({
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-semibold tracking-[0.2em] text-emerald-700 uppercase">Uploading</p>
-              <h2 className="mt-2 text-2xl font-semibold">Shipping your dataset</h2>
+              <h2 className="mt-2 text-2xl font-semibold">
+                {isTrainingOnlyUpload ? "Uploading training images" : "Shipping your dataset"}
+              </h2>
               <p className="mt-2 text-sm text-slate-600">{uploadMessage}</p>
             </div>
-            <Badge className="bg-slate-900 text-white">Step 3 of 3</Badge>
+            <Badge className="bg-slate-900 text-white">
+              {isTrainingOnlyUpload ? "Step 2 of 2" : "Step 3 of 3"}
+            </Badge>
           </div>
 
           <div className="mt-8 rounded-2xl border border-emerald-100 bg-white/80 p-6 text-center shadow-lg shadow-emerald-100/60">
@@ -972,16 +1122,18 @@ export default function ImageUploadDialog({
 
   return (
     <Dialog open={open} onOpenChange={!isUploading ? handleClose : () => {}}>
-      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-5xl p-0 overflow-hidden max-h-[90vh]">
         <DialogTitle className="sr-only">Upload images and labels</DialogTitle>
         <DialogDescription className="sr-only">
-          Upload images with optional labels and class mapping, then split them into training and inference groups.
+          Upload images with optional labels and class mapping, then split them into training and validation groups or send them straight to training.
         </DialogDescription>
-        <AnimatePresence mode="wait">
-          {step === 'select' && renderSelectStep()}
-          {step === 'split' && renderSplitStep()}
-          {step === 'uploading' && renderUploadingStep()}
-        </AnimatePresence>
+        <div className="max-h-[90vh] overflow-y-auto">
+          <AnimatePresence mode="wait">
+            {step === 'select' && renderSelectStep()}
+            {step === 'split' && renderSplitStep()}
+            {step === 'uploading' && renderUploadingStep()}
+          </AnimatePresence>
+        </div>
       </DialogContent>
     </Dialog>
   );

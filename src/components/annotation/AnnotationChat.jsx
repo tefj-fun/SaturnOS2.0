@@ -12,7 +12,6 @@ import {
   Square,
   MousePointer2,
   Lightbulb,
-  Palette,
   Spline, // For Polygon tool
   Brush // For Brush tool
 } from "lucide-react";
@@ -25,11 +24,8 @@ export default function AnnotationChat({
   currentStep,
   onAnnotationModeChange,
   annotationMode,
-  activeClass,
-  onActiveClassChange,
   brushSize,
-  onBrushSizeChange,
-  projectId // Add projectId prop
+  onBrushSizeChange
 }) {
   const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef(null);
@@ -44,14 +40,8 @@ export default function AnnotationChat({
     if (currentStep) {
       // Default to 'draw' mode whenever a new step is loaded
       onAnnotationModeChange('draw'); 
-      // Select the first available class for the new step, or set to null if no classes
-      if (currentStep.classes && currentStep.classes.length > 0) {
-        onActiveClassChange(currentStep.classes[0]);
-      } else {
-        onActiveClassChange(null);
-      }
     }
-  }, [currentStep, onAnnotationModeChange, onActiveClassChange]);
+  }, [currentStep, onAnnotationModeChange]);
 
   const handleSendMessage = (e) => {
     e.preventDefault();
@@ -67,8 +57,9 @@ export default function AnnotationChat({
 
   const getStepGuidance = () => {
     if (!currentStep) return null;
-    
-    const { product } = currentStep;
+
+    const product =
+      typeof currentStep.product === "string" ? currentStep.product.trim() : "";
     
     const guidance = {
       button: {
@@ -100,7 +91,8 @@ export default function AnnotationChat({
       }
     };
     
-    return guidance[product.toLowerCase()] || guidance.button;
+    const key = product ? product.toLowerCase() : "button";
+    return guidance[key] || guidance.button;
   };
 
   const stepGuidance = getStepGuidance();
@@ -212,36 +204,11 @@ export default function AnnotationChat({
             )}
           </AnimatePresence>
 
-          {/* Class Selector */}
-          <div className="mb-3 mt-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Palette className="w-4 h-4 text-teal-700" />
-              <span className="font-semibold text-sm text-gray-900">2. Select Class</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {(currentStep.classes || []).map(cls => (
-                 <Button
-                    key={cls}
-                    variant={activeClass === cls ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => onActiveClassChange(cls)}
-                    className={`h-auto text-xs py-1 px-3 rounded-full transition-all duration-200 ${
-                      activeClass === cls
-                        ? "bg-teal-600 hover:bg-teal-700 shadow-md text-white"
-                        : "bg-white hover:bg-gray-100"
-                    }`}
-                 >
-                   {cls}
-                 </Button>
-              ))}
-            </div>
-          </div>
-
           {/* Quick Responses */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 mb-2">
                 <Lightbulb className="w-4 h-4 text-teal-700" />
-                <span className="font-semibold text-sm text-gray-900">3. Ask for Help</span>
+                <span className="font-semibold text-sm text-gray-900">2. Ask for Help</span>
             </div>
             <div className="flex flex-wrap gap-1">
               {quickResponses.slice(0, 3).map((response, index) => (

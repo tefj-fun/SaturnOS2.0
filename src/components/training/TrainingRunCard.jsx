@@ -165,6 +165,14 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2 mt-4">
+            {['running', 'queued', 'canceling'].includes(run.status) && (
+              <Button asChild variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50">
+                <Link to={createPageUrl(`TrainingStatus?runId=${run.id}`)}>
+                  <BarChart3 className="w-3 h-3 mr-1" />
+                  View Progress
+                </Link>
+              </Button>
+            )}
             {run.status === 'completed' && !run.is_deployed && run.deployment_status !== 'deploying' && (
               <Button
                 onClick={handleDeploy}

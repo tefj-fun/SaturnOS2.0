@@ -1,7 +1,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { uploadToSupabaseStorage } from "@/api/storage";
-import { createStepImage, deleteStepImage, updateStepImage, listStepImages } from "@/api/db";
+import { createStepImage, deleteStepImage, deleteStepImages, updateStepImage, listStepImages } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -112,18 +112,31 @@ export default function ImagePortal({
 
 
   const currentImage = stepImages[currentImageIndex];
+  const currentImageId = currentImage?.id ?? null;
+  const stepImageIndexById = React.useMemo(() => {
+    const map = new Map();
+    stepImages.forEach((image, index) => {
+      if (image?.id !== undefined && image?.id !== null) {
+        map.set(image.id, index);
+      }
+    });
+    return map;
+  }, [stepImages]);
 
   const deleteImage = async (imageId) => {
     try {
       await deleteStepImage(imageId);
       onImagesUpdate();
 
-      const deletedImageOriginalIndex = stepImages.findIndex(img => img.id === imageId);
-      if (currentImageIndex === deletedImageOriginalIndex) {
-        onImageIndexChange(Math.max(0, stepImages.length - 2));
-      } else if (currentImageIndex > deletedImageOriginalIndex) {
-        onImageIndexChange(currentImageIndex - 1);
-      }
+    const deletedImageOriginalIndex = stepImageIndexById.get(imageId);
+    if (deletedImageOriginalIndex === undefined) {
+      return;
+    }
+    if (currentImageIndex === deletedImageOriginalIndex) {
+      onImageIndexChange(Math.max(0, stepImages.length - 2));
+    } else if (currentImageIndex > deletedImageOriginalIndex) {
+      onImageIndexChange(currentImageIndex - 1);
+    }
     } catch (error) {
       console.error("Error deleting image:", error);
     }
@@ -134,9 +147,8 @@ export default function ImagePortal({
 
     setIsDeleting(true);
     try {
-      for (const imageId of selectedImages) {
-        await deleteStepImage(imageId);
-      }
+      const idsToDelete = Array.from(selectedImages);
+      await deleteStepImages(idsToDelete);
 
       setSelectedImages(new Set());
       setIsSelectionMode(false);
@@ -370,8 +382,8 @@ export default function ImagePortal({
     event.stopPropagation();
     
     // Navigate to this image in the canvas
-    const imageIndex = stepImages.findIndex(img => img.id === image.id);
-    if (imageIndex !== -1) {
+    const imageIndex = stepImageIndexById.get(image.id);
+    if (imageIndex !== undefined) {
       onImageIndexChange(imageIndex);
     }
     
@@ -396,28 +408,25 @@ export default function ImagePortal({
   const navigateToNextImage = () => {
     if (groupedAndFilteredImages.length === 0) return;
 
-    const currentFilteredIndex = groupedAndFilteredImages.findIndex(img =>
-      stepImages.findIndex(original => original.id === img.id) === currentImageIndex
-    );
-
-    if (currentFilteredIndex !== -1 && currentFilteredIndex < groupedAndFilteredImages.length - 1) {
+    if (currentFilteredIndex === -1) return;
+    if (currentFilteredIndex < groupedAndFilteredImages.length - 1) {
       const nextImage = groupedAndFilteredImages[currentFilteredIndex + 1];
-      const nextOriginalIndex = stepImages.findIndex(img => img.id === nextImage.id);
-      onImageIndexChange(nextOriginalIndex);
+      const nextOriginalIndex = stepImageIndexById.get(nextImage.id);
+      if (nextOriginalIndex !== undefined) {
+        onImageIndexChange(nextOriginalIndex);
+      }
     }
   };
 
   const navigateToPrevImage = () => {
     if (groupedAndFilteredImages.length === 0) return;
 
-    const currentFilteredIndex = groupedAndFilteredImages.findIndex(img =>
-      stepImages.findIndex(original => original.id === img.id) === currentImageIndex
-    );
-
     if (currentFilteredIndex > 0) {
       const prevImage = groupedAndFilteredImages[currentFilteredIndex - 1];
-      const prevOriginalIndex = stepImages.findIndex(img => img.id === prevImage.id);
-      onImageIndexChange(prevOriginalIndex);
+      const prevOriginalIndex = stepImageIndexById.get(prevImage.id);
+      if (prevOriginalIndex !== undefined) {
+        onImageIndexChange(prevOriginalIndex);
+      }
     }
   };
 
@@ -507,6 +516,23 @@ export default function ImagePortal({
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
+  const getImageName = useCallback((image) => {
+    if (!image) return "Untitled";
+    const rawName = image.image_name || image.name || image.filename;
+    if (rawName) return String(rawName);
+    const url = image.image_url || image.display_url || image.thumbnail_url;
+    if (!url) return "Untitled";
+    try {
+      const parsed = new URL(url);
+      const parts = parsed.pathname.split("/");
+      const last = parts[parts.length - 1];
+      return last ? decodeURIComponent(last) : "Untitled";
+    } catch (error) {
+      const parts = String(url).split("/");
+      return parts[parts.length - 1] || "Untitled";
+    }
+  }, []);
+
   const getImageAnnotationStatus = useCallback((image) => {
     if (isImageProcessing(image)) return 'pending';
     if (image?.no_annotations_needed) return 'skipped';
@@ -555,8 +581,11 @@ export default function ImagePortal({
   const groupedAndFilteredImages = React.useMemo(() => {
     let filtered = stepImages.filter(image => {
       // Search filter
-      if (searchTerm && !image.image_name.toLowerCase().includes(searchTerm.toLowerCase())) {
+      if (searchTerm) {
+        const name = getImageName(image).toLowerCase();
+        if (!name.includes(searchTerm.toLowerCase())) {
         return false;
+        }
       }
 
       // Status filter
@@ -581,7 +610,7 @@ export default function ImagePortal({
 
       switch (sortBy) {
         case 'name':
-          comparison = a.image_name.localeCompare(b.image_name);
+          comparison = getImageName(a).localeCompare(getImageName(b));
           break;
         case 'size':
           comparison = (a.file_size || 0) - (b.file_size || 0);
@@ -590,14 +619,14 @@ export default function ImagePortal({
           comparison = new Date(a.created_at || a.created_date) - new Date(b.created_at || b.created_date);
           break;
         default:
-          comparison = a.image_name.localeCompare(b.image_name);
+          comparison = getImageName(a).localeCompare(getImageName(b));
       }
 
       return sortOrder === 'asc' ? comparison : -comparison;
     });
 
     return filtered;
-  }, [stepImages, searchTerm, filterStatus, filterGroup, sortBy, sortOrder, getImageAnnotationStatus]);
+  }, [stepImages, searchTerm, filterStatus, filterGroup, sortBy, sortOrder, getImageAnnotationStatus, getImageName]);
 
   // Group the filtered images - include empty groups
   const groupedImages = React.useMemo(() => {
@@ -628,6 +657,13 @@ export default function ImagePortal({
     return groups;
   }, [groupedAndFilteredImages, allAvailableGroups, createdEmptyGroups]);
 
+  const currentFilteredIndex = React.useMemo(() => {
+    if (!groupedAndFilteredImages.length) return -1;
+    return groupedAndFilteredImages.findIndex(
+      (image) => stepImageIndexById.get(image.id) === currentImageIndex
+    );
+  }, [groupedAndFilteredImages, stepImageIndexById, currentImageIndex]);
+
   // Selection state derived values
   const areAllSelected = selectedImages.size > 0 && selectedImages.size === groupedAndFilteredImages.length;
   const areSomeSelected = selectedImages.size > 0 && selectedImages.size < groupedAndFilteredImages.length;
@@ -641,8 +677,8 @@ export default function ImagePortal({
       <ContextMenuContent className="w-48">
         <ContextMenuItem
           onClick={() => {
-            const imageIndex = stepImages.findIndex(img => img.id === image.id);
-            if (imageIndex !== -1) {
+            const imageIndex = stepImageIndexById.get(image.id);
+            if (imageIndex !== undefined) {
               onImageIndexChange(imageIndex);
               setViewMode('viewer'); // Switch to viewer mode
             }
@@ -814,7 +850,7 @@ export default function ImagePortal({
               <div className="flex items-center gap-2 px-3 py-1 bg-teal-50 rounded-lg border border-teal-200">
                 <Target className="w-4 h-4 text-teal-600" />
                 <span className="text-sm font-medium text-teal-900">
-                  Currently viewing: {currentImage.image_name}
+                  Currently viewing: {getImageName(currentImage)}
                 </span>
                 <Badge className="bg-teal-600 text-white text-xs">
                   {currentImage.image_group || 'Untagged'}
@@ -1090,10 +1126,7 @@ export default function ImagePortal({
                             variant="outline"
                             size="sm"
                             onClick={navigateToPrevImage}
-                            disabled={groupedAndFilteredImages.length === 0 ||
-                              groupedAndFilteredImages.findIndex(img =>
-                                stepImages.findIndex(original => original.id === img.id) === currentImageIndex
-                              ) === 0}
+                            disabled={groupedAndFilteredImages.length === 0 || currentFilteredIndex <= 0}
                           >
                             <ChevronLeft className="w-4 h-4" />
                           </Button>
@@ -1101,10 +1134,10 @@ export default function ImagePortal({
                             variant="outline"
                             size="sm"
                             onClick={navigateToNextImage}
-                            disabled={groupedAndFilteredImages.length === 0 ||
-                              groupedAndFilteredImages.findIndex(img =>
-                                stepImages.findIndex(original => original.id === img.id) === currentImageIndex
-                              ) === groupedAndFilteredImages.length - 1}
+                            disabled={
+                              groupedAndFilteredImages.length === 0 ||
+                              currentFilteredIndex === groupedAndFilteredImages.length - 1
+                            }
                           >
                             <ChevronRight className="w-4 h-4" />
                           </Button>
@@ -1132,7 +1165,7 @@ export default function ImagePortal({
                           <div className="w-full h-full flex items-center justify-center bg-gray-100 rounded-lg overflow-hidden">
                             <img
                               src={getImageUrl(currentImage, 'display')}
-                              alt={currentImage.image_name}
+                              alt={getImageName(currentImage)}
                               className="max-w-full max-h-full object-contain"
                               style={{ imageRendering: 'high-quality' }}
                               loading="lazy"
@@ -1162,8 +1195,8 @@ export default function ImagePortal({
                           <div className="space-y-2 text-sm">
                             <div className="flex justify-between">
                               <span className="text-gray-600">Name:</span>
-                              <span className="font-medium truncate ml-2" title={currentImage.image_name}>
-                                {currentImage.image_name}
+                              <span className="font-medium truncate ml-2" title={getImageName(currentImage)}>
+                                {getImageName(currentImage)}
                               </span>
                             </div>
                             <div className="flex justify-between">
@@ -1283,7 +1316,7 @@ export default function ImagePortal({
                                           className={`group relative bg-white rounded border transition-all duration-200 cursor-pointer hover:shadow-sm hover:scale-105 ${
                                             isSelectionMode && selectedImages.has(image.id)
                                               ? 'border-blue-500 bg-blue-50/70 shadow-md ring-2 ring-blue-400'
-                                              : stepImages.findIndex(img => img.id === image.id) === currentImageIndex
+                                              : image.id === currentImageId
                                                 ? 'border-teal-500 shadow-md ring-2 ring-teal-200 bg-teal-50'
                                                 : 'border-gray-200 hover:border-gray-300'
                                           }`}
@@ -1291,7 +1324,7 @@ export default function ImagePortal({
                                           onDoubleClick={(e) => handleImageDoubleClick(image, e)}
                                         >
                                           {/* Current image indicator */}
-                                          {stepImages.findIndex(img => img.id === image.id) === currentImageIndex && (
+                                          {image.id === currentImageId && (
                                             <div className="absolute -top-1 -right-1 z-10">
                                               <div className="w-3 h-3 bg-teal-600 rounded-full border-2 border-white shadow-sm"></div>
                                             </div>
@@ -1306,7 +1339,7 @@ export default function ImagePortal({
                                             ) : (
                                               <img
                                                 src={getImageUrl(image, 'thumbnail')}
-                                                alt={image.image_name}
+                                                alt={getImageName(image)}
                                                 className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-110"
                                                 loading="lazy"
                                                 decoding="async"
@@ -1335,8 +1368,8 @@ export default function ImagePortal({
                                           <div className="p-1">
                                             <div className="flex items-center justify-between">
                                               <div className="flex-1 min-w-0">
-                                                <p className="text-xs font-medium text-gray-900 truncate" title={image.image_name}>
-                                                  {image.image_name.length > 8 ? `${image.image_name.substring(0, 8)}...` : image.image_name}
+                                                <p className="text-xs font-medium text-gray-900 truncate" title={getImageName(image)}>
+                                                  {getImageName(image).length > 8 ? `${getImageName(image).substring(0, 8)}...` : getImageName(image)}
                                                 </p>
                                               </div>
                                               <div className="ml-1">
@@ -1423,7 +1456,7 @@ export default function ImagePortal({
                                       className={`flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer transition-colors ${
                                         isSelectionMode && selectedImages.has(image.id)
                                           ? 'bg-blue-50 border-l-4 border-blue-500 ring-1 ring-blue-200'
-                                          : stepImages.findIndex(img => img.id === image.id) === currentImageIndex
+                                          : image.id === currentImageId
                                             ? 'bg-teal-50 border-l-4 border-teal-500'
                                             : ''
                                       }`}
@@ -1446,7 +1479,7 @@ export default function ImagePortal({
                                         ) : (
                                           <img
                                             src={getImageUrl(image, 'thumbnail')}
-                                            alt={image.image_name}
+                                            alt={getImageName(image)}
                                             className="w-full h-full object-cover rounded-lg"
                                             loading="lazy"
                                             decoding="async"
@@ -1456,8 +1489,8 @@ export default function ImagePortal({
 
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                          <h4 className="font-medium text-gray-900 truncate" title={image.image_name}>
-                                            {image.image_name}
+                                          <h4 className="font-medium text-gray-900 truncate" title={getImageName(image)}>
+                                            {getImageName(image)}
                                           </h4>
                                           {image.is_primary && (
                                             <Star className="w-4 h-4 text-amber-500 fill-current flex-shrink-0" />
@@ -1522,7 +1555,7 @@ export default function ImagePortal({
         <DialogContent className="max-w-4xl max-h-[90vh] p-2">
           <DialogHeader className="pb-2">
             <DialogTitle className="flex items-center justify-between">
-              <span>{previewImage?.image_name}</span>
+              <span>{getImageName(previewImage)}</span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -1536,7 +1569,7 @@ export default function ImagePortal({
             <div className="flex items-center justify-center max-h-[80vh]">
               <img
                 src={getImageUrl(previewImage, 'full')}
-                alt={previewImage.image_name}
+                alt={getImageName(previewImage)}
                 className="max-w-full max-h-full object-contain"
                 style={{ imageRendering: 'high-quality' }}
               />

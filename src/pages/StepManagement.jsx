@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -24,7 +23,6 @@ import {
   Eye,
   EyeOff,
   Layers,
-  Target,
   PenTool
 } from "lucide-react";
 import { createPageUrl } from "@/utils";
@@ -46,7 +44,6 @@ export default function StepManagementPage() {
   const [newStep, setNewStep] = useState({
     title: "",
     description: "",
-    product: "button",
     condition: "",
     classes: [],
     status: "Pass,Fail",
@@ -173,7 +170,6 @@ export default function StepManagementPage() {
     setNewStep({
       title: "",
       description: "",
-      product: "button",
       condition: "",
       classes: [],
       status: "Pass,Fail",
@@ -276,7 +272,6 @@ export default function StepManagementPage() {
       setNewStep({ // Reset new step form
         title: "",
         description: "",
-        product: "button",
         condition: "",
         classes: [],
         status: "Pass,Fail",
@@ -312,17 +307,6 @@ export default function StepManagementPage() {
       console.error("Error marking step as clarified:", error);
     }
   };
-
-  const getProductColor = useCallback((product) => {
-    const colors = {
-      button: "bg-blue-100 text-blue-800",
-      form: "bg-green-100 text-green-800",
-      menu: "bg-purple-100 text-purple-800",
-      modal: "bg-pink-100 text-pink-800",
-      input: "bg-amber-100 text-amber-800"
-    };
-    return colors[product] || colors.button;
-  }, []);
 
   const getStatusColor = useCallback((status) => {
     const colors = {
@@ -521,7 +505,7 @@ export default function StepManagementPage() {
               <CardTitle className="flex items-center justify-between">
                 <span className="text-blue-800">
                   {insertAfterIndex === -1 
-                    ? "Add New Step at End" 
+                    ? "Add New Step" 
                     : `Insert Step After Step ${steps[insertAfterIndex].step_number}`
                   }
                 </span>
@@ -552,22 +536,7 @@ export default function StepManagementPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-700">Product</label>
-                  <Select value={newStep.product} onValueChange={(value) => setNewStep(prev => ({ ...prev, product: value }))}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="button">Button</SelectItem>
-                      <SelectItem value="form">Form</SelectItem>
-                      <SelectItem value="menu">Menu</SelectItem>
-                      <SelectItem value="modal">Modal</SelectItem>
-                      <SelectItem value="input">Input</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Classes (comma-separated)</label>
+                  <label className="text-sm font-medium text-gray-700">Labels to annotate (comma-separated)</label>
                   <Input
                     value={(newStep.classes || []).join(', ')}
                     onChange={(e) => setNewStep(prev => ({ 
@@ -575,9 +544,12 @@ export default function StepManagementPage() {
                       // Allow trailing commas during editing
                       classes: e.target.value.split(',').map(s => s.trim()) 
                     }))}
-                    placeholder="Submit Button, Cancel Button"
+                    placeholder="e.g., Scratch, Dent, Misalignment"
                     className="mt-1"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use defect-focused labels the annotator should tag.
+                  </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Status (comma-separated)</label>
@@ -647,7 +619,6 @@ export default function StepManagementPage() {
                             onDelete={deleteStep}
                             onMarkClarified={markAsClarified}
                             onAddAfter={handleAddStepAfter}
-                            getProductColor={getProductColor}
                             getStatusColor={getStatusColor}
                             dragHandleProps={provided.dragHandleProps}
                             isAnyStepSelected={selectedSteps.size > 0} 
@@ -698,7 +669,6 @@ function StepCard({
   onDelete, 
   onMarkClarified,
   onAddAfter,
-  getProductColor,
   getStatusColor,
   dragHandleProps,
   isAnyStepSelected, 
@@ -765,8 +735,7 @@ function StepCard({
                 />
               ) : (
                 <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                  <span>Product:</span>
-                  <Badge variant="outline" className="text-xs">{step.product}</Badge>
+                  <span>Step #{step.step_number}</span>
                 </div>
               )}
             </div>
@@ -828,27 +797,16 @@ function StepCard({
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-700">Product</label>
-                  <Select value={editedStep.product} onValueChange={(value) => onEditChange('product', value)}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="button">Button</SelectItem>
-                      <SelectItem value="form">Form</SelectItem>
-                      <SelectItem value="menu">Menu</SelectItem>
-                      <SelectItem value="modal">Modal</SelectItem>
-                      <SelectItem value="input">Input</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Classes (comma-separated)</label>
+                  <label className="text-sm font-medium text-gray-700">Labels to annotate (comma-separated)</label>
                   <Input
                     value={(editedStep.classes || []).join(', ')}
                     onChange={(e) => onEditChange('classes', e.target.value)}
                     className="mt-1"
+                    placeholder="e.g., Scratch, Dent, Misalignment"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use defect-focused labels the annotator should tag.
+                  </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Status (comma-separated)</label>
@@ -941,7 +899,7 @@ function StepCard({
                   {step.status}
                 </Badge>
                 <Badge variant="secondary">
-                  Classes: {(step.classes || []).join(', ')}
+                  Labels: {(step.classes || []).join(', ')}
                 </Badge>
                 <Badge variant="outline">
                   Clarity: {step.clarity_score}/10

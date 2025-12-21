@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Project } from '@/api/entities';
 import { SOPStep } from '@/api/entities';
 import { TrainingRun } from '@/api/entities';
 import { TrainerWorker } from '@/api/entities';
+import { listStepImages } from '@/api/db';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   ArrowLeft,
   PlayCircle,
   Cpu,
-  Settings,
   Layers,
-  FileText,
-  Spline,
   CheckCircle,
   History,
   FolderOpen,
@@ -25,7 +23,9 @@ import {
   Loader2,
   Clock,
   WifiOff,
-  Rocket
+  RefreshCw,
+  Rocket,
+  ChevronDown
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 import LoadingOverlay from '@/components/projects/LoadingOverlay';
@@ -52,15 +52,20 @@ export default function TrainingConfigurationPage() {
     const [selectedStepId, setSelectedStepId] = useState(null);
     const [selectedStep, setSelectedStep] = useState(null);
     const [trainingRuns, setTrainingRuns] = useState([]);
+    const [datasetSummary, setDatasetSummary] = useState(null);
+    const [isDatasetLoading, setIsDatasetLoading] = useState(false);
     const [trainerStatus, setTrainerStatus] = useState({
         state: "checking",
         running: 0,
         queued: 0,
         workersOnline: 0,
+        lastCheckedAt: null,
+        activeWorkers: [],
     });
 
     const [isLoading, setIsLoading] = useState(true);
     const [showStartTrainingDialog, setShowStartTrainingDialog] = useState(false);
+    const [showTrainerAdvanced, setShowTrainerAdvanced] = useState(false);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -112,10 +117,24 @@ export default function TrainingConfigurationPage() {
                     : workersOnline === 0
                         ? 'offline'
                         : 'idle';
-            setTrainerStatus({ state, running, queued, workersOnline });
+            setTrainerStatus({
+                state,
+                running,
+                queued,
+                workersOnline,
+                lastCheckedAt: new Date().toISOString(),
+                activeWorkers,
+            });
         } catch (error) {
             console.error('Error loading trainer status:', error);
-            setTrainerStatus({ state: 'unknown', running: 0, queued: 0, workersOnline: 0 });
+            setTrainerStatus({
+                state: 'unknown',
+                running: 0,
+                queued: 0,
+                workersOnline: 0,
+                lastCheckedAt: new Date().toISOString(),
+                activeWorkers: [],
+            });
         }
     }, []);
 
@@ -140,6 +159,124 @@ export default function TrainingConfigurationPage() {
         });
         return groups;
     }, [trainingRuns]);
+
+    const recentRuns = useMemo(() => trainingRuns.slice(0, 5), [trainingRuns]);
+
+    const getSplitName = (groupName) => {
+        if (!groupName) return "train";
+        const normalized = String(groupName).toLowerCase();
+        if (normalized === "training") return "train";
+        if (normalized === "inference" || normalized === "validation" || normalized === "val") return "val";
+        if (normalized === "test" || normalized === "testing") return "test";
+        return "train";
+    };
+
+    const toNumber = (value) => {
+        if (value === null || value === undefined) return null;
+        const parsed = typeof value === "string" ? Number(value) : value;
+        return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const formatTime = (value) => {
+        if (!value) return "Unknown";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "Unknown";
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    const getWorkerHardwareLabel = (worker) => {
+        if (!worker) return null;
+        const parts = [];
+        const deviceType = worker.device_type || worker.compute_type;
+        if (deviceType) parts.push(`device: ${deviceType}`);
+        const gpuName = worker.gpu_name || worker.gpu_model || worker.gpu;
+        if (gpuName) parts.push(`GPU: ${gpuName}`);
+        const vramGb = toNumber(worker.gpu_memory_gb ?? worker.gpu_vram_gb);
+        const vramMb = toNumber(worker.gpu_memory_mb ?? worker.gpu_vram_mb);
+        if (vramGb && vramGb > 0) {
+            parts.push(`VRAM: ${vramGb} GB`);
+        } else if (vramMb && vramMb > 0) {
+            parts.push(`VRAM: ${(vramMb / 1024).toFixed(1)} GB`);
+        }
+        const cpuModel = worker.cpu_model || worker.cpu;
+        if (cpuModel) parts.push(`CPU: ${cpuModel}`);
+        const ramGb = toNumber(worker.ram_gb);
+        if (ramGb && ramGb > 0) parts.push(`RAM: ${ramGb} GB`);
+        return parts.length ? parts.join(" | ") : null;
+    };
+
+    const extractAnnotations = (imageRow) => {
+        const raw = imageRow?.annotations;
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === "object") {
+            if (Array.isArray(raw.annotations)) return raw.annotations;
+            if (Array.isArray(raw.objects)) return raw.objects;
+        }
+        return [];
+    };
+
+    const getAnnotationTypeCounts = (imageRow, classNames) => {
+        const annotations = extractAnnotations(imageRow);
+        if (!annotations.length) return { boxes: 0, segments: 0 };
+        let boxes = 0;
+        let segments = 0;
+        const enforceClasses = Array.isArray(classNames) && classNames.length > 0;
+        annotations.forEach((annotation) => {
+            if (!annotation) return;
+            if (annotation.status && ["deleted", "disabled", "archived"].includes(String(annotation.status))) {
+                return;
+            }
+            const className = annotation.class || annotation.label;
+            if (!className) return;
+            if (enforceClasses && !classNames.includes(className)) return;
+            const type = annotation.type || annotation.shape;
+            if (type === "bbox" || type === "rectangle") {
+                boxes += 1;
+                return;
+            }
+            if (type === "polygon" || type === "segmentation" || type === "brush") {
+                segments += 1;
+            }
+        });
+        return { boxes, segments };
+    };
+
+    const refreshDatasetSummary = useCallback(async (stepOverride) => {
+        const step = stepOverride || selectedStep;
+        if (!step?.id) {
+            setDatasetSummary(null);
+            return;
+        }
+        setIsDatasetLoading(true);
+        try {
+            const stepImages = await listStepImages(step.id);
+            const splits = { train: 0, val: 0, test: 0 };
+            let labeled = 0;
+            const classNames = (step.classes || []).filter(Boolean);
+            const labelTypes = { boxes: 0, segments: 0 };
+            stepImages.forEach((imageRow) => {
+                const splitName = getSplitName(imageRow.image_group);
+                if (splitName === "train") splits.train += 1;
+                if (splitName === "val") splits.val += 1;
+                if (splitName === "test") splits.test += 1;
+                const counts = getAnnotationTypeCounts(imageRow, classNames);
+                labelTypes.boxes += counts.boxes;
+                labelTypes.segments += counts.segments;
+                const annotations = extractAnnotations(imageRow);
+                if (annotations.length > 0) labeled += 1;
+            });
+            const total = stepImages.length;
+            const classesCount = (step.classes || []).filter(Boolean).length;
+            const ready = total > 0 && labeled > 0 && classesCount > 0;
+            setDatasetSummary({ total, labeled, splits, classesCount, ready, labelTypes });
+        } catch (error) {
+            console.error("Error loading dataset summary:", error);
+            setDatasetSummary(null);
+        } finally {
+            setIsDatasetLoading(false);
+        }
+    }, [selectedStep]);
 
     const loadAllProjects = async () => {
         try {
@@ -169,6 +306,7 @@ export default function TrainingConfigurationPage() {
                 setSelectedStepId(null);
                 setSelectedStep(null);
                 setTrainingRuns([]);
+                setDatasetSummary(null);
             }
         } catch (error) {
             console.error("Error loading project data:", error);
@@ -190,6 +328,7 @@ export default function TrainingConfigurationPage() {
             '-created_date'
         );
         setTrainingRuns(runs);
+        refreshDatasetSummary(step);
     };
     
     const handleProjectSelect = (projectId) => {
@@ -266,7 +405,35 @@ export default function TrainingConfigurationPage() {
         offline: { label: 'Trainer offline', color: 'bg-red-100 text-red-800', icon: <WifiOff className="w-3 h-3 mr-1" /> },
         unknown: { label: 'Trainer status unknown', color: 'bg-red-100 text-red-800', icon: <Info className="w-3 h-3 mr-1" /> },
     };
+    const trainerStatusDescriptions = {
+        checking: 'Checking the trainer service status.',
+        busy: 'Trainer workers are running active jobs. New runs may queue.',
+        queued: 'Trainer workers are busy and queued runs are waiting.',
+        idle: 'At least one trainer worker is online and there are no active or queued runs.',
+        offline: 'No trainer workers were seen recently. Runs will remain queued.',
+        unknown: 'Trainer status could not be determined.',
+    };
     const currentTrainerStatus = trainerStatusConfig[trainerStatus.state] || trainerStatusConfig.unknown;
+    const isTrainerOffline = trainerStatus.state === 'offline' || trainerStatus.state === 'unknown';
+    const startButtonClass = isTrainerOffline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700';
+    const datasetReady = datasetSummary ? datasetSummary.ready : true;
+    const datasetStatusLabel = datasetSummary ? (datasetReady ? 'Ready' : 'Needs attention') : 'Not checked';
+    const datasetStatusClass = datasetSummary
+        ? (datasetReady ? 'bg-emerald-100 text-emerald-800 border-0' : 'bg-amber-100 text-amber-800 border-0')
+        : 'bg-gray-100 text-gray-700 border-0';
+    const labelTypes = datasetSummary?.labelTypes || { boxes: 0, segments: 0 };
+    const hasMixedLabels = labelTypes.boxes > 0 && labelTypes.segments > 0;
+    const annotationTypeLabel = datasetSummary
+        ? (hasMixedLabels
+            ? "Mixed (boxes + polygons)"
+            : labelTypes.segments > 0
+                ? "Polygons only"
+                : labelTypes.boxes > 0
+                    ? "Boxes only"
+                    : "None")
+        : "n/a";
+    const activeWorkers = trainerStatus.activeWorkers || [];
+    const trainerStatusDescription = trainerStatusDescriptions[trainerStatus.state] || trainerStatusDescriptions.unknown;
 
     if (isLoading && !allProjects.length) {
         return <LoadingOverlay isLoading={true} text="Loading projects..." />;
@@ -281,28 +448,111 @@ export default function TrainingConfigurationPage() {
                                 <ArrowLeft className="w-4 h-4" />
                             </Button>
                             <div>
-                                <h1 className="text-3xl font-bold text-gray-900">AI Model Training Hub</h1>
+                                <h1 className="text-3xl font-bold text-gray-900">Training Overview</h1>
                                 <p className="text-gray-600 mt-1">
                                     {selectedProject?.name}
-                                    {selectedStep && <span className="text-blue-600 font-medium"> • Step: {selectedStep.title}</span>}
+                                    {selectedStep && <span className="text-blue-600 font-medium"> / Step: {selectedStep.title}</span>}
                                 </p>
                             </div>
                         </div>
-                    <div className="flex items-center gap-4">
-                        <div className="flex flex-col items-end gap-1">
-                            <Badge className={`${currentTrainerStatus.color} border-0 font-medium`}>
-                                {currentTrainerStatus.icon}
-                                <span>{currentTrainerStatus.label}</span>
-                            </Badge>
+                        <div className="flex items-center gap-4">
+                          <div className="flex flex-col items-end gap-1">
+                            <div className="flex items-center justify-end gap-2">
+                                <Popover onOpenChange={(open) => { if (!open) setShowTrainerAdvanced(false); }}>
+                                    <PopoverTrigger
+                                        className="appearance-none border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded-md"
+                                        type="button"
+                                    >
+                                        <Badge className={`${currentTrainerStatus.color} border-0 font-medium`}>
+                                            {currentTrainerStatus.icon}
+                                            <span>{currentTrainerStatus.label}</span>
+                                        </Badge>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="end" className="w-80">
+                                        <div className="space-y-3">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">Trainer status</p>
+                                                <p className="text-xs text-gray-600 mt-1">{trainerStatusDescription}</p>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <Badge className={`${currentTrainerStatus.color} border-0 font-medium`}>
+                                                    {currentTrainerStatus.icon}
+                                                    <span>{currentTrainerStatus.label}</span>
+                                                </Badge>
+                                                <span className="text-xs text-gray-500">
+                                                    Last checked: {formatTime(trainerStatus.lastCheckedAt)}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <div className="rounded-md bg-gray-50 p-2 text-center">
+                                                    <div className="text-sm font-semibold text-gray-900">{trainerStatus.workersOnline}</div>
+                                                    <div className="text-[11px] text-gray-500">Workers</div>
+                                                </div>
+                                                <div className="rounded-md bg-gray-50 p-2 text-center">
+                                                    <div className="text-sm font-semibold text-gray-900">{trainerStatus.running}</div>
+                                                    <div className="text-[11px] text-gray-500">Running</div>
+                                                </div>
+                                                <div className="rounded-md bg-gray-50 p-2 text-center">
+                                                    <div className="text-sm font-semibold text-gray-900">{trainerStatus.queued}</div>
+                                                    <div className="text-[11px] text-gray-500">Queued</div>
+                                                </div>
+                                            </div>
+                                            <div className="border-t border-gray-100 pt-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowTrainerAdvanced((prev) => !prev)}
+                                                    className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                                >
+                                                    Advanced details
+                                                    <ChevronDown className={`w-3 h-3 transition-transform ${showTrainerAdvanced ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                {showTrainerAdvanced && (
+                                                    <div className="mt-2 space-y-2">
+                                                        {activeWorkers.length === 0 && (
+                                                            <p className="text-xs text-gray-500">No active workers detected.</p>
+                                                        )}
+                                                        {activeWorkers.map((worker, index) => {
+                                                            const hardwareLabel = getWorkerHardwareLabel(worker);
+                                                            return (
+                                                                <div key={worker.worker_id || index} className="rounded-md bg-gray-50 p-2 text-xs text-gray-600">
+                                                                    <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                                                        <span className="font-medium text-gray-700">Worker {index + 1}</span>
+                                                                        <span>Last seen: {formatTime(worker?.last_seen)}</span>
+                                                                    </div>
+                                                                    <div className="mt-1 text-gray-700">
+                                                                        {hardwareLabel || "Hardware not reported by this worker."}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-gray-600 hover:text-gray-900"
+                                    onClick={() => {
+                                        setTrainerStatus((prev) => ({ ...prev, state: "checking" }));
+                                        loadTrainerStatus();
+                                    }}
+                                    aria-label="Refresh trainer status"
+                                    title="Refresh trainer status"
+                                >
+                                    <RefreshCw className="h-4 w-4" />
+                                </Button>
+                            </div>
                             <span className="text-xs text-gray-500">
                                 running: {trainerStatus.running}, queued: {trainerStatus.queued}, workers: {trainerStatus.workersOnline}
                             </span>
+                            {isTrainerOffline && (
+                                <span className="text-xs text-amber-600">Runs will stay queued while offline</span>
+                            )}
                         </div>
-                        {selectedStep && (
-                            <Button onClick={() => setShowStartTrainingDialog(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-6">
-                                <PlayCircle className="w-4 h-4 mr-2" /> Start New Training Run
-                            </Button>
-                        )}
                     </div>
                 </div>
 
@@ -329,45 +579,157 @@ export default function TrainingConfigurationPage() {
                 <div className="max-w-7xl mx-auto">
                     {selectedStep ? (
                         <div className="space-y-8">
-                            {groupedRuns.running.length > 0 && (
-                                <Section title="Live Training & Optimization" icon={<Rocket className="w-5 h-5 text-blue-600" />} count={groupedRuns.running.length}>
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {groupedRuns.running.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
-                                    </div>
-                                </Section>
-                            )}
+                            <div className="grid gap-6 lg:grid-cols-3">
+                                <Card className="border-0 shadow-sm">
+                                    <CardHeader>
+                                        <div className="flex items-center justify-between">
+                                            <CardTitle>Dataset readiness</CardTitle>
+                                            <Badge className={datasetStatusClass}>
+                                                {datasetStatusLabel}
+                                            </Badge>
+                                        </div>
+                                        <CardDescription>Check images, labels, splits, and classes before training.</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3 text-sm text-gray-600">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="space-y-1">
+                                                <p><span className="font-medium text-gray-800">Images:</span> {datasetSummary ? datasetSummary.total : (isDatasetLoading ? "Checking..." : "Not checked")}</p>
+                                                <p><span className="font-medium text-gray-800">Labeled images:</span> {datasetSummary ? datasetSummary.labeled : "n/a"}</p>
+                                                <p><span className="font-medium text-gray-800">Splits:</span> train {datasetSummary?.splits?.train ?? "n/a"} / val {datasetSummary?.splits?.val ?? "n/a"} / test {datasetSummary?.splits?.test ?? "n/a"}</p>
+                                                <p><span className="font-medium text-gray-800">Classes:</span> {datasetSummary ? datasetSummary.classesCount : "n/a"}</p>
+                                                <p><span className="font-medium text-gray-800">Annotation types:</span> {annotationTypeLabel}</p>
+                                            </div>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => refreshDatasetSummary(selectedStep)}
+                                                disabled={isDatasetLoading}
+                                            >
+                                                {isDatasetLoading ? "Refreshing..." : "Refresh"}
+                                            </Button>
+                                        </div>
+                                        {datasetSummary?.classesCount === 0 && (
+                                            <p className="text-xs text-amber-700">Add class names before training.</p>
+                                        )}
+                                        {datasetSummary?.total === 0 && (
+                                            <p className="text-xs text-amber-700">Upload images before training.</p>
+                                        )}
+                                        {datasetSummary?.total > 0 && datasetSummary?.labeled === 0 && (
+                                            <p className="text-xs text-amber-700">Annotate images to produce meaningful training results.</p>
+                                        )}
+                                        {hasMixedLabels && (
+                                            <p className="text-xs text-amber-700">Mixed box and polygon labels detected. Use only boxes for detection or only polygons for segmentation.</p>
+                                        )}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => navigate(createPageUrl(`AnnotationStudio?projectId=${selectedProjectId}`))}
+                                        >
+                                            Open annotation studio
+                                        </Button>
+                                    </CardContent>
+                                </Card>
 
-                             {groupedRuns.queued.length > 0 && (
-                                <Section title="In Queue" icon={<Clock className="w-5 h-5 text-amber-600" />} count={groupedRuns.queued.length}>
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {groupedRuns.queued.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
-                                    </div>
-                                </Section>
-                            )}
+                                <Card className="border-0 shadow-sm">
+                                    <CardHeader>
+                                        <CardTitle>Start training</CardTitle>
+                                        <CardDescription>Use presets for speed, or open advanced settings for full control.</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4 text-sm text-gray-600">
+                                        <div className="space-y-1">
+                                            <p><span className="font-medium text-gray-800">Preset:</span> Balanced</p>
+                                            <p><span className="font-medium text-gray-800">Base model:</span> YOLOv8s</p>
+                                            <p><span className="font-medium text-gray-800">Compute:</span> GPU (device 0)</p>
+                                        </div>
+                                        {!datasetReady && (
+                                            <Alert className="border-amber-200 bg-amber-50">
+                                                <AlertTitle className="text-amber-900">Dataset not ready</AlertTitle>
+                                                <AlertDescription className="text-amber-800">Resolve dataset issues before starting a run.</AlertDescription>
+                                            </Alert>
+                                        )}
+                                        <Button
+                                            onClick={() => setShowStartTrainingDialog(true)}
+                                            className={`${startButtonClass} text-white`}
+                                            disabled={!datasetReady}
+                                        >
+                                            <PlayCircle className="w-4 h-4 mr-2" />
+                                            {isTrainerOffline ? 'Queue Training Run' : 'Start Training'}
+                                        </Button>
+                                    </CardContent>
+                                </Card>
 
-                            {groupedRuns.completed.length > 0 && (
-                                <Section title="Completed Models" icon={<CheckCircle className="w-5 h-5 text-green-600" />} count={groupedRuns.completed.length}>
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {groupedRuns.completed.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
-                                    </div>
-                                </Section>
-                            )}
-                            
-                            {groupedRuns.history.length > 0 && (
-                                <Section title="History (Failed/Stopped)" icon={<History className="w-5 h-5 text-gray-600" />} count={groupedRuns.history.length}>
-                                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {groupedRuns.history.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
-                                    </div>
-                                </Section>
-                            )}
+                                <Card className="border-0 shadow-sm">
+                                    <CardHeader>
+                                        <CardTitle>Recent runs</CardTitle>
+                                        <CardDescription>Quick access to the latest training activity.</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3">
+                                        {recentRuns.length === 0 && (
+                                            <p className="text-sm text-gray-500">No runs yet for this step.</p>
+                                        )}
+                                        {recentRuns.map(run => (
+                                            <div key={run.id} className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900">{run.run_name}</p>
+                                                    <p className="text-xs text-gray-500">{run.created_date ? new Date(run.created_date).toLocaleString() : "Unknown date"}</p>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge className="border-0 bg-gray-100 text-gray-700 capitalize">{run.status}</Badge>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => navigate(createPageUrl(`TrainingStatus?runId=${run.id}`))}
+                                                    >
+                                                        View
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </CardContent>
+                                </Card>
+                            </div>
 
-                            {trainingRuns.length === 0 && (
-                                <div className="text-center py-16 bg-gray-50 rounded-lg">
-                                    <FolderOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                                    <h3 className="text-xl font-semibold text-gray-800">No Training Runs Yet</h3>
-                                    <p className="text-gray-500 mt-2">Start your first training run to begin creating a model for this step.</p>
-                                </div>
-                            )}
+                            <div className="space-y-8">
+                                {groupedRuns.running.length > 0 && (
+                                    <Section title="Live training" icon={<Rocket className="w-5 h-5 text-blue-600" />} count={groupedRuns.running.length}>
+                                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {groupedRuns.running.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                        </div>
+                                    </Section>
+                                )}
+
+                                {groupedRuns.queued.length > 0 && (
+                                    <Section title="Queued runs" icon={<Clock className="w-5 h-5 text-amber-600" />} count={groupedRuns.queued.length}>
+                                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {groupedRuns.queued.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                        </div>
+                                    </Section>
+                                )}
+
+                                {groupedRuns.completed.length > 0 && (
+                                    <Section title="Completed models" icon={<CheckCircle className="w-5 h-5 text-green-600" />} count={groupedRuns.completed.length}>
+                                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {groupedRuns.completed.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                        </div>
+                                    </Section>
+                                )}
+                                
+                                {groupedRuns.history.length > 0 && (
+                                    <Section title="History" icon={<History className="w-5 h-5 text-gray-600" />} count={groupedRuns.history.length}>
+                                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {groupedRuns.history.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                        </div>
+                                    </Section>
+                                )}
+
+                                {trainingRuns.length === 0 && (
+                                    <div className="text-center py-16 bg-gray-50 rounded-lg">
+                                        <FolderOpen className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+                                        <h3 className="text-xl font-semibold text-gray-800">No training runs yet</h3>
+                                        <p className="text-gray-500 mt-2">Start your first training run to begin creating a model for this step.</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     ) : (
                          <div className="text-center py-16 bg-gray-50 rounded-lg">
@@ -387,6 +749,7 @@ export default function TrainingConfigurationPage() {
                 stepTitle={selectedStep?.title}
                 stepData={selectedStep}
                 existingRuns={trainingRuns}
+                trainerOffline={isTrainerOffline}
             />
         </div>
     );

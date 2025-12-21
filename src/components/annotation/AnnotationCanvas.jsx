@@ -24,6 +24,7 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Tag,
   Target,
   Palette,
   ChevronLeft,
@@ -31,6 +32,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   FolderOpen,
+  Pin,
   ChevronDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -40,15 +42,28 @@ const HANDLE_SIZE = 8; // Size of resize handles in pixels (in screen pixels, ad
 const UNLABELED_CLASS_KEY = "[Unlabeled]"; // Special key for annotations without a class
 const POLYGON_CLOSE_THRESHOLD = 15; // In image pixels
 const DRAG_THRESHOLD = 3; // Minimum pixels to move to register a drag vs a click
+const MIN_BOX_SIZE = 4; // Minimum bbox size in image pixels
+
+const BADGE_LAYOUT = {
+  height: 18,
+  minWidth: 44,
+  maxWidth: 220,
+  charWidth: 6,
+  padding: 14,
+  gap: 4,
+  inset: 2,
+};
 
 const MAX_VISIBLE_STATUSES = 3;
 const HISTORY_LIMIT = 50;
 const MAX_SAVE_RETRIES = 2;
 const SAVE_RETRY_BASE_MS = 600;
 const MIN_SAVING_MS = 600;
+const MAX_VISIBLE_ACTIVE_CLASSES = 18;
+const MAX_VISIBLE_FILTER_CLASSES = 24;
 
 // Annotation Toolbar Component
-const AnnotationToolbar = React.forwardRef(({ annotation, onStatusChange, onDelete, style, stepStatus }, ref) => {
+const AnnotationToolbar = React.forwardRef(({ annotation, onStatusChange, onDelete, onRelabel, style, stepStatus }, ref) => {
   // Parse the step status - it could be comma-separated values like "Pass,Fail" or "Good,Bad,Defective"
   const statusOptions = stepStatus ? stepStatus.split(',').map(s => s.trim()) : ['pass', 'fail'];
   const visibleStatusOptions = statusOptions.slice(0, MAX_VISIBLE_STATUSES);
@@ -107,6 +122,18 @@ const AnnotationToolbar = React.forwardRef(({ annotation, onStatusChange, onDele
             })}
           </DropdownMenuContent>
         </DropdownMenu>
+      )}
+      {onRelabel && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onRelabel}
+          className="h-7 px-2 text-gray-600 hover:text-blue-600"
+          title="Assign label"
+        >
+          <Tag className="w-4 h-4 mr-1" />
+          Label
+        </Button>
       )}
       <Button
         size="sm"
@@ -212,16 +239,23 @@ const AnnotationLabler = ({ x, y, classes, suggestedClass, onSelect, onCancel })
         </div>
         <ScrollArea className="h-40">
           <div className="p-2 pt-0">
-          {filteredClasses.length > 0 ? filteredClasses.map((cls, index) => (
-            <Button
-              key={cls}
-              variant={selectedIndex === index ? 'default' : 'ghost'}
-              className={`w-full justify-start h-8 text-sm mb-1 ${selectedIndex === index ? 'bg-blue-600' : ''}`}
-              onClick={() => onSelect(cls)}
-            >
-              {cls}
-            </Button>
-          )) : (
+          {filteredClasses.length > 0 ? filteredClasses.map((cls, index) => {
+            const isSelected = selectedIndex === index;
+            return (
+              <Button
+                key={cls}
+                variant={isSelected ? 'default' : 'ghost'}
+                className={`w-full justify-start h-8 text-sm mb-1 transition-all ${
+                  isSelected
+                    ? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-300 ring-offset-2 ring-offset-white scale-[1.02]'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+                onClick={() => onSelect(cls)}
+              >
+                {cls}
+              </Button>
+            );
+          }) : (
             <div className="text-center text-xs text-gray-500 py-2">No matching classes</div>
           )}
           </div>
@@ -237,6 +271,7 @@ export default forwardRef(function AnnotationCanvas({
   currentImage,
   annotationMode,
   activeClass,
+  onActiveClassChange,
   projectId,
   onNextImage,
   onPrevImage,
@@ -246,6 +281,7 @@ export default forwardRef(function AnnotationCanvas({
   stepImages = [], // New prop: array of all images in the step
   onImageIndexChange, // New prop: function to change the current image by its overall index
   onImageSaved,
+  onImageLoaded,
 }, ref) {
   const canvasContainerRef = useRef(null); // The div that holds the transform-wrapper
   const imageRef = useRef(null); // The actual <img> element
@@ -291,9 +327,13 @@ export default forwardRef(function AnnotationCanvas({
   const [showAnnotationPanel, setShowAnnotationPanel] = useState(true); // Panel visibility
   const [classColors, setClassColors] = useState({}); // New state for class-specific colors
   const [showGroupNavigation, setShowGroupNavigation] = useState(false); // New state for group navigation dropdown
+  const [showAllActiveClasses, setShowAllActiveClasses] = useState(false);
+  const [showAllFilterClasses, setShowAllFilterClasses] = useState(false);
+  const [pinnedClasses, setPinnedClasses] = useState(new Set());
   const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved | error
   const saveStatusTimeoutRef = useRef(null);
   const saveStatusStartRef = useRef(null);
+  const [isImageLoading, setIsImageLoading] = useState(false);
   const [toolbarSize, setToolbarSize] = useState({ width: 0, height: 0 });
   const [effectiveImageProps, setEffectiveImageProps] = useState({
     naturalWidth: 0,
@@ -323,15 +363,25 @@ export default forwardRef(function AnnotationCanvas({
     return Math.min(scaleX, scaleY) * 0.95;
   }, [containerSize, effectiveImageProps]);
 
+  const isFitZoom = useMemo(
+    () => Boolean(fitZoom && Math.abs(zoom - fitZoom) < 0.005),
+    [fitZoom, zoom]
+  );
+
   const zoomLabel = useMemo(() => {
     if (Math.abs(zoom - 1) < 0.005) {
       return "100%";
     }
-    if (fitZoom && Math.abs(zoom - fitZoom) < 0.005) {
+    if (isFitZoom) {
       return "Fit";
     }
     return `${Math.round(zoom * 100)}%`;
-  }, [fitZoom, zoom]);
+  }, [isFitZoom, zoom]);
+
+  const isFitZoomRef = useRef(false);
+  useEffect(() => {
+    isFitZoomRef.current = isFitZoom;
+  }, [isFitZoom]);
 
   // NEW: Memo to calculate annotation stats for the entire step
   const stepWideAnnotationStats = useMemo(() => {
@@ -558,6 +608,28 @@ export default forwardRef(function AnnotationCanvas({
 
   const totalInGroup = imageGroups[currentImageGroup]?.length || 0;
 
+  useEffect(() => {
+    if (!currentImage?.image_url) {
+      setIsImageLoading(false);
+      setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
+      return;
+    }
+
+    const imgEl = imageRef.current;
+    if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+      setEffectiveImageProps({
+        naturalWidth: imgEl.naturalWidth,
+        naturalHeight: imgEl.naturalHeight,
+      });
+      setIsImageLoading(false);
+      onImageLoaded?.();
+      return;
+    }
+
+    setIsImageLoading(true);
+    setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
+  }, [currentImage?.id, currentImage?.image_url, onImageLoaded]);
+
   // MODIFIED EFFECT: Load annotations FROM currentImage's data
   useEffect(() => {
     if (historyTimerRef.current) {
@@ -600,7 +672,7 @@ export default forwardRef(function AnnotationCanvas({
     // Also reset selection and other states when image changes
     applySelection([], null);
     setLabelingState({ isVisible: false, x: 0, y: 0, annotationId: null });
-  }, [currentImage]);
+  }, [currentImage?.id]);
 
   useEffect(() => {
     if (!currentImage?.id) return;
@@ -640,7 +712,9 @@ export default forwardRef(function AnnotationCanvas({
         naturalWidth: imageRef.current.naturalWidth,
         naturalHeight: imageRef.current.naturalHeight,
       });
+      setIsImageLoading(false);
     }
+    onImageLoaded?.();
   };
 
   // Effect to "fit" the image to the container when it loads or container resizes
@@ -688,6 +762,9 @@ export default forwardRef(function AnnotationCanvas({
       e.stopPropagation();
 
       // Priority: Ctrl+Scroll = Zoom, Shift+Scroll = Horizontal Pan, Regular Scroll = Vertical Pan
+      if (!e.ctrlKey && isFitZoomRef.current) {
+        return;
+      }
       if (e.ctrlKey) {
         // Zooming logic - takes priority over all other operations
         const rect = container.getBoundingClientRect();
@@ -1111,7 +1188,7 @@ export default forwardRef(function AnnotationCanvas({
           y: point.y,
           width: 0,
           height: 0,
-          class: null, // Start with no class, will be labeled later
+          class: null,
           status: 'neutral',
         });
         applySelection([], null); // Deselect any existing annotation when starting to draw
@@ -1139,6 +1216,7 @@ export default forwardRef(function AnnotationCanvas({
               points: [...currentAnnotation.points], // Do not add the closing point, it will be closed by renderer
               id: Date.now(),
               index: annotations.length + 1,
+              class: currentAnnotation.class || null,
             };
             setAnnotations(prev => [...prev, newAnnotation]);
             setIsDrawing(false);
@@ -1405,7 +1483,7 @@ export default forwardRef(function AnnotationCanvas({
         }
 
         // Only save if bounding box has a reasonable size (at least 10x10 pixels in natural image space)
-        if (finalWidth > 10 && finalHeight > 10) {
+        if (finalWidth > MIN_BOX_SIZE && finalHeight > MIN_BOX_SIZE) {
           const newAnnotation = {
             ...currentAnnotation,
             type: 'bbox', // Ensure type is bbox
@@ -1416,7 +1494,7 @@ export default forwardRef(function AnnotationCanvas({
             id: Date.now(), // Unique ID for each annotation
             index: annotations.length + 1, // Add index for display
             status: 'neutral', // Default status for new annotations
-            class: null // Class will be set via the labler
+            class: currentAnnotation.class || null
           };
           setAnnotations(prev => [...prev, newAnnotation]);
           selectSingleAnnotation(newAnnotation.id); // Select the new annotation immediately
@@ -1444,6 +1522,7 @@ export default forwardRef(function AnnotationCanvas({
             type: 'brush', // Ensure type is brush
             id: Date.now(),
             index: annotations.length + 1,
+            class: currentAnnotation.class || null,
           };
           setAnnotations(prev => [...prev, newAnnotation]);
           selectSingleAnnotation(newAnnotation.id);
@@ -1482,7 +1561,7 @@ export default forwardRef(function AnnotationCanvas({
 
 
               // Minimum size check after normalization
-              if (finalAnn.width < 10 || finalAnn.height < 10) {
+              if (finalAnn.width < MIN_BOX_SIZE || finalAnn.height < MIN_BOX_SIZE) {
                 return null; // Mark for deletion if too small after resize
               }
             } else if (finalAnn.type === 'polygon' || finalAnn.type === 'brush') {
@@ -1512,6 +1591,7 @@ export default forwardRef(function AnnotationCanvas({
           ...currentAnnotation,
           id: Date.now(),
           index: annotations.length + 1,
+          class: currentAnnotation.class || null,
         };
         setAnnotations(prev => [...prev, newAnnotation]);
         setIsDrawing(false);
@@ -1526,10 +1606,14 @@ export default forwardRef(function AnnotationCanvas({
       // Finish Brush with Right-Click
       else if (currentAnnotation.type === 'brush' && currentAnnotation.points.length > 5) {
         setIsDrawing(false);
-        const newAnnotation = { ...currentAnnotation, id: Date.now(), index: annotations.length + 1 };
+        const newAnnotation = {
+          ...currentAnnotation,
+          id: Date.now(),
+          index: annotations.length + 1,
+          class: currentAnnotation.class || null,
+        };
         setAnnotations(prev => [...prev, newAnnotation]);
         selectSingleAnnotation(newAnnotation.id);
-        
         const lastPoint = currentAnnotation.points[currentAnnotation.points.length - 1];
         const lablerX = lastPoint.x * zoom + pan.x;
         const lablerY = lastPoint.y * zoom + pan.y;
@@ -1547,6 +1631,24 @@ export default forwardRef(function AnnotationCanvas({
     selectSingleAnnotation(annotationId); // Keep it selected after labeling
   };
 
+  const openLabelerForAnnotation = useCallback((annotation) => {
+    if (!annotation) return;
+    let anchorX = annotation.x ?? 0;
+    let anchorY = annotation.y ?? 0;
+    if ((annotation.type === 'polygon' || annotation.type === 'brush') && annotation.points?.length) {
+      const xs = annotation.points.map(point => point.x);
+      const ys = annotation.points.map(point => point.y);
+      anchorX = Math.max(...xs);
+      anchorY = Math.max(...ys);
+    } else if (annotation.type === 'bbox') {
+      anchorX = (annotation.x ?? 0) + (annotation.width ?? 0);
+      anchorY = (annotation.y ?? 0) + (annotation.height ?? 0);
+    }
+    const lablerX = anchorX * zoom + pan.x;
+    const lablerY = anchorY * zoom + pan.y;
+    setLabelingState({ isVisible: true, x: lablerX + 5, y: lablerY, annotationId: annotation.id });
+  }, [pan.x, pan.y, zoom]);
+
   const handleLabelCancel = (annotationId) => {
     // If the annotation was a polygon or brush, and we cancel labeling, we should reset isDrawing.
     const canceledAnnotation = annotations.find(ann => ann.id === annotationId);
@@ -1554,10 +1656,12 @@ export default forwardRef(function AnnotationCanvas({
       setIsDrawing(false);
       setCurrentAnnotation(null);
     }
-    // Remove the annotation that was just drawn and was awaiting a label
-    setAnnotations(prevAnns => prevAnns.filter(ann => ann.id !== annotationId));
     setLabelingState({ isVisible: false, x: 0, y: 0, annotationId: null });
-    applySelection([], null); // Deselect if the canceled annotation was selected
+    if (canceledAnnotation) {
+      selectSingleAnnotation(canceledAnnotation.id);
+    } else {
+      applySelection([], null);
+    }
   };
 
   const updateCursor = useCallback((point) => {
@@ -1734,10 +1838,23 @@ export default forwardRef(function AnnotationCanvas({
     });
   };
 
+  const togglePinnedClass = (className) => {
+    setPinnedClasses(prev => {
+      const newPins = new Set(prev);
+      if (newPins.has(className)) {
+        newPins.delete(className);
+      } else {
+        newPins.add(className);
+      }
+      return newPins;
+    });
+  };
+
   // Clear all filters
   const clearAllFilters = () => {
     setClassFilters(new Set());
     setSearchTerm('');
+    setShowAllFilterClasses(false);
     applySelection([], null); // Clear selection when clearing filters
   };
 
@@ -1830,6 +1947,16 @@ export default forwardRef(function AnnotationCanvas({
     ];
   };
 
+  const estimateBadgeMetrics = (text) => {
+    if (!text) return { width: 0, height: 0 };
+    const roughTextWidth = text.length * BADGE_LAYOUT.charWidth;
+    const width = Math.min(
+      BADGE_LAYOUT.maxWidth,
+      Math.max(BADGE_LAYOUT.minWidth, roughTextWidth + BADGE_LAYOUT.padding)
+    );
+    return { width, height: BADGE_LAYOUT.height };
+  };
+
   const renderAnnotation = (annotation, key) => { // key is annotation.id or -1 for currentAnnotation
     const isPrimarySelected = selectedAnnotationId === annotation.id;
     const isSelected = isAnnotationSelected(annotation.id);
@@ -1849,6 +1976,14 @@ export default forwardRef(function AnnotationCanvas({
     const statusColor = getStatusColor(annotation.status);
     
     const borderColor = statusColor || (isSelected ? '#f59e0b' : baseColor);
+    const isPulsing = key !== -1 && isPrimarySelected;
+    const pulseColor = hexToRgba(borderColor, 0.35);
+    const pulseAnimation = isPulsing
+      ? { boxShadow: [`0 0 0 0 ${pulseColor}`, `0 0 0 6px ${pulseColor}`, `0 0 0 0 ${pulseColor}`] }
+      : { boxShadow: "none" };
+    const pulseTransition = isPulsing
+      ? { duration: 1.1, ease: "easeInOut", repeat: Infinity }
+      : { duration: 0 };
 
     const fillOpacity = isUnlabeled ? 0.4 : annotationOpacity;
 
@@ -1865,6 +2000,57 @@ export default forwardRef(function AnnotationCanvas({
         }
         return { x, y, width, height };
       })();
+
+      const labelText = isUnlabeled ? UNLABELED_CLASS_KEY : `#${annotation.index} ${annotation.class}`;
+      const statusText = annotation.status !== 'neutral' ? annotation.status : null;
+      const labelMetrics = estimateBadgeMetrics(labelText);
+      const statusMetrics = estimateBadgeMetrics(statusText);
+      const boxScreenWidth = normalized.width * zoom;
+      const boxScreenHeight = normalized.height * zoom;
+      const spaceAbove = normalized.y * zoom;
+      const spaceBelow = (effectiveImageProps.naturalHeight - (normalized.y + normalized.height)) * zoom;
+      const labelOutside = showLabels &&
+        (boxScreenWidth < labelMetrics.width + 8 || boxScreenHeight < labelMetrics.height + 6);
+      const labelPlacement = labelOutside
+        ? (spaceAbove >= labelMetrics.height + BADGE_LAYOUT.gap || spaceBelow < labelMetrics.height + BADGE_LAYOUT.gap
+            ? 'outside-top'
+            : 'outside-bottom')
+        : 'inside-top';
+      let statusPlacement = null;
+      if (statusText) {
+        const statusOutside =
+          boxScreenWidth < statusMetrics.width + 8 || boxScreenHeight < statusMetrics.height + 6;
+        statusPlacement = statusOutside
+          ? (spaceBelow >= statusMetrics.height + BADGE_LAYOUT.gap ? 'outside-bottom' : 'outside-top')
+          : 'inside-bottom';
+        if (labelPlacement === 'outside-top' && statusPlacement === 'outside-top' && spaceBelow >= statusMetrics.height + BADGE_LAYOUT.gap) {
+          statusPlacement = 'outside-bottom';
+        }
+      }
+
+      const getBadgeStyle = (placement, align, metrics) => {
+        if (!placement) return null;
+        const style = {
+          position: 'absolute',
+          [align === 'right' ? 'right' : 'left']: 0,
+          transform: `scale(${1 / zoom})`,
+        };
+        if (placement === 'inside-top') {
+          style.top = BADGE_LAYOUT.inset / zoom;
+          style.transformOrigin = align === 'right' ? 'top right' : 'top left';
+        } else if (placement === 'inside-bottom') {
+          style.bottom = BADGE_LAYOUT.inset / zoom;
+          style.transformOrigin = align === 'right' ? 'bottom right' : 'bottom left';
+        } else if (placement === 'outside-top') {
+          style.top = -(metrics.height + BADGE_LAYOUT.gap) / zoom;
+          style.transformOrigin = align === 'right' ? 'top right' : 'top left';
+        } else if (placement === 'outside-bottom') {
+          style.top = normalized.height + BADGE_LAYOUT.gap / zoom;
+          style.transformOrigin = align === 'right' ? 'top right' : 'top left';
+        }
+        return style;
+      };
+
       const style = {
         position: 'absolute',
         left: normalized.x,
@@ -1877,38 +2063,39 @@ export default forwardRef(function AnnotationCanvas({
         opacity: (isVisible || isDrawing) ? 1 : 0.3 // Dim non-selected/non-drawing if annotations hidden
       };
       return (
-        <div
+        <motion.div
           key={key}
-          style={style}
+          style={{ ...style, transformOrigin: 'center' }}
           className={`pointer-events-auto transition-colors duration-200 ${isSelected ? 'shadow-lg' : ''}`}
+          initial={false}
+          animate={pulseAnimation}
+          transition={pulseTransition}
           // REMOVED onClick handler that was causing the conflict
         >
-          <div className="flex items-center justify-between w-full h-full p-1">
-            {showLabels && (
-              <Badge
-                className="text-white text-xs self-start"
-                style={{
-                  transform: `scale(${1 / zoom})`,
-                  transformOrigin: 'top left',
-                  backgroundColor: borderColor
-                }}
-              >
-                {isUnlabeled ? UNLABELED_CLASS_KEY : `#${annotation.index} ${annotation.class}`}
-              </Badge>
-            )}
-            {annotation.status !== 'neutral' && (
-              <Badge
-                className="text-white text-xs self-end"
-                style={{
-                  transform: `scale(${1 / zoom})`,
-                  transformOrigin: 'bottom right',
-                  backgroundColor: statusColor
-                }}
-              >
-                {annotation.status}
-              </Badge>
-            )}
-          </div>
+          {showLabels && (
+            <Badge
+              className="text-white text-xs shadow-sm truncate max-w-[220px]"
+              title={labelText}
+              style={{
+                ...getBadgeStyle(labelPlacement, 'left', labelMetrics),
+                backgroundColor: borderColor,
+              }}
+            >
+              {labelText}
+            </Badge>
+          )}
+          {statusText && (
+            <Badge
+              className="text-white text-xs shadow-sm truncate max-w-[220px]"
+              title={statusText}
+              style={{
+                ...getBadgeStyle(statusPlacement, 'right', statusMetrics),
+                backgroundColor: statusColor,
+              }}
+            >
+              {statusText}
+            </Badge>
+          )}
 
           {isSelected && annotationMode === 'move' && getResizeHandles({ ...annotation, ...normalized }).map(handle => (
               <div
@@ -1927,7 +2114,7 @@ export default forwardRef(function AnnotationCanvas({
                 }}
               />
           ))}
-        </div>
+        </motion.div>
       );
     } else if (annotation.type === 'polygon' || annotation.type === 'brush') {
       if (!annotation.points || annotation.points.length === 0) return null;
@@ -1966,7 +2153,7 @@ export default forwardRef(function AnnotationCanvas({
       const isBrushCompleted = annotation.type === 'brush' && !isDrawing && annotation.points.length > 5;
 
       return (
-        <div
+        <motion.div
           key={key}
           style={{
             position: 'absolute',
@@ -1977,7 +2164,11 @@ export default forwardRef(function AnnotationCanvas({
             zIndex: isSelected ? 20 : 10,
             opacity: (isVisible || isDrawing) ? 1 : 0.3,
             pointerEvents: 'none', // The containing div does not intercept pointer events
+            transformOrigin: 'center',
           }}
+          initial={false}
+          animate={pulseAnimation}
+          transition={pulseTransition}
           // REMOVED onClick handler that was causing the conflict
         >
           {showLabels && !isDrawing && (
@@ -2068,7 +2259,7 @@ export default forwardRef(function AnnotationCanvas({
               {annotation.status}
             </Badge>
           )}
-        </div>
+        </motion.div>
       );
     }
   };
@@ -2099,6 +2290,42 @@ export default forwardRef(function AnnotationCanvas({
       ...Object.keys(stepWideAnnotationStats),
       ...(annotations.some(ann => ann.class === null) && !Array.from(new Set([...Object.keys(stepWideAnnotationStats), ...(currentStep?.classes || [])])).includes(UNLABELED_CLASS_KEY) ? [UNLABELED_CLASS_KEY] : []) // Add Unlabeled if exists on current image and not already covered by stepWide or stepClasses
     ])).sort();
+    const classSearchTerm = searchTerm.trim().toLowerCase();
+    const searchedClasses = classSearchTerm
+      ? availableClasses.filter((className) => className.toLowerCase().includes(classSearchTerm))
+      : availableClasses;
+    const classFilterOptions = searchedClasses.filter((className) => {
+      const totalStepCount = stepWideAnnotationStats[className]?.count || 0;
+      return (
+        totalStepCount > 0 ||
+        (currentStep?.classes || []).includes(className) ||
+        className === UNLABELED_CLASS_KEY
+      );
+    });
+    const activeClassOptions = currentStep?.classes || [];
+    const pinnedActiveClasses = activeClassOptions.filter((className) => pinnedClasses.has(className));
+    const orderedActiveClasses = pinnedActiveClasses;
+    const visibleActiveClasses = showAllActiveClasses
+      ? orderedActiveClasses
+      : orderedActiveClasses.slice(0, MAX_VISIBLE_ACTIVE_CLASSES);
+    const hiddenActiveClassCount = Math.max(orderedActiveClasses.length - visibleActiveClasses.length, 0);
+
+    const pinnedFilterOptions = classFilterOptions.filter((className) => pinnedClasses.has(className));
+    const selectedFilterOptions = classFilterOptions.filter((className) => !pinnedClasses.has(className) && classFilters.has(className));
+    const unpinnedFilterOptions = classFilterOptions.filter((className) => !pinnedClasses.has(className) && !classFilters.has(className));
+    const orderedFilterOptions = [...pinnedFilterOptions, ...selectedFilterOptions, ...unpinnedFilterOptions];
+    const filterPrioritySet = new Set([...pinnedFilterOptions, ...selectedFilterOptions]);
+    const showAllFilters = showAllFilterClasses || classSearchTerm.length > 0;
+    const visibleFilterOptions = showAllFilters
+      ? orderedFilterOptions
+      : (() => {
+          if (orderedFilterOptions.length <= MAX_VISIBLE_FILTER_CLASSES) return orderedFilterOptions;
+          const prioritized = orderedFilterOptions.filter((className) => filterPrioritySet.has(className));
+          const rest = orderedFilterOptions.filter((className) => !filterPrioritySet.has(className));
+          const remaining = Math.max(MAX_VISIBLE_FILTER_CLASSES - prioritized.length, 0);
+          return [...prioritized, ...rest.slice(0, remaining)];
+        })();
+    const hiddenFilterCount = Math.max(orderedFilterOptions.length - visibleFilterOptions.length, 0);
 
     // Group annotations by class if enabled
     const filteredAnnotations = annotations.filter(ann => shouldShowAnnotation(ann));
@@ -2141,83 +2368,202 @@ export default forwardRef(function AnnotationCanvas({
             </div>
           </div>
 
+          {/* Active class selector */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-gray-600">Active class</span>
+              {activeClass && pinnedClasses.has(activeClass) && (
+                <Badge variant="outline" className="text-[10px] px-2 py-0 h-5">
+                  {activeClass}
+                </Badge>
+              )}
+            </div>
+            {pinnedActiveClasses.length > 0 ? (
+              <div className="space-y-1">
+                <div className="max-h-28 overflow-y-auto pr-1">
+                  <div className="flex flex-wrap gap-1">
+                    {visibleActiveClasses.map((className) => (
+                      <div key={className} className="relative group">
+                        <Button
+                          variant={activeClass === className ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => onActiveClassChange?.(className)}
+                          className="text-[11px] h-6 pl-2 pr-6"
+                          style={{
+                            backgroundColor: activeClass === className ? getResolvedClassColor(className) : "transparent",
+                            borderColor: getResolvedClassColor(className),
+                            color: activeClass === className ? "white" : getResolvedClassColor(className)
+                          }}
+                        >
+                          {className}
+                        </Button>
+                        <button
+                          type="button"
+                          title={pinnedClasses.has(className) ? "Unpin class" : "Pin class"}
+                          aria-pressed={pinnedClasses.has(className)}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            togglePinnedClass(className);
+                          }}
+                          className={`absolute right-1 top-1/2 -translate-y-1/2 transition-opacity ${
+                            pinnedClasses.has(className) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                          }`}
+                        >
+                          <Pin className={`w-3 h-3 ${pinnedClasses.has(className) ? "text-blue-600" : "text-gray-400"}`} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {orderedActiveClasses.length > MAX_VISIBLE_ACTIVE_CLASSES && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAllActiveClasses((prev) => !prev)}
+                    className="h-5 px-2 text-[11px]"
+                  >
+                    {showAllActiveClasses ? "Show less" : `Show ${hiddenActiveClassCount} more`}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="text-xs text-gray-500">
+                {activeClassOptions.length > 0
+                  ? "Pin classes below to show them here."
+                  : "No classes configured for this step."}
+              </div>
+            )}
+          </div>
+
           {/* Search */}
           <Input
-            placeholder="Search annotations..."
+            placeholder="Search annotations and classes..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="text-xs h-7 mb-2"
           />
 
           {/* Class filters */}
-          <div className="flex flex-wrap gap-1 mb-2">
-            {availableClasses.map((className, index) => {
-              const currentImageCount = currentImageStats[className]?.count || 0;
-              const totalStepCount = stepWideAnnotationStats[className]?.count || 0;
-
-              // Do not show button if there are no annotations at all for this class AND it's not a class explicitly defined for the current step
-              if (totalStepCount === 0 && !(currentStep?.classes || []).includes(className) && className !== UNLABELED_CLASS_KEY) return null;
-
-              return (
-                <Button
-                  key={className}
-                  variant={classFilters.has(className) ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleClassFilter(className)}
-                  className="text-xs h-6 px-2"
-                  style={{
-                    backgroundColor: classFilters.has(className) ? getResolvedClassColor(className) : 'transparent',
-                    borderColor: getResolvedClassColor(className),
-                    color: classFilters.has(className) ? 'white' : getResolvedClassColor(className)
-                  }}
-                >
-                  {className} ({currentImageCount}/{totalStepCount})
-                </Button>
-              );
-            })}
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className="text-gray-600">
+              Class filters {classFilterOptions.length}/{availableClasses.length}
+            </span>
             <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowLabels(!showLabels)}
-              className="h-6 text-xs"
-            >
-              Labels: {showLabels ? 'ON' : 'OFF'}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setGroupByClass(!groupByClass)}
-              className="h-6 text-xs"
-            >
-              Group: {groupByClass ? 'ON' : 'OFF'}
-            </Button>
-            <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={clearAllFilters}
-              className="h-6 text-xs text-red-600"
+              className="h-5 px-2 text-[11px] text-red-700 border-red-200 hover:bg-red-50"
             >
-              Clear All
+              Clear filters
             </Button>
           </div>
+          <div className="max-h-24 overflow-y-auto pr-1 mb-2">
+            <div className="flex flex-wrap gap-1">
+              {visibleFilterOptions.length > 0 ? (
+                visibleFilterOptions.map((className) => {
+                  const currentImageCount = currentImageStats[className]?.count || 0;
+                  const totalStepCount = stepWideAnnotationStats[className]?.count || 0;
 
-          {/* Opacity slider */}
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs text-gray-600">Opacity:</span>
-            <input
-              type="range"
-              min="0.1"
-              max="1"
-              step="0.1"
-              value={annotationOpacity}
-              onChange={(e) => setAnnotationOpacity(parseFloat(e.target.value))}
-              className="flex-1 h-1"
-            />
-            <span className="text-xs text-gray-600">{Math.round(annotationOpacity * 100)}%</span>
+                  return (
+                    <div key={className} className="relative group">
+                      <Button
+                        variant={classFilters.has(className) ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => toggleClassFilter(className)}
+                        className="text-xs h-6 pl-2 pr-6"
+                        style={{
+                          backgroundColor: classFilters.has(className) ? getResolvedClassColor(className) : 'transparent',
+                          borderColor: getResolvedClassColor(className),
+                          color: classFilters.has(className) ? 'white' : getResolvedClassColor(className)
+                        }}
+                      >
+                        {className} ({currentImageCount}/{totalStepCount})
+                      </Button>
+                      <button
+                        type="button"
+                        title={pinnedClasses.has(className) ? "Unpin class" : "Pin class"}
+                        aria-pressed={pinnedClasses.has(className)}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          togglePinnedClass(className);
+                        }}
+                        className={`absolute right-1 top-1/2 -translate-y-1/2 transition-opacity ${
+                          pinnedClasses.has(className) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        }`}
+                      >
+                        <Pin className={`w-3 h-3 ${pinnedClasses.has(className) ? "text-blue-600" : "text-gray-400"}`} />
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-xs text-gray-500 py-1">No classes match your search.</div>
+              )}
+            </div>
+          </div>
+          {!classSearchTerm && orderedFilterOptions.length > MAX_VISIBLE_FILTER_CLASSES && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAllFilterClasses((prev) => !prev)}
+              className="h-5 px-2 text-[11px] mb-2"
+            >
+              {showAllFilterClasses ? "Show less" : `Show ${hiddenFilterCount} more`}
+            </Button>
+          )}
+
+          {/* Display controls */}
+          <div className="mt-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-600">Display</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowLabels(!showLabels)}
+                aria-pressed={showLabels}
+                className={`h-6 px-2 text-xs gap-1 ${
+                  showLabels
+                    ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                    : "text-gray-600 border-gray-200 hover:bg-gray-50"
+                }`}
+              >
+                {showLabels ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                Labels {showLabels ? "On" : "Off"}
+              </Button>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-xs text-gray-600">Opacity</span>
+              <input
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.1"
+                value={annotationOpacity}
+                onChange={(e) => setAnnotationOpacity(parseFloat(e.target.value))}
+                className="flex-1 h-1"
+              />
+              <span className="text-xs text-gray-600">{Math.round(annotationOpacity * 100)}%</span>
+            </div>
+          </div>
+
+          {/* List controls */}
+          <div className="flex items-center justify-between text-xs mt-2">
+            <span className="text-gray-600">List</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setGroupByClass(!groupByClass)}
+              aria-pressed={groupByClass}
+              className={`h-6 px-2 text-xs ${
+                groupByClass
+                  ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                  : "text-gray-600 border-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              Group {groupByClass ? "On" : "Off"}
+            </Button>
           </div>
         </div>
 
@@ -2321,9 +2667,9 @@ export default forwardRef(function AnnotationCanvas({
           position: 'relative',
           width: effectiveImageProps.naturalWidth,
           height: effectiveImageProps.naturalHeight,
-          cursor: cursor, // Apply dynamic cursor state to the whole interactive layer
+          cursor: isImageLoading ? 'wait' : cursor, // Apply dynamic cursor state to the whole interactive layer
           userSelect: 'none',
-          pointerEvents: 'auto', // This div itself is interactive
+          pointerEvents: isImageLoading ? 'none' : 'auto', // Disable interactions while loading
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -2341,82 +2687,86 @@ export default forwardRef(function AnnotationCanvas({
             pointerEvents: 'none', // Image itself doesn't intercept mouse events
             width: effectiveImageProps.naturalWidth,
             height: effectiveImageProps.naturalHeight,
+            opacity: isImageLoading ? 0 : 1,
           }}
         />
         {/* Annotations layer */}
-        <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
-            {annotations.map((annotation) => renderAnnotation(annotation, annotation.id))}
-            {currentAnnotation && isDrawing && renderAnnotation(currentAnnotation, -1)}
+        {!isImageLoading && (
+          <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+              {annotations.map((annotation) => renderAnnotation(annotation, annotation.id))}
+              {currentAnnotation && isDrawing && renderAnnotation(currentAnnotation, -1)}
 
-            {/* Dynamic Annotation Toolbar */}
-            {selectedAnnotation && !labelingState.isVisible && (() => {
-              let toolbarX, toolbarY;
-              // Calculate bounding box for polygon/brush to position toolbar
-              if (selectedAnnotation.type === 'bbox') {
-                toolbarX = selectedAnnotation.x;
-                toolbarY = selectedAnnotation.y;
-              } else if (selectedAnnotation.points && selectedAnnotation.points.length > 0) {
-                let minX = Infinity, minY = Infinity;
-                selectedAnnotation.points.forEach(p => {
-                  minX = Math.min(minX, p.x);
-                  minY = Math.min(minY, p.y);
-                });
-                toolbarX = minX;
-                toolbarY = minY;
-              } else {
-                return null; // Should not happen for a valid selectedAnnotation
-              }
-
-              const baseTop = toolbarY - (40 / zoom);
-              let clampedLeft = toolbarX;
-              let clampedTop = baseTop;
-
-              if (toolbarSize.width > 0 && toolbarSize.height > 0 && containerSize.width > 0 && containerSize.height > 0) {
-                const padding = 8;
-                const baseScreenX = pan.x + toolbarX * zoom;
-                const baseScreenY = pan.y + baseTop * zoom;
-                const rightOverflow = baseScreenX + toolbarSize.width + padding - containerSize.width;
-                const leftOverflow = padding - baseScreenX;
-                const bottomOverflow = baseScreenY + toolbarSize.height + padding - containerSize.height;
-                const topOverflow = padding - baseScreenY;
-
-                let offsetScreenX = 0;
-                let offsetScreenY = 0;
-
-                if (rightOverflow > 0) {
-                  offsetScreenX = -rightOverflow;
-                } else if (leftOverflow > 0) {
-                  offsetScreenX = leftOverflow;
+              {/* Dynamic Annotation Toolbar */}
+              {selectedAnnotation && !labelingState.isVisible && (() => {
+                let toolbarX, toolbarY;
+                // Calculate bounding box for polygon/brush to position toolbar
+                if (selectedAnnotation.type === 'bbox') {
+                  toolbarX = selectedAnnotation.x;
+                  toolbarY = selectedAnnotation.y;
+                } else if (selectedAnnotation.points && selectedAnnotation.points.length > 0) {
+                  let minX = Infinity, minY = Infinity;
+                  selectedAnnotation.points.forEach(p => {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                  });
+                  toolbarX = minX;
+                  toolbarY = minY;
+                } else {
+                  return null; // Should not happen for a valid selectedAnnotation
                 }
 
-                if (bottomOverflow > 0) {
-                  offsetScreenY = -bottomOverflow;
-                } else if (topOverflow > 0) {
-                  offsetScreenY = topOverflow;
+                const baseTop = toolbarY - (40 / zoom);
+                let clampedLeft = toolbarX;
+                let clampedTop = baseTop;
+
+                if (toolbarSize.width > 0 && toolbarSize.height > 0 && containerSize.width > 0 && containerSize.height > 0) {
+                  const padding = 8;
+                  const baseScreenX = pan.x + toolbarX * zoom;
+                  const baseScreenY = pan.y + baseTop * zoom;
+                  const rightOverflow = baseScreenX + toolbarSize.width + padding - containerSize.width;
+                  const leftOverflow = padding - baseScreenX;
+                  const bottomOverflow = baseScreenY + toolbarSize.height + padding - containerSize.height;
+                  const topOverflow = padding - baseScreenY;
+
+                  let offsetScreenX = 0;
+                  let offsetScreenY = 0;
+
+                  if (rightOverflow > 0) {
+                    offsetScreenX = -rightOverflow;
+                  } else if (leftOverflow > 0) {
+                    offsetScreenX = leftOverflow;
+                  }
+
+                  if (bottomOverflow > 0) {
+                    offsetScreenY = -bottomOverflow;
+                  } else if (topOverflow > 0) {
+                    offsetScreenY = topOverflow;
+                  }
+
+                  clampedLeft = toolbarX + offsetScreenX / zoom;
+                  clampedTop = baseTop + offsetScreenY / zoom;
                 }
 
-                clampedLeft = toolbarX + offsetScreenX / zoom;
-                clampedTop = baseTop + offsetScreenY / zoom;
-              }
-
-              return (
-                <AnnotationToolbar
-                  ref={toolbarRef}
-                  annotation={selectedAnnotation}
-                  onStatusChange={(status) => handleAnnotationStatusChange(selectedAnnotation.id, status)}
-                  onDelete={() => deleteAnnotation(selectedAnnotation.id)}
-                  stepStatus={currentStep?.status} // Pass the step status to make toolbar dynamic
-                  style={{
-                    left: clampedLeft,
-                    top: clampedTop, // Position above the top-left of the bounding box
-                    transform: `scale(${1 / zoom})`, // Scale toolbar inversely to zoom for constant screen size
-                    transformOrigin: 'bottom left',
-                    pointerEvents: 'auto', // Toolbar itself should be interactive
-                  }}
-                />
-              );
-            })()}
-        </div>
+                return (
+                  <AnnotationToolbar
+                    ref={toolbarRef}
+                    annotation={selectedAnnotation}
+                    onStatusChange={(status) => handleAnnotationStatusChange(selectedAnnotation.id, status)}
+                    onRelabel={() => openLabelerForAnnotation(selectedAnnotation)}
+                    onDelete={() => deleteAnnotation(selectedAnnotation.id)}
+                    stepStatus={currentStep?.status} // Pass the step status to make toolbar dynamic
+                    style={{
+                      left: clampedLeft,
+                      top: clampedTop, // Position above the top-left of the bounding box
+                      transform: `scale(${1 / zoom})`, // Scale toolbar inversely to zoom for constant screen size
+                      transformOrigin: 'bottom left',
+                      pointerEvents: 'auto', // Toolbar itself should be interactive
+                    }}
+                  />
+                );
+              })()}
+          </div>
+        )}
       </div>
     );
   };
@@ -2675,6 +3025,14 @@ export default forwardRef(function AnnotationCanvas({
                 <ImageIcon className="w-16 h-16 mx-auto mb-4 opacity-50" />
                 <p>No image selected for annotation</p>
                 <p className="text-sm">Upload images in the Images tab</p>
+              </div>
+            </div>
+          )}
+          {currentImage && isImageLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-gray-600">
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded-full border-2 border-gray-300 border-t-gray-600 animate-spin" />
+                <span className="text-sm">Loading image...</span>
               </div>
             </div>
           )}
