@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/api/supabaseClient';
 import { getPermissionsForProjectRole } from '@/api/rbac';
 
@@ -7,24 +7,18 @@ import { getPermissionsForProjectRole } from '@/api/rbac';
  * @param {string} projectId - The project ID to check permissions for
  * @param {string|string[]} permission - Required permission(s) to show children
  * @param {string} fallback - Fallback component to show when permission is denied
- * @param {boolean} requireAll - Whether all permissions are required (default: false, any permission)
  * @param {React.ReactNode} children - Content to show when permission is granted
  */
 export default function PermissionGate({ 
   projectId, 
   permission, 
   fallback = null, 
-  requireAll = false, 
   children 
 }) {
   const [hasPermission, setHasPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    checkPermission();
-  }, [projectId, permission]);
-
-  const checkPermission = async () => {
+  const checkPermission = useCallback(async () => {
     try {
       const { data } = await supabase.auth.getUser();
       const currentUser = data?.user;
@@ -74,7 +68,11 @@ export default function PermissionGate({
       setHasPermission(false);
       setIsLoading(false);
     }
-  };
+  }, [projectId, permission]);
+
+  useEffect(() => {
+    checkPermission();
+  }, [checkPermission]);
 
   if (isLoading) {
     return null; // or a loading spinner
@@ -91,11 +89,7 @@ export function useProjectPermissions(projectId) {
   const [isLoading, setIsLoading] = useState(true);
   const [userRole, setUserRole] = useState(null);
 
-  useEffect(() => {
-    loadUserPermissions();
-  }, [projectId]);
-
-  const loadUserPermissions = async () => {
+  const loadUserPermissions = useCallback(async () => {
     try {
       const { data } = await supabase.auth.getUser();
       const currentUser = data?.user;
@@ -146,7 +140,11 @@ export function useProjectPermissions(projectId) {
       setPermissions([]);
       setIsLoading(false);
     }
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    loadUserPermissions();
+  }, [loadUserPermissions]);
 
   const hasPermission = (permission) => {
     if (userRole === 'admin') return true;

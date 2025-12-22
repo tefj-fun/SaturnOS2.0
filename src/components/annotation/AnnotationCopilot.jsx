@@ -1,5 +1,4 @@
 
-import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,15 +12,12 @@ import {
   ArrowRight,
   Sparkles
 } from "lucide-react";
-import { motion } from "framer-motion";
 
 export default function AnnotationCopilot({ 
   currentStep, 
   onAnnotationModeChange, 
   annotationMode 
 }) {
-  const [isThinking, setIsThinking] = useState(false);
-
   const getProductGuidance = () => {
     if (!currentStep) return null;
     

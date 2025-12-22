@@ -1,26 +1,14 @@
 
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { BuildVariant } from "@/api/entities";
 import { StepVariantConfig } from "@/api/entities";
 import { SOPStep } from "@/api/entities";
 import { Project } from "@/api/entities";
-import { LogicRule } from "@/api/entities";
-import { TrainingRun } from "@/api/entities";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import {
   Plus,
   Settings,
@@ -31,11 +19,10 @@ import {
   CheckCircle,
   Circle,
   Search,
-  Filter,
   Cpu,
   Target
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 import CreateVariantDialog from "../components/build-variants/CreateVariantDialog";
 import EditVariantDialog from "../components/build-variants/EditVariantDialog";
@@ -304,7 +291,7 @@ export default function BuildVariantsPage() {
                 Step Configuration Overrides
                 {selectedVariant && (
                   <span className="text-sm font-normal text-blue-600">
-                    for "{selectedVariant.name}"
+                    for &quot;{selectedVariant.name}&quot;
                   </span>
                 )}
               </CardTitle>

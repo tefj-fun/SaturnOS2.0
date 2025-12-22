@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -54,48 +54,6 @@ export default function AnnotationChat({
   const handleQuickResponse = (response) => {
     onSendMessage(response);
   };
-
-  const getStepGuidance = () => {
-    if (!currentStep) return null;
-
-    const product =
-      typeof currentStep.product === "string" ? currentStep.product.trim() : "";
-    
-    const guidance = {
-      button: {
-        icon: Target,
-        color: "text-blue-600",
-        tips: [
-          "Look for clickable elements like buttons or links",
-          "Consider hover states and active states",
-          "Check for disabled or loading states"
-        ]
-      },
-      form: {
-        icon: Square,
-        color: "text-green-600", 
-        tips: [
-          "Identify input fields, labels, and validation messages",
-          "Look for form submission buttons",
-          "Consider error states and success feedback"
-        ]
-      },
-      menu: {
-        icon: MousePointer2,
-        color: "text-purple-600",
-        tips: [
-          "Find dropdown menus, navigation bars",
-          "Look for menu items and submenus",
-          "Consider open and closed states"
-        ]
-      }
-    };
-    
-    const key = product ? product.toLowerCase() : "button";
-    return guidance[key] || guidance.button;
-  };
-
-  const stepGuidance = getStepGuidance();
 
   const annotationModes = [
     {

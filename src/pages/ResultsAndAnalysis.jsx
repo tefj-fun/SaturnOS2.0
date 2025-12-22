@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { TrainingRun } from '@/api/entities';
 import { Project } from '@/api/entities';
@@ -61,7 +61,7 @@ const normalizePredictions = (annotations) => {
   if (typeof normalized === "string") {
     try {
       normalized = JSON.parse(normalized);
-    } catch (error) {
+    } catch {
       normalized = [];
     }
   }
@@ -168,7 +168,7 @@ const resolveImageUrl = async (image) => {
     try {
       const signed = await createSignedImageUrl(bucket, path, { expiresIn: 3600 });
       return signed || fallbackUrl;
-    } catch (error) {
+    } catch {
       return fallbackUrl;
     }
   };

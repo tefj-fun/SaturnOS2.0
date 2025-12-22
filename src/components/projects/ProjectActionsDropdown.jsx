@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
@@ -9,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { MoreHorizontal, Edit, Trash2, Layers, Copy, PlayCircle, Spline } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, Layers, Copy, Spline } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 
 export default function ProjectActionsDropdown({ project, onEdit, onDelete, onDuplicate }) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,7 +9,6 @@ import {
   Lightbulb,
   Users,
   CheckCircle,
-  Clock,
   Sparkles,
   Eye,
   Zap
@@ -91,8 +90,6 @@ const RANDOM_THINKING_MESSAGES = [
 
 export default function StepGenerationLog({ isGenerating, onComplete }) {
   const [logs, setLogs] = useState([]);
-  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
-  const [showRandomMessages, setShowRandomMessages] = useState(false);
   const scrollAreaRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -109,8 +106,6 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
   useEffect(() => {
     if (!isGenerating) {
       setLogs([]);
-      setCurrentMessageIndex(0);
-      setShowRandomMessages(false);
       return;
     }
 
@@ -127,14 +122,11 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
           timestamp: new Date()
         }]);
         
-        setCurrentMessageIndex(i);
-        
         // Wait for the specified duration
         await new Promise(resolve => setTimeout(resolve, message.duration));
       }
       
       // After main messages, show random thinking messages
-      setShowRandomMessages(true);
       
       // Add a few random messages
       for (let i = 0; i < 3; i++) {
@@ -206,7 +198,7 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
         <ScrollArea ref={scrollAreaRef} className="h-64 pr-4">
           <div className="space-y-3">
             <AnimatePresence>
-              {logs.map((log, index) => (
+            {logs.map((log) => (
                 <motion.div
                   key={log.id}
                   initial={{ opacity: 0, x: -20 }}

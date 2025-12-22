@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
@@ -8,24 +8,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Plus,
   FolderPlus,
   PenTool,
-  Upload,
   Spline,
   CheckCircle,
   Clock,
   Target,
   Brain,
-  Users,
   TrendingUp,
   Activity,
   FileText,
   ArrowRight,
   Sparkles,
-  Calendar,
   Database } from
 "lucide-react";
 import { motion } from "framer-motion";
@@ -34,7 +30,6 @@ export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [projects, setProjects] = useState([]);
   const [allSteps, setAllSteps] = useState([]);
-  const [trainingRuns, setTrainingRuns] = useState([]);
   const [recentActivity, setRecentActivity] = useState([]);
   const [stats, setStats] = useState({
     totalProjects: 0,
@@ -51,11 +46,7 @@ export default function DashboardPage() {
   });
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
     try {
       const [{ data: authUser }, projectsData, stepsData, runsData] = await Promise.all([
         supabase.auth.getUser(),
@@ -67,7 +58,6 @@ export default function DashboardPage() {
       setUser(authUser?.user ? { full_name: authUser.user.email, role: "admin" } : { full_name: "Local User", role: "admin" });
       setProjects(projectsData);
       setAllSteps(stepsData);
-      setTrainingRuns(runsData);
 
       // Calculate basic statistics
       const totalProjects = projectsData.length;
@@ -128,7 +118,11 @@ export default function DashboardPage() {
       console.error("Error loading dashboard data:", error);
     }
     setIsLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   const generateRecentActivity = (projects, runs) => {
     const activities = [];
@@ -216,7 +210,7 @@ export default function DashboardPage() {
                 Welcome back, {user?.full_name?.split(' ')[0] || 'there'}! 👋
               </h1>
               <p className="text-gray-600 text-lg">
-                Here's what's happening with your annotation projects
+                Here&apos;s what&apos;s happening with your annotation projects
               </p>
             </div>
             <div className="flex items-center gap-3">

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Project } from '@/api/entities';
 import { SOPStep } from '@/api/entities';
 import { TrainingRun } from '@/api/entities';
@@ -45,6 +45,7 @@ const Section = ({ title, icon, children, count }) => (
 
 export default function TrainingConfigurationPage() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [allProjects, setAllProjects] = useState([]);
     const [selectedProjectId, setSelectedProjectId] = useState(null);
     const [selectedProject, setSelectedProject] = useState(null);
@@ -66,32 +67,6 @@ export default function TrainingConfigurationPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [showStartTrainingDialog, setShowStartTrainingDialog] = useState(false);
     const [showTrainerAdvanced, setShowTrainerAdvanced] = useState(false);
-
-    useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const projectId = urlParams.get('projectId');
-        const stepId = urlParams.get('stepId');
-        
-        loadAllProjects().then((projects) => {
-            if (projectId) {
-                const isValidProject = projects.some(project => project.id === projectId);
-                if (!isValidProject) {
-                    setSelectedProjectId(null);
-                    setSelectedProject(null);
-                    setSelectedStepId(null);
-                    setSelectedStep(null);
-                    setProjectSteps([]);
-                    setTrainingRuns([]);
-                    setIsLoading(false);
-                    navigate(createPageUrl('TrainingConfiguration'));
-                    return;
-                }
-                loadProjectData(projectId, stepId);
-            } else {
-                setIsLoading(false);
-            }
-        });
-    }, [location.search]);
 
     const HEARTBEAT_TIMEOUT_MS = 60000;
 
@@ -162,14 +137,14 @@ export default function TrainingConfigurationPage() {
 
     const recentRuns = useMemo(() => trainingRuns.slice(0, 5), [trainingRuns]);
 
-    const getSplitName = (groupName) => {
+    const getSplitName = useCallback((groupName) => {
         if (!groupName) return "train";
         const normalized = String(groupName).toLowerCase();
         if (normalized === "training") return "train";
         if (normalized === "inference" || normalized === "validation" || normalized === "val") return "val";
         if (normalized === "test" || normalized === "testing") return "test";
         return "train";
-    };
+    }, []);
 
     const toNumber = (value) => {
         if (value === null || value === undefined) return null;
@@ -205,7 +180,7 @@ export default function TrainingConfigurationPage() {
         return parts.length ? parts.join(" | ") : null;
     };
 
-    const extractAnnotations = (imageRow) => {
+    const extractAnnotations = useCallback((imageRow) => {
         const raw = imageRow?.annotations;
         if (!raw) return [];
         if (Array.isArray(raw)) return raw;
@@ -214,9 +189,9 @@ export default function TrainingConfigurationPage() {
             if (Array.isArray(raw.objects)) return raw.objects;
         }
         return [];
-    };
+    }, []);
 
-    const getAnnotationTypeCounts = (imageRow, classNames) => {
+    const getAnnotationTypeCounts = useCallback((imageRow, classNames) => {
         const annotations = extractAnnotations(imageRow);
         if (!annotations.length) return { boxes: 0, segments: 0 };
         let boxes = 0;
@@ -240,7 +215,7 @@ export default function TrainingConfigurationPage() {
             }
         });
         return { boxes, segments };
-    };
+    }, [extractAnnotations]);
 
     const refreshDatasetSummary = useCallback(async (stepOverride) => {
         const step = stepOverride || selectedStep;
@@ -276,18 +251,33 @@ export default function TrainingConfigurationPage() {
         } finally {
             setIsDatasetLoading(false);
         }
-    }, [selectedStep]);
+    }, [extractAnnotations, getAnnotationTypeCounts, getSplitName, selectedStep]);
 
-    const loadAllProjects = async () => {
+    const loadAllProjects = useCallback(async () => {
         try {
             const projects = await Project.list();
             setAllProjects(projects);
             return projects;
         } catch (error) { console.error('Error loading projects:', error); }
         return [];
-    };
+    }, []);
     
-    const loadProjectData = async (projectId, stepId = null) => {
+    const loadStepData = useCallback(async (stepId, allSteps) => {
+        const step = (allSteps || projectSteps).find(s => s.id === stepId);
+        if (!step) return;
+        
+        setSelectedStepId(stepId);
+        setSelectedStep(step);
+
+        const runs = await TrainingRun.filter(
+            { step_id: stepId, project_id: step.project_id },
+            '-created_date'
+        );
+        setTrainingRuns(runs);
+        refreshDatasetSummary(step);
+    }, [projectSteps, refreshDatasetSummary]);
+
+    const loadProjectData = useCallback(async (projectId, stepId = null) => {
         setIsLoading(true);
         setSelectedProjectId(projectId);
         try {
@@ -314,22 +304,7 @@ export default function TrainingConfigurationPage() {
         } finally {
             setIsLoading(false);
         }
-    };
-
-    const loadStepData = async (stepId, allSteps) => {
-        const step = (allSteps || projectSteps).find(s => s.id === stepId);
-        if (!step) return;
-        
-        setSelectedStepId(stepId);
-        setSelectedStep(step);
-
-        const runs = await TrainingRun.filter(
-            { step_id: stepId, project_id: step.project_id },
-            '-created_date'
-        );
-        setTrainingRuns(runs);
-        refreshDatasetSummary(step);
-    };
+    }, [loadStepData, navigate]);
     
     const handleProjectSelect = (projectId) => {
         const url = createPageUrl('TrainingConfiguration', { projectId });
@@ -342,6 +317,32 @@ export default function TrainingConfigurationPage() {
         navigate(url);
         loadStepData(stepId);
     };
+
+    useEffect(() => {
+        const urlParams = new URLSearchParams(location.search);
+        const projectId = urlParams.get('projectId');
+        const stepId = urlParams.get('stepId');
+        
+        loadAllProjects().then((projects) => {
+            if (projectId) {
+                const isValidProject = projects.some(project => project.id === projectId);
+                if (!isValidProject) {
+                    setSelectedProjectId(null);
+                    setSelectedProject(null);
+                    setSelectedStepId(null);
+                    setSelectedStep(null);
+                    setProjectSteps([]);
+                    setTrainingRuns([]);
+                    setIsLoading(false);
+                    navigate(createPageUrl('TrainingConfiguration'));
+                    return;
+                }
+                loadProjectData(projectId, stepId);
+            } else {
+                setIsLoading(false);
+            }
+        });
+    }, [loadAllProjects, loadProjectData, location.search, navigate]);
 
     useEffect(() => {
         if (!selectedStepId) return;
@@ -441,7 +442,8 @@ export default function TrainingConfigurationPage() {
 
     return (
         <div className="h-full flex flex-col">
-            <div className="max-w-7xl mx-auto p-6 w-full">
+            <div className="p-6 w-full">
+                <div className="max-w-7xl mx-auto">
                     <div className="flex items-center justify-between mb-8">
                         <div className="flex items-center gap-4">
                             <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0">
@@ -553,26 +555,27 @@ export default function TrainingConfigurationPage() {
                                 <span className="text-xs text-amber-600">Runs will stay queued while offline</span>
                             )}
                         </div>
+                        </div>
                     </div>
+
+                    {!selectedProjectId && (
+                        <Card><CardHeader><CardTitle>Select a Project</CardTitle></CardHeader><CardContent>
+                            <Select onValueChange={handleProjectSelect}>
+                                <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
+                                <SelectContent>{allProjects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </CardContent></Card>
+                    )}
+
+                    {selectedProjectId && !selectedStepId && (
+                         <Card><CardHeader><CardTitle>Select a Step</CardTitle></CardHeader><CardContent>
+                            <Select onValueChange={handleStepSelect}>
+                                <SelectTrigger><SelectValue placeholder="Select a step to train..." /></SelectTrigger>
+                                <SelectContent>{projectSteps.map(s => <SelectItem key={s.id} value={s.id}>Step {s.step_number}: {s.title}</SelectItem>)}</SelectContent>
+                            </Select>
+                        </CardContent></Card>
+                    )}
                 </div>
-
-                {!selectedProjectId && (
-                    <Card><CardHeader><CardTitle>Select a Project</CardTitle></CardHeader><CardContent>
-                        <Select onValueChange={handleProjectSelect}>
-                            <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
-                            <SelectContent>{allProjects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-                        </Select>
-                    </CardContent></Card>
-                )}
-
-                {selectedProjectId && !selectedStepId && (
-                     <Card><CardHeader><CardTitle>Select a Step</CardTitle></CardHeader><CardContent>
-                        <Select onValueChange={handleStepSelect}>
-                            <SelectTrigger><SelectValue placeholder="Select a step to train..." /></SelectTrigger>
-                            <SelectContent>{projectSteps.map(s => <SelectItem key={s.id} value={s.id}>Step {s.step_number}: {s.title}</SelectItem>)}</SelectContent>
-                        </Select>
-                    </CardContent></Card>
-                )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 pt-0">
@@ -732,11 +735,15 @@ export default function TrainingConfigurationPage() {
                             </div>
                         </div>
                     ) : (
-                         <div className="text-center py-16 bg-gray-50 rounded-lg">
-                            <Layers className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                            <h3 className="text-xl font-semibold text-gray-800">Select a Project and Step</h3>
-                            <p className="text-gray-500 mt-2">Choose a project and a specific step to view and manage its training runs.</p>
-                        </div>
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Select a Project and Step</CardTitle>
+                            </CardHeader>
+                            <CardContent className="flex min-h-[40px] items-center gap-3 text-sm text-gray-500">
+                                <Layers className="h-5 w-5 text-gray-400" />
+                                <span>Choose a project and a specific step to view and manage its training runs.</span>
+                            </CardContent>
+                        </Card>
                     )}
                 </div>
             </div>

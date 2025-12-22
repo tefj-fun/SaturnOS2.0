@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '@/api/supabaseClient';
+import { useState, useEffect, useCallback } from 'react';
 import { inviteUser } from '@/api/invitations';
 import {
   getCurrentAuthUser,
@@ -16,7 +15,6 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -35,16 +33,12 @@ import {
   Bell,
   Palette,
   Globe,
-  Key,
-  Users,
   Plus,
   Trash2,
-  Edit3,
   Crown,
   CheckCircle,
   AlertTriangle
 } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 const DEFAULT_PREFERENCES = {
   theme: 'light',
@@ -94,11 +88,16 @@ export default function SettingsPage() {
 
   const [userSettings, setUserSettings] = useState(DEFAULT_PREFERENCES);
 
-  useEffect(() => {
-    loadCurrentUser();
+  const loadTeamMembers = useCallback(async () => {
+    try {
+      const profiles = await listProfiles();
+      setTeamMembers(profiles);
+    } catch (error) {
+      console.error('Error loading team members:', error);
+    }
   }, []);
 
-  const loadCurrentUser = async () => {
+  const loadCurrentUser = useCallback(async () => {
     try {
       const user = await getCurrentAuthUser();
       if (!user) return;
@@ -106,7 +105,7 @@ export default function SettingsPage() {
       let profile = null;
       try {
         profile = await getProfile(user.id);
-      } catch (error) {
+      } catch {
         profile = null;
       }
 
@@ -132,16 +131,11 @@ export default function SettingsPage() {
     } catch (error) {
       console.error('Error loading user:', error);
     }
-  };
+  }, [loadTeamMembers]);
 
-  const loadTeamMembers = async () => {
-    try {
-      const profiles = await listProfiles();
-      setTeamMembers(profiles);
-    } catch (error) {
-      console.error('Error loading team members:', error);
-    }
-  };
+  useEffect(() => {
+    loadCurrentUser();
+  }, [loadCurrentUser]);
 
   const handleSaveProfile = async () => {
     setIsLoading(true);

@@ -1,24 +1,22 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { SOPStep } from "@/api/entities";
 import { uploadToSupabaseStorage } from "@/api/storage";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { 
   Upload,
-  FileText,
   CheckCircle,
   X,
   ArrowRight,
   AlertCircle,
-  Folder,
-  Image
+  Folder
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-export default function DatasetUpload({ projectId, steps, onComplete }) {
+export default function DatasetUpload({ projectId, onComplete }) {
   const [uploadingSteps, setUploadingSteps] = useState({});
   const [uploadProgress, setUploadProgress] = useState({});
   const [completedSteps, setCompletedSteps] = useState(new Set());
@@ -57,11 +55,8 @@ export default function DatasetUpload({ projectId, steps, onComplete }) {
     });
   };
 
-  useEffect(() => {
-    loadStepsData();
-  }, [projectId]);
-
-  const loadStepsData = async () => {
+  const loadStepsData = useCallback(async () => {
+    if (!projectId) return;
     try {
       const data = await SOPStep.filter({ project_id: projectId }, 'step_number');
       setStepsData(data);
@@ -76,7 +71,11 @@ export default function DatasetUpload({ projectId, steps, onComplete }) {
     } catch (error) {
       console.error("Error loading steps data:", error);
     }
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    loadStepsData();
+  }, [loadStepsData]);
 
   const handleFileUpload = async (stepId, file) => {
     setUploadingSteps(prev => ({ ...prev, [stepId]: true }));
@@ -246,7 +245,7 @@ function DatasetUploadCard({
   onFileUpload, 
   onRemoveDataset 
 }) {
-  const fileInputRef = React.useRef(null);
+  const fileInputRef = useRef(null);
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];

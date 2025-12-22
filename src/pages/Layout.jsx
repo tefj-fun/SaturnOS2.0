@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect, useMemo, useRef, memo } from "react";
+import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
@@ -142,7 +142,7 @@ export default function Layout({ children, currentPageName }) {
         } else if (!user) {
           setUser(null);
         }
-      } catch (err) {
+      } catch {
         // If there is no session, keep user null and continue to the auth screen
         if (!user) {
           setUser(null);

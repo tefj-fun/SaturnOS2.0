@@ -20,7 +20,6 @@ import {
   XCircle,
   AlertTriangle,
   ImageIcon,
-  MousePointer,
   Eye,
   EyeOff,
   Trash2,
@@ -198,7 +197,7 @@ const AnnotationLabler = ({ x, y, classes, suggestedClass, onSelect, onCancel })
   
   useEffect(() => {
     inputRef.current?.focus();
-  }, [updateStepImage]);
+  }, []);
 
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowDown') {
@@ -272,9 +271,6 @@ export default forwardRef(function AnnotationCanvas({
   annotationMode,
   activeClass,
   onActiveClassChange,
-  projectId,
-  onNextImage,
-  onPrevImage,
   currentImageIndex,
   totalImages,
   brushSize = 10, // Default brush size in image pixels
@@ -286,7 +282,6 @@ export default forwardRef(function AnnotationCanvas({
   const canvasContainerRef = useRef(null); // The div that holds the transform-wrapper
   const imageRef = useRef(null); // The actual <img> element
   const imageContainerRef = useRef(null); // The div that contains the image and annotations, which will have its own mouse handlers
-  const canvasRef = useRef(null); // Adding ref for the inner canvas div
   const colorInputRefs = useRef({}); // Refs for color inputs in the list
   const toolbarRef = useRef(null);
 
@@ -402,6 +397,8 @@ export default forwardRef(function AnnotationCanvas({
     return stats;
   }, [stepImages]);
 
+  const currentImageSnapshot = useMemo(() => currentImage, [currentImage]);
+
   const attemptSave = useCallback(async (payload) => {
     for (let attempt = 0; attempt <= MAX_SAVE_RETRIES; attempt += 1) {
       try {
@@ -482,7 +479,7 @@ export default forwardRef(function AnnotationCanvas({
 
     saveInFlightRef.current = false;
     resolveWaiters();
-  }, [attemptSave]);
+  }, [attemptSave, onImageSaved]);
 
 
   const persistAnnotations = useCallback(async () => {
@@ -491,7 +488,11 @@ export default forwardRef(function AnnotationCanvas({
     }
 
     const normalizedPayload = {
-      annotations: annotations.map(({ id, stepId, index, ...rest }) => {
+      annotations: annotations.map((annotation) => {
+        const rest = { ...annotation };
+        delete rest.id;
+        delete rest.stepId;
+        delete rest.index;
         if ((rest.type === 'polygon' || rest.type === 'brush') && rest.points && rest.points.length > 0) {
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
           rest.points.forEach(p => {
@@ -643,8 +644,9 @@ export default forwardRef(function AnnotationCanvas({
     lastSnapshotRef.current = null;
     lastSnapshotKeyRef.current = "";
 
-    if (currentImage) {
-      const imageData = currentImage.annotations || {}; // Get annotations from currentImage
+    const imageSnapshot = currentImageSnapshot;
+    if (imageSnapshot) {
+      const imageData = imageSnapshot.annotations || {}; // Get annotations from currentImage
       const loadedAnnotations = (imageData.annotations || []).map((ann, idx) => ({
         ...ann,
         class: ann.class || null, // Ensure class is null if not present
@@ -657,7 +659,7 @@ export default forwardRef(function AnnotationCanvas({
       setAnnotations(loadedAnnotations);
       setClassColors(imageData.classColors || {}); // Load class colors
       lastSavedSnapshotRef.current.set(
-        currentImage.id,
+        imageSnapshot.id,
         JSON.stringify({
           annotations: imageData.annotations || [],
           classColors: imageData.classColors || {},
@@ -670,9 +672,10 @@ export default forwardRef(function AnnotationCanvas({
     }
     setSaveStatus("idle");
     // Also reset selection and other states when image changes
-    applySelection([], null);
+    setSelectedAnnotationIds([]);
+    setSelectedAnnotationId(null);
     setLabelingState({ isVisible: false, x: 0, y: 0, annotationId: null });
-  }, [currentImage?.id]);
+  }, [currentImageSnapshot]);
 
   useEffect(() => {
     if (!currentImage?.id) return;
@@ -717,14 +720,7 @@ export default forwardRef(function AnnotationCanvas({
     onImageLoaded?.();
   };
 
-  // Effect to "fit" the image to the container when it loads or container resizes
-  useEffect(() => {
-    if (containerSize.width && effectiveImageProps.naturalWidth) {
-      fitImageToContainer();
-    }
-  }, [containerSize, effectiveImageProps.naturalWidth, effectiveImageProps.naturalHeight, currentImage]);
-
-  const fitImageToContainer = () => {
+  const fitImageToContainer = useCallback(() => {
     const { naturalWidth, naturalHeight } = effectiveImageProps;
     const { width: containerWidth, height: containerHeight } = containerSize;
 
@@ -747,7 +743,20 @@ export default forwardRef(function AnnotationCanvas({
 
     setZoom(newZoom);
     setPan({ x: newPanX, y: newPanY });
-  };
+  }, [containerSize, effectiveImageProps]);
+
+  // Effect to "fit" the image to the container when it loads or container resizes
+  useEffect(() => {
+    if (containerSize.width && effectiveImageProps.naturalWidth) {
+      fitImageToContainer();
+    }
+  }, [
+    containerSize.width,
+    effectiveImageProps.naturalWidth,
+    effectiveImageProps.naturalHeight,
+    currentImage?.id,
+    fitImageToContainer,
+  ]);
 
   // This `useEffect` adds a direct, low-level event listener to intercept wheel events.
   // This is the most reliable way to prevent the browser's default page zoom.
@@ -973,6 +982,21 @@ export default forwardRef(function AnnotationCanvas({
     return true;
   }, [applySelection, selectedAnnotationIds, selectedAnnotationId]);
 
+  const handleLabelCancel = useCallback((annotationId) => {
+    // If the annotation was a polygon or brush, and we cancel labeling, reset isDrawing.
+    const canceledAnnotation = annotations.find(ann => ann.id === annotationId);
+    if (canceledAnnotation && (canceledAnnotation.type === 'polygon' || canceledAnnotation.type === 'brush')) {
+      setIsDrawing(false);
+      setCurrentAnnotation(null);
+    }
+    setLabelingState({ isVisible: false, x: 0, y: 0, annotationId: null });
+    if (canceledAnnotation) {
+      selectSingleAnnotation(canceledAnnotation.id);
+    } else {
+      applySelection([], null);
+    }
+  }, [annotations, applySelection, selectSingleAnnotation]);
+
   // Add keyboard event listener for ESC key deselection and Ctrl key state
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -1036,7 +1060,7 @@ export default forwardRef(function AnnotationCanvas({
       }
     };
 
-    const handleKeyUp = (e) => {
+    const handleKeyUp = () => {
       // No specific action needed on key up for now
     };
 
@@ -1050,6 +1074,7 @@ export default forwardRef(function AnnotationCanvas({
   }, [
     applySelection,
     deleteSelectedAnnotations,
+    handleLabelCancel,
     redoAnnotations,
     undoAnnotations,
     isDrawing,
@@ -1058,7 +1083,7 @@ export default forwardRef(function AnnotationCanvas({
     labelingState.annotationId,
   ]); // Dependencies ensure current state is captured
 
-  const getPointInImageSpace = (e) => {
+  const getPointInImageSpace = useCallback((e) => {
     const container = canvasContainerRef.current; // The outer container that is NOT transformed
     if (!container) return { x: 0, y: 0 };
 
@@ -1074,7 +1099,42 @@ export default forwardRef(function AnnotationCanvas({
     const imageY = (mouseY - pan.y) / zoom;
 
     return { x: imageX, y: imageY };
-  };
+  }, [pan.x, pan.y, zoom]);
+
+  // Check if annotation should be shown based on filters
+  const shouldShowAnnotation = useCallback((annotation, options = {}) => {
+    const { ignoreShowAnnotations = false } = options;
+
+    if (!ignoreShowAnnotations && !showAnnotations) return false;
+
+    const actualClass = annotation.class || UNLABELED_CLASS_KEY;
+
+    if (classFilters.size > 0 && !classFilters.has(actualClass)) return false;
+    
+    if (searchTerm) {
+      if (!annotation.class && UNLABELED_CLASS_KEY.toLowerCase().includes(searchTerm.toLowerCase())) return true;
+      if (annotation.class && !annotation.class.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    }
+    
+    return true;
+  }, [showAnnotations, classFilters, searchTerm]);
+
+  const getResizeHandles = useCallback((annotation) => {
+    // Only return handles for bounding boxes
+    if (annotation.type !== 'bbox') return [];
+    
+    // Handle size should be constant in screen pixels, so scale by inverse of zoom for logical size
+    const handleSize = HANDLE_SIZE / zoom;
+    const halfHandleSize = handleSize / 2;
+
+    // Return coordinates relative to the annotation box itself
+    return [
+        { position: 'top-left', x: -halfHandleSize, y: -halfHandleSize, size: handleSize },
+        { position: 'top-right', x: annotation.width - halfHandleSize, y: -halfHandleSize, size: handleSize },
+        { position: 'bottom-left', x: -halfHandleSize, y: annotation.height - halfHandleSize, size: handleSize },
+        { position: 'bottom-right', x: annotation.width - halfHandleSize, y: annotation.height - halfHandleSize, size: handleSize },
+    ];
+  }, [zoom]);
 
   const getAnnotationAtPoint = useCallback((point) => {
     // Iterate backwards so we hit the top-most annotation first
@@ -1108,7 +1168,7 @@ export default forwardRef(function AnnotationCanvas({
       }
     }
     return null;
-  }, [annotations, classFilters, searchTerm, showAnnotations]);
+  }, [annotations, shouldShowAnnotation]);
 
   const getHandleAtPoint = useCallback((point) => {
     // Check only the selected annotation for handles
@@ -1133,7 +1193,7 @@ export default forwardRef(function AnnotationCanvas({
       }
     }
     return null;
-  }, [annotations, selectedAnnotationId, zoom]);
+  }, [annotations, getResizeHandles, selectedAnnotationId, zoom]);
 
   const getPolygonVertexAtPoint = useCallback((point, annotation) => {
     if (!annotation || annotation.type !== 'polygon') return null;
@@ -1649,21 +1709,6 @@ export default forwardRef(function AnnotationCanvas({
     setLabelingState({ isVisible: true, x: lablerX + 5, y: lablerY, annotationId: annotation.id });
   }, [pan.x, pan.y, zoom]);
 
-  const handleLabelCancel = (annotationId) => {
-    // If the annotation was a polygon or brush, and we cancel labeling, we should reset isDrawing.
-    const canceledAnnotation = annotations.find(ann => ann.id === annotationId);
-    if (canceledAnnotation && (canceledAnnotation.type === 'polygon' || canceledAnnotation.type === 'brush')) {
-      setIsDrawing(false);
-      setCurrentAnnotation(null);
-    }
-    setLabelingState({ isVisible: false, x: 0, y: 0, annotationId: null });
-    if (canceledAnnotation) {
-      selectSingleAnnotation(canceledAnnotation.id);
-    } else {
-      applySelection([], null);
-    }
-  };
-
   const updateCursor = useCallback((point) => {
     if (!imageContainerRef.current) {
         setCursor('default');
@@ -1712,7 +1757,7 @@ export default forwardRef(function AnnotationCanvas({
     }
 
     setCursor('default'); // Default cursor for the canvas area
-  }, [annotations, selectedAnnotationId, annotationMode, getAnnotationAtPoint, getHandleAtPoint, getPolygonVertexAtPoint, zoom]);
+  }, [annotations, selectedAnnotationId, annotationMode, getAnnotationAtPoint, getHandleAtPoint, getPolygonVertexAtPoint]);
 
   const handleGlobalMouseMove = useCallback((e) => {
     // Only update cursor globally if no interaction is active (drawing, moving, resizing, panning)
@@ -1725,7 +1770,7 @@ export default forwardRef(function AnnotationCanvas({
         setCursor('default');
       }
     }
-  }, [isDrawing, interaction, updateCursor, isMiddleMousePanning]);
+  }, [getPointInImageSpace, isDrawing, interaction, updateCursor, isMiddleMousePanning]);
 
   const handleZoomAction = (factor) => {
     const container = canvasContainerRef.current;
@@ -1805,24 +1850,6 @@ export default forwardRef(function AnnotationCanvas({
       }
     });
     return stats;
-  };
-
-  // Check if annotation should be shown based on filters
-  const shouldShowAnnotation = (annotation, options = {}) => {
-    const { ignoreShowAnnotations = false } = options;
-
-    if (!ignoreShowAnnotations && !showAnnotations) return false;
-
-    const actualClass = annotation.class || UNLABELED_CLASS_KEY;
-
-    if (classFilters.size > 0 && !classFilters.has(actualClass)) return false;
-    
-    if (searchTerm) {
-      if (!annotation.class && UNLABELED_CLASS_KEY.toLowerCase().includes(searchTerm.toLowerCase())) return true; // Match unlabeled if search term matches UNLABELED_CLASS_KEY
-      if (annotation.class && !annotation.class.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-    }
-    
-    return true;
   };
 
   // Toggle class filter
@@ -1928,23 +1955,6 @@ export default forwardRef(function AnnotationCanvas({
     const g = parseInt(value.slice(2, 4), 16);
     const b = parseInt(value.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  };
-
-  const getResizeHandles = (annotation) => {
-    // Only return handles for bounding boxes
-    if (annotation.type !== 'bbox') return [];
-    
-    // Handle size should be constant in screen pixels, so scale by inverse of zoom for logical size
-    const handleSize = HANDLE_SIZE / zoom;
-    const halfHandleSize = handleSize / 2;
-
-    // Return coordinates relative to the annotation box itself
-    return [
-        { position: 'top-left', x: -halfHandleSize, y: -halfHandleSize, size: handleSize },
-        { position: 'top-right', x: annotation.width - halfHandleSize, y: -halfHandleSize, size: handleSize },
-        { position: 'bottom-left', x: -halfHandleSize, y: annotation.height - halfHandleSize, size: handleSize },
-        { position: 'bottom-right', x: annotation.width - halfHandleSize, y: annotation.height - halfHandleSize, size: handleSize },
-    ];
   };
 
   const estimateBadgeMetrics = (text) => {

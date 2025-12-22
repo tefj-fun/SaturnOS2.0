@@ -1,14 +1,12 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { LogicRule } from "@/api/entities";
 import { InvokeLLM } from "@/api/integrations";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Plus,
   Edit3,
@@ -16,8 +14,6 @@ import {
   Save,
   X,
   Workflow,
-  AlertTriangle,
-  CheckCircle,
   ArrowDown,
   GripVertical,
   Loader2,
@@ -384,7 +380,7 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
                 <Sparkles className="w-16 h-16 mx-auto mb-4 text-teal-400 animate-pulse" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Generating Logic...</h3>
                 <p className="text-gray-600 mb-6">
-                  AI is creating default rules based on your step's context.
+                  AI is creating default rules based on your step&apos;s context.
                 </p>
                 <Loader2 className="w-8 h-8 mx-auto text-gray-400 animate-spin" />
               </div>
@@ -634,7 +630,6 @@ function AddRuleCard({
             onConditionDrop={onConditionDrop}
             onDragOver={onDragOver}
             draggedClass={draggedClass}
-            isNew
           />
         </CardContent>
       </Card>
@@ -642,7 +637,7 @@ function AddRuleCard({
   );
 }
 
-function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, draggedClass, isNew = false }) {
+function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, draggedClass }) {
 
   const DropTargetInput = ({ value, onChange, placeholder, fieldName }) => {
     const [isDropTarget, setIsDropTarget] = useState(false);
@@ -720,7 +715,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
                   Class Name
                   {draggedClass && (
                     <span className="text-xs text-teal-600">
-                      Drop "{draggedClass}" here
+                      Drop &quot;{draggedClass}&quot; here
                     </span>
                   )}
                 </label>
@@ -761,7 +756,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
                     Subject Class (A)
                     {draggedClass && (
                       <span className="text-xs text-teal-600">
-                        Drop "{draggedClass}" here
+                        Drop &quot;{draggedClass}&quot; here
                       </span>
                     )}
                   </label>
@@ -791,7 +786,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
                     Target Class (B)
                     {draggedClass && (
                       <span className="text-xs text-teal-600">
-                        Drop "{draggedClass}" here
+                        Drop &quot;{draggedClass}&quot; here
                       </span>
                     )}
                   </label>

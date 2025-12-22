@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -119,7 +119,7 @@ export default function StepConfigDialog({
             Configure Step for Build Variant
           </DialogTitle>
           <DialogDescription>
-            Set up custom annotation settings for <strong>"{step.title}"</strong> when using build variant <strong>"{variant.name}"</strong>
+            Set up custom annotation settings for <strong>&quot;{step.title}&quot;</strong> when using build variant <strong>&quot;{variant.name}&quot;</strong>
           </DialogDescription>
         </DialogHeader>
 

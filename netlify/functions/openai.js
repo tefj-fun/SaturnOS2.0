@@ -22,7 +22,7 @@ export const handler = async (event) => {
   let payload = {};
   try {
     payload = JSON.parse(event.body || "{}");
-  } catch (err) {
+  } catch {
     return jsonResponse(400, { error: "Invalid JSON payload" });
   }
 
@@ -52,7 +52,7 @@ export const handler = async (event) => {
       },
       body: JSON.stringify(requestBody),
     });
-  } catch (err) {
+  } catch {
     return jsonResponse(502, { error: "Failed to reach OpenAI API" });
   }
 
@@ -68,7 +68,7 @@ export const handler = async (event) => {
   let data;
   try {
     data = JSON.parse(upstreamText);
-  } catch (err) {
+  } catch {
     return jsonResponse(502, { error: "Invalid OpenAI response" });
   }
 

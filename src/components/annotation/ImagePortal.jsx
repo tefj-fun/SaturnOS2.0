@@ -1,20 +1,17 @@
 
-import React, { useRef, useState, useEffect, useCallback } from "react";
-import { uploadToSupabaseStorage } from "@/api/storage";
-import { createStepImage, deleteStepImage, deleteStepImages, updateStepImage, listStepImages } from "@/api/db";
+import React, { useState, useCallback } from "react";
+import { deleteStepImage, deleteStepImages, updateStepImage } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator"; // New import
 import {
   Upload,
@@ -30,11 +27,8 @@ import {
   AlertCircle,
   Maximize2,
   X,
-  Download,
   CheckSquare,
-  Square,
   Search,
-  Filter,
   ArrowUpDown,
   ArrowDownUp,
   Image as ImageIcon,
@@ -45,10 +39,8 @@ import {
   Tag,
   FolderPlus,
   Edit,
-  Plus,
   MoreVertical,
   Move,
-  Copy,
   Expand,
   Minimize2,
   Target // New import
@@ -455,7 +447,7 @@ export default function ImagePortal({
         );
       }
       return parsed.toString();
-    } catch (error) {
+    } catch {
       return url;
     }
   };
@@ -481,7 +473,7 @@ export default function ImagePortal({
       if (resize) params.set("resize", resize);
       parsed.search = params.toString();
       return parsed.toString();
-    } catch (error) {
+    } catch {
       return url;
     }
   };
@@ -527,7 +519,7 @@ export default function ImagePortal({
       const parts = parsed.pathname.split("/");
       const last = parts[parts.length - 1];
       return last ? decodeURIComponent(last) : "Untitled";
-    } catch (error) {
+    } catch {
       const parts = String(url).split("/");
       return parts[parts.length - 1] || "Untitled";
     }

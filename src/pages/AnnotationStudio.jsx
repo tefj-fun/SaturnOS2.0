@@ -1,11 +1,10 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { getProjectById, listStepsByProject, listStepImages, updateProject, updateStep, updateStepImage } from "@/api/db";
+import { getProjectById, listStepsByProject, listStepImages, updateProject, updateStep } from "@/api/db";
 import { BuildVariant, StepVariantConfig } from "@/api/entities";
 import { createSignedImageUrl, getStoragePathFromUrl } from "@/api/storage";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -31,8 +30,6 @@ import {
   Bot,
   ChevronLeft,
   ChevronRight,
-  CheckCircle,
-  Circle,
   Target,
   Cog,
   Image as ImageIcon,
@@ -87,7 +84,6 @@ export default function AnnotationStudioPage() {
   const [pendingClassNames, setPendingClassNames] = useState([]);
 
   const [selectedBuildVariant, setSelectedBuildVariant] = useState(null);
-  const [buildVariants, setBuildVariants] = useState([]);
   const [currentStepConfig, setCurrentStepConfig] = useState(null);
   const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
   const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
@@ -103,7 +99,7 @@ export default function AnnotationStudioPage() {
       const parsed = new URL(project.sop_file_url);
       const parts = parsed.pathname.split("/");
       return decodeURIComponent(parts[parts.length - 1]) || "sop.pdf";
-    } catch (error) {
+    } catch {
       return "sop.pdf";
     }
   }, [project?.sop_file_url]);
@@ -232,7 +228,6 @@ export default function AnnotationStudioPage() {
   const loadBuildVariants = useCallback(async () => {
     try {
       const variants = await BuildVariant.list();
-      setBuildVariants(variants);
       setSelectedBuildVariant(prev => {
         if (!variants.length) return null;
         if (!prev) return variants[0];
@@ -241,7 +236,6 @@ export default function AnnotationStudioPage() {
       });
     } catch (error) {
       console.error("Error loading build variants:", error);
-      setBuildVariants([]);
       setSelectedBuildVariant(null);
     }
   }, []);
@@ -329,7 +323,7 @@ export default function AnnotationStudioPage() {
       setHasLoadedImages(true);
       setIsInitialImageReady(true);
     }
-  }, [currentStep]);
+  }, [currentStep, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
 
   useEffect(() => {
     const imageUrl = stepImages[currentImageIndex]?.image_url;

@@ -55,7 +55,7 @@ export function getStoragePathFromUrl(url, bucket) {
     if (path.includes(objectPrefix)) {
       return decodeURIComponent(path.split(objectPrefix)[1]);
     }
-  } catch (error) {
+  } catch {
     return null;
   }
   return null;

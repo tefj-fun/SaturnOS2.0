@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/api/supabaseClient';
 import { inviteUser } from '@/api/invitations';
 import { getProfile } from '@/api/profiles';
@@ -23,7 +23,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +32,6 @@ import {
 import {
   Users,
   Plus,
-  Mail,
   Crown,
   Edit3,
   Eye,
@@ -95,14 +93,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
   const [customPermissions, setCustomPermissions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    if (open && project) {
-      loadProjectMembers();
-      loadCurrentUser();
-    }
-  }, [open, project]);
-
-  const loadCurrentUser = async () => {
+  const loadCurrentUser = useCallback(async () => {
     try {
       const { data } = await supabase.auth.getUser();
       const user = data?.user;
@@ -110,7 +101,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
       let profile = null;
       try {
         profile = await getProfile(user.id);
-      } catch (error) {
+      } catch {
         profile = null;
       }
       setCurrentUser({
@@ -121,16 +112,24 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
     } catch (error) {
       console.error('Error loading current user:', error);
     }
-  };
+  }, []);
 
-  const loadProjectMembers = async () => {
+  const loadProjectMembers = useCallback(async () => {
+    if (!project?.id) return;
     try {
       const projectMembers = await listProjectMembers(project.id);
       setMembers(projectMembers);
     } catch (error) {
       console.error('Error loading project members:', error);
     }
-  };
+  }, [project?.id]);
+
+  useEffect(() => {
+    if (open && project) {
+      loadProjectMembers();
+      loadCurrentUser();
+    }
+  }, [open, project, loadProjectMembers, loadCurrentUser]);
 
   const handleInviteMember = async () => {
     if (!inviteEmail || !project) return;

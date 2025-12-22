@@ -20,16 +20,13 @@ import {
   ChevronLeft, 
   ChevronRight, 
   PenTool, 
-  Check, 
-  X, 
   Wand2, 
   AlertTriangle, 
   CheckCircle2,
   XCircle,
   Target,
   BarChart3,
-  Image as ImageIcon,
-  MousePointer
+  Image as ImageIcon
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 
@@ -44,7 +41,7 @@ const toAnnotationArray = (value) => {
     try {
       const parsed = JSON.parse(value);
       return toAnnotationArray(parsed);
-    } catch (error) {
+    } catch {
       return [];
     }
   }
@@ -222,7 +219,7 @@ const resolveImageUrl = async (image) => {
     try {
       const signed = await createSignedImageUrl(bucket, path, { expiresIn: 3600 });
       return signed || fallbackUrl;
-    } catch (error) {
+    } catch {
       return fallbackUrl;
     }
   };
@@ -332,10 +329,10 @@ const ImageErrorDialog = ({ cell, open, onClose }) => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-red-600" />
-            Classification Errors: {cell.actual} -> {cell.predicted}
+            Classification Errors: {cell.actual} -&gt; {cell.predicted}
           </DialogTitle>
           <DialogDescription>
-            The model incorrectly predicted "{cell.predicted}" when the actual class was "{cell.actual}" in these {cell.count} cases.
+            The model incorrectly predicted &quot;{cell.predicted}&quot; when the actual class was &quot;{cell.actual}&quot; in these {cell.count} cases.
             Here are some example images:
           </DialogDescription>
         </DialogHeader>
@@ -686,8 +683,15 @@ export default function AnnotationReviewPage() {
   }, [runId]);
 
   const currentImage = validationImages[currentImageIndex];
-  const currentPredictions = currentImage ? predictions[currentImage.id] || [] : [];
-  const currentGroundTruths = currentImage ? groundTruths[currentImage.id] || [] : [];
+  const currentImageId = currentImage?.id;
+  const currentPredictions = useMemo(
+    () => (currentImageId ? predictions[currentImageId] || [] : []),
+    [currentImageId, predictions]
+  );
+  const currentGroundTruths = useMemo(
+    () => (currentImageId ? groundTruths[currentImageId] || [] : []),
+    [currentImageId, groundTruths]
+  );
   const imageLookup = useMemo(() => (
     validationImages.reduce((acc, image) => {
       acc[image.id] = {

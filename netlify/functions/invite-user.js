@@ -40,7 +40,7 @@ export const handler = async (event) => {
   let payload = {};
   try {
     payload = JSON.parse(event.body || "{}");
-  } catch (err) {
+  } catch {
     return jsonResponse(400, { error: "Invalid JSON payload" });
   }
 

@@ -1,5 +1,4 @@
 
-import React from "react";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +40,7 @@ export default function DeleteProjectDialog({ open, project, onOpenChange, onDel
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription>
-              Deleting "{project?.name}" will permanently remove:
+              Deleting &quot;{project?.name}&quot; will permanently remove:
               <ul className="list-disc list-inside mt-2 space-y-1">
                 <li>All annotation steps</li>
                 <li>All uploaded datasets</li>

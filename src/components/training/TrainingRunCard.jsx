@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -139,7 +139,7 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
               ) : (
                 <div className="bg-green-50 border border-green-200 p-3 rounded-lg text-center">
                   <p className="text-sm font-medium text-green-800">Training Completed Successfully</p>
-                  <p className="text-xs text-green-600 mt-1">Click "View Results" to see metrics and artifacts.</p>
+                  <p className="text-xs text-green-600 mt-1">Click &quot;View Results&quot; to see metrics and artifacts.</p>
                 </div>
               )}
               

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadToSupabaseStorage } from "@/api/storage";
 import { generateStepsFromSOP } from "@/api/llm";
@@ -27,7 +27,7 @@ import {
   Edit3
 } from "lucide-react";
 import { createPageUrl } from "@/utils";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 import FileUploadZone from "../components/setup/FileUploadZone";
 
@@ -41,14 +41,11 @@ export default function ProjectSetupPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [setupChoice, setSetupChoice] = useState(null); // 'ai' or 'manual'
   const [error, setError] = useState(null);
-  const [generatedSteps, setGeneratedSteps] = useState([]);
-
   const [isUploading, setIsUploading] = useState(false);
   const [isGeneratingSteps, setIsGeneratingSteps] = useState(false);
 
   // Add new state for live log
   const [generationLogs, setGenerationLogs] = useState([]);
-  const [currentLogIndex, setCurrentLogIndex] = useState(0);
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom when new messages are added
@@ -61,18 +58,7 @@ export default function ProjectSetupPage() {
     }
   }, [generationLogs]);
 
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const id = urlParams.get('id');
-    if (id) {
-      setProjectId(id);
-      loadProject(id);
-    } else {
-      navigate(createPageUrl('Projects'));
-    }
-  }, []);
-
-  const loadProject = async (id) => {
+  const loadProject = useCallback(async (id) => {
     try {
       const [projectData, existingSteps] = await Promise.all([
         getProjectById(id),
@@ -95,7 +81,18 @@ export default function ProjectSetupPage() {
       setError("Failed to load project");
     }
     setIsLoading(false);
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+    if (id) {
+      setProjectId(id);
+      loadProject(id);
+    } else {
+      navigate(createPageUrl('Projects'));
+    }
+  }, [loadProject, navigate]);
 
   const handleSetupChoice = (choice) => {
     setSetupChoice(choice);
@@ -146,7 +143,6 @@ export default function ProjectSetupPage() {
     setError(null);
     setCurrentStep(3);
     setGenerationLogs([]);
-    setCurrentLogIndex(0);
 
     const logMessages = [
       { icon: "FileText", message: "Opening SOP document...", type: "info", duration: 800 },
@@ -161,7 +157,6 @@ export default function ProjectSetupPage() {
         for (let i = 0; i < logMessages.length; i++) {
           const message = logMessages[i];
           setGenerationLogs(prev => [...prev, { ...message, id: Date.now() + i, timestamp: new Date() }]);
-          setCurrentLogIndex(i);
           setGenerationProgress(Math.min(90, (i + 1) / logMessages.length * 70));
           await new Promise(resolve => setTimeout(resolve, message.duration));
         }
@@ -194,8 +189,6 @@ export default function ProjectSetupPage() {
       setGenerationProgress(100);
 
       if (steps && steps.length > 0) {
-        setGeneratedSteps(steps);
-
         const stepsToCreate = steps.map((step, index) => ({
           project_id: projectId,
           step_number: index + 1,

@@ -3,7 +3,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Project } from '@/api/entities';
 import { SOPStep } from '@/api/entities';
-import { StepImage } from '@/api/entities'; // Not used in this file but part of original imports
 import { LabelLibrary } from '@/api/entities';
 import { StepVariantConfig } from "@/api/entities";
 import { BuildVariant } from "@/api/entities";
@@ -13,28 +12,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'; // Not used in this file but part of original imports
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area'; // Not used in this file but part of original imports
 import { 
   Database, 
   Search, 
   Filter, 
   Tag, 
-  Image as ImageIcon, // Not used in this file but part of original imports
-  Palette, // Not used in this file but part of original imports
-  Calendar, // Not used in this file but part of original imports
   TrendingUp,
-  Eye, // Not used in this file but part of original imports
   Grid3x3,
   List,
-  BarChart3, // Not used in this file but part of original imports
   Target,
   FolderOpen,
-  Users, // Not used in this file but part of original imports
-  Clock, // Not used in this file but part of original imports
   Hash,
-  Zap, // Not used in this file but part of original imports
   X,
   Layers, // New import for variant usage display
   Package // New import for variant usage display
@@ -364,7 +353,6 @@ export default function LabelLibraryPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
   const [selectedLabel, setSelectedLabel] = useState(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true); // New state for loading
 
   useEffect(() => {
@@ -761,8 +749,8 @@ export default function LabelLibraryPage() {
         <div className="flex items-center justify-between mb-6">
           <p className="text-sm text-gray-600">
             Showing {filteredLabels.length} of {labels.length} labels
-            {searchQuery && <span> matching "{searchQuery}"</span>}
-            {categoryFilter !== 'all' && <span> in "{categoryFilter}"</span>}
+            {searchQuery && <span> matching &quot;{searchQuery}&quot;</span>}
+            {categoryFilter !== 'all' && <span> in &quot;{categoryFilter}&quot;</span>}
           </p>
         </div>
 
@@ -808,7 +796,6 @@ export default function LabelLibraryPage() {
                   label={label}
                   onSelect={(label) => {
                     setSelectedLabel(label);
-                    setShowDetailModal(true);
                   }}
                   isSelected={selectedLabel?.id === label.id}
                   viewMode={viewMode}
@@ -822,7 +809,6 @@ export default function LabelLibraryPage() {
         <LabelDetailModal
           label={selectedLabel}
           onClose={() => {
-            setShowDetailModal(false);
             setSelectedLabel(null);
           }}
         />

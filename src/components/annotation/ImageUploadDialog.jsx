@@ -1,5 +1,6 @@
 
-import React, { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
+import JSZip from "jszip";
 import { uploadToSupabaseStorage } from "@/api/storage";
 import { createStepImages, updateStep } from "@/api/db";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
@@ -29,10 +30,19 @@ const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const isImageFile = (file) => (
   file.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name)
 );
+const isZipFile = (file) => file.type === "application/zip" || /\.zip$/i.test(file.name);
 const isLabelFile = (file) => /\.txt$/i.test(file.name);
 const isClassFile = (file) => /\.(txt|names|ya?ml)$/i.test(file.name);
 const isYamlFile = (file) => /\.(ya?ml)$/i.test(file.name);
 const toSafeSegment = (value) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
+const IMAGE_MIME_BY_EXT = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  gif: "image/gif",
+};
 const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
 const UPLOAD_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_UPLOAD_CONCURRENCY) || 6);
 const INSERT_BATCH_SIZE = Math.max(1, Number(import.meta.env.VITE_UPLOAD_INSERT_BATCH) || 25);
@@ -49,11 +59,12 @@ const resolveSplitName = (groupName) => {
   return "test";
 };
 
-const runWithConcurrency = async (items, limit, worker) => {
+const runWithConcurrency = async (items, limit, worker, shouldContinue) => {
   if (!items.length) return;
   const queue = [...items];
   const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
     while (queue.length) {
+      if (shouldContinue && !shouldContinue()) return;
       const next = queue.shift();
       if (!next) return;
       await worker(next);
@@ -210,6 +221,54 @@ const parseYoloLabels = (content, imageSize, classNames) => {
   return annotations;
 };
 
+const isImageName = (filename) => /\.(png|jpe?g|webp|bmp|gif)$/i.test(filename);
+
+const getImageMimeType = (filename) => {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  return IMAGE_MIME_BY_EXT[ext] || "";
+};
+
+const buildStorageName = (entryName) => (
+  entryName
+    .split("/")
+    .filter(Boolean)
+    .join("__")
+);
+
+const extractZipImages = async (zipFile) => {
+  const zip = await JSZip.loadAsync(zipFile);
+  const entries = Object.values(zip.files);
+  const images = [];
+
+  for (const entry of entries) {
+    if (entry.dir) continue;
+    const entryName = entry.name.replace(/\\/g, "/");
+    const baseName = entryName.split("/").pop();
+    if (!baseName || !isImageName(baseName)) continue;
+    const blob = await entry.async("blob");
+    const mimeType = getImageMimeType(baseName) || blob.type || "application/octet-stream";
+    const typedBlob = blob.type ? blob : blob.slice(0, blob.size, mimeType);
+    const file = new File([typedBlob], baseName, {
+      type: mimeType,
+      lastModified: zipFile.lastModified || Date.now(),
+    });
+    images.push({
+      file,
+      sourceId: `${zipFile.name}-${zipFile.lastModified || "zip"}:${entryName}`,
+      storageName: buildStorageName(entryName),
+    });
+  }
+
+  return images;
+};
+
+const buildImageWrapper = (file, sourceId, storageName) => ({
+  file,
+  id: sourceId ? `${sourceId}-${file.size}` : `${file.name}-${file.size}-${file.lastModified}`,
+  storageName: storageName || file.name,
+  preview: URL.createObjectURL(file),
+});
+
 export default function ImageUploadDialog({
   open,
   onOpenChange,
@@ -309,11 +368,18 @@ export default function ImageUploadDialog({
     return { path, publicUrl };
   }, [projectId, currentStepId, classMapping, stepClasses]);
 
-  const uploadDatasetArtifact = useCallback(async ({ file, stem, labelContent, groupName, skipImageUpload = false }) => {
+  const uploadDatasetArtifact = useCallback(async ({
+    file,
+    stem,
+    labelContent,
+    groupName,
+    skipImageUpload = false,
+    storageName,
+  }) => {
     if (!projectId || !currentStepId) return;
     const splitName = resolveSplitName(groupName);
     if (!skipImageUpload && file) {
-      const safeName = toSafeSegment(file.name);
+      const safeName = toSafeSegment(storageName || file.name);
       const imagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
       await uploadToSupabaseStorage(file, imagePath, { bucket: DATASET_BUCKET });
     }
@@ -343,23 +409,43 @@ export default function ImageUploadDialog({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadMessage, setUploadMessage] = useState("Preparing upload...");
+  const cancelRef = useRef(false);
 
   const visibleImageFiles = useMemo(() => files.slice(0, MAX_IMAGE_PREVIEWS), [files]);
   const hiddenImageCount = Math.max(0, files.length - visibleImageFiles.length);
   const visibleLabelFiles = useMemo(() => labelFiles.slice(0, MAX_LABEL_PREVIEWS), [labelFiles]);
   const hiddenLabelCount = Math.max(0, labelFiles.length - visibleLabelFiles.length);
 
-  const handleFileSelect = (selectedFiles) => {
-    const newFiles = Array.from(selectedFiles)
-      .filter(isImageFile)
-      .map(file => ({
-        file,
-        id: `${file.name}-${file.size}-${file.lastModified}`,
-        preview: URL.createObjectURL(file),
-      }));
-    setFiles(prev => {
-      const existingIds = new Set(prev.map(f => f.id));
-      return [...prev, ...newFiles.filter(f => !existingIds.has(f.id))];
+  const handleFileSelect = async (selectedFiles) => {
+    const incoming = Array.from(selectedFiles || []);
+    const directImages = incoming.filter(isImageFile);
+    const zipFiles = incoming.filter(isZipFile);
+    const extracted = [];
+
+    if (zipFiles.length > 0) {
+      const zipResults = await Promise.all(
+        zipFiles.map(async (zipFile) => {
+          try {
+            return await extractZipImages(zipFile);
+          } catch (error) {
+            console.error(`Failed to read zip ${zipFile.name}:`, error);
+            return [];
+          }
+        })
+      );
+      zipResults.forEach((result) => extracted.push(...result));
+    }
+
+    const newFiles = [
+      ...directImages.map((file) => buildImageWrapper(file)),
+      ...extracted.map(({ file, sourceId, storageName }) => buildImageWrapper(file, sourceId, storageName)),
+    ];
+
+    if (newFiles.length === 0) return;
+
+    setFiles((prev) => {
+      const existingIds = new Set(prev.map((f) => f.id));
+      return [...prev, ...newFiles.filter((f) => !existingIds.has(f.id))];
     });
   };
 
@@ -477,9 +563,15 @@ export default function ImageUploadDialog({
     onOpenChange(false);
   };
 
+  const cancelUpload = () => {
+    cancelRef.current = true;
+    handleClose();
+  };
+
   const startUploadProcess = async ({ mode = 'guided' } = {}) => {
     if (files.length === 0 || !currentStepId) return;
 
+    cancelRef.current = false;
     setUploadMode(mode);
     setUploadMessage(mode === 'training-only' ? 'Preparing training upload...' : 'Preparing upload...');
     setStep('uploading');
@@ -488,6 +580,7 @@ export default function ImageUploadDialog({
     const shuffledFiles = shuffleArray([...files]);
     const totalFiles = shuffledFiles.length;
     const labelContentByStem = await buildLabelContentByStem();
+    if (cancelRef.current) return;
 
     let assignments = {};
     if (mode === 'training-only') {
@@ -572,11 +665,14 @@ export default function ImageUploadDialog({
       let filesUploaded = 0;
       const totalUploads = uploadTargets.length;
       const uploadSingle = async ({ groupName, fileWrapper }) => {
+        if (cancelRef.current) return;
         setUploadMessage(`Uploading to "${groupName}": ${fileWrapper.file.name}`);
-        const stem = getFileStem(fileWrapper.file.name).toLowerCase();
-        const labelContent = labelContentByStem.get(stem);
+        const lookupStem = getFileStem(fileWrapper.file.name).toLowerCase();
+        const labelContent = labelContentByStem.get(lookupStem);
         const splitName = resolveSplitName(groupName);
-        const safeName = toSafeSegment(fileWrapper.file.name);
+        const storageBaseName = fileWrapper.storageName || fileWrapper.file.name;
+        const safeName = toSafeSegment(storageBaseName);
+        const storageStem = getFileStem(storageBaseName).toLowerCase();
         const datasetImagePath = `${projectId}/${currentStepId}/images/${splitName}/${safeName}`;
         const uploadPromise = uploadToSupabaseStorage(fileWrapper.file, datasetImagePath, {
           bucket: DATASET_BUCKET,
@@ -590,13 +686,15 @@ export default function ImageUploadDialog({
         const labelUploadPromise = labelContent !== undefined
           ? uploadDatasetArtifact({
             file: fileWrapper.file,
-            stem,
+            stem: storageStem,
             labelContent,
             groupName,
             skipImageUpload: true,
+            storageName: fileWrapper.storageName,
           })
           : Promise.resolve();
         const [{ publicUrl }, imageSize] = await Promise.all([uploadPromise, imageSizePromise]);
+        if (cancelRef.current) return;
 
         let annotationPayload = null;
         let noAnnotationsNeeded = false;
@@ -638,16 +736,21 @@ export default function ImageUploadDialog({
           payload.annotations = annotationPayload;
         }
 
+        if (cancelRef.current) return;
         enqueueInsert(payload);
         await labelUploadPromise;
 
         filesUploaded += 1;
-        setUploadProgress(Math.round((filesUploaded / totalUploads) * 100));
+        if (!cancelRef.current) {
+          setUploadProgress(Math.round((filesUploaded / totalUploads) * 100));
+        }
       };
 
-      await runWithConcurrency(uploadTargets, UPLOAD_CONCURRENCY, uploadSingle);
+      await runWithConcurrency(uploadTargets, UPLOAD_CONCURRENCY, uploadSingle, () => !cancelRef.current);
+      if (cancelRef.current) return;
       setUploadMessage("Finalizing image records...");
       await flushInserts();
+      if (cancelRef.current) return;
 
       if (!classFile || !isYamlFile(classFile.file)) {
         const hasTestSplit = Object.keys(assignments).some(
@@ -657,6 +760,7 @@ export default function ImageUploadDialog({
         await generateDatasetYaml(hasTestSplit);
         setYamlUploadStatus({ state: "saved", message: "Dataset YAML generated for training." });
       }
+      if (cancelRef.current) return;
 
       setUploadMessage("Upload complete!");
       setUploadProgress(100);
@@ -664,6 +768,7 @@ export default function ImageUploadDialog({
       setTimeout(handleClose, 1000); // Close dialog after a short delay
 
     } catch (error) {
+      if (cancelRef.current) return;
       console.error("Error during upload process:", error);
       setUploadMessage(`Error: ${error.message}. Please try again.`);
       // Don't close on error, let user see the message
@@ -727,15 +832,18 @@ export default function ImageUploadDialog({
                 onClick={() => document.getElementById('file-upload-input')?.click()}
               >
                 <UploadCloud className="w-12 h-12 mx-auto text-amber-500" />
-                <p className="mt-3 text-base font-semibold text-slate-800">Drop images or click to browse</p>
+                <p className="mt-3 text-base font-semibold text-slate-800">Drop images or a zip to browse</p>
                 <p className="text-sm text-slate-600">Auto-split next, or send everything straight to Training.</p>
                 <Input
                   id="file-upload-input"
                   type="file"
                   multiple
-                  accept="image/*"
                   className="hidden"
-                  onChange={(e) => handleFileSelect(e.target.files)}
+                  accept="image/*,.zip"
+                  onChange={(e) => {
+                    handleFileSelect(e.target.files);
+                    e.target.value = "";
+                  }}
                 />
               </div>
 
@@ -843,7 +951,7 @@ export default function ImageUploadDialog({
                     <div>Class mapping: 0-{Math.max(0, stepClasses.length - 1)} maps to step classes</div>
                   )}
                   {labelFiles.length > 0 && stepClasses.length === 0 && !classFile && (
-                    <div className="text-amber-600">No step classes found. Labels will import as "Class N".</div>
+                    <div className="text-amber-600">No step classes found. Labels will import as &quot;Class N&quot;.</div>
                   )}
                 </div>
               )}
@@ -1121,7 +1229,20 @@ export default function ImageUploadDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={!isUploading ? handleClose : () => {}}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          onOpenChange(true);
+          return;
+        }
+        if (isUploading) {
+          cancelUpload();
+          return;
+        }
+        handleClose();
+      }}
+    >
       <DialogContent className="sm:max-w-5xl p-0 overflow-hidden max-h-[90vh]">
         <DialogTitle className="sr-only">Upload images and labels</DialogTitle>
         <DialogDescription className="sr-only">

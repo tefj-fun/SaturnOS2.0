@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -78,6 +78,107 @@ const presetOptions = [
   },
 ];
 
+const augmentationPresets = [
+  {
+    value: 'none',
+    label: 'None',
+    description: 'No augmentation (use raw images only).',
+    summary: 'Turns off color, flip, mosaic, and mixup.',
+    config: {
+      hsv_h: 0,
+      hsv_s: 0,
+      hsv_v: 0,
+      degrees: 0,
+      translate: 0,
+      scale: 0,
+      shear: 0,
+      perspective: 0,
+      flipud: 0,
+      fliplr: 0,
+      mosaic: 0,
+      mixup: 0,
+      copy_paste: 0,
+    },
+  },
+  {
+    value: 'light',
+    label: 'Light',
+    description: 'Small color jitter with mild geometry.',
+    summary: 'hsv 0.01/0.4/0.3, translate 0.05, scale 0.3, mosaic 0.5.',
+    config: {
+      hsv_h: 0.01,
+      hsv_s: 0.4,
+      hsv_v: 0.3,
+      degrees: 0,
+      translate: 0.05,
+      scale: 0.3,
+      shear: 0,
+      perspective: 0,
+      flipud: 0,
+      fliplr: 0.5,
+      mosaic: 0.5,
+      mixup: 0.0,
+      copy_paste: 0.0,
+    },
+  },
+  {
+    value: 'standard',
+    label: 'Standard',
+    description: 'Ultralytics YOLO defaults.',
+    summary: 'hsv 0.015/0.7/0.4, translate 0.1, scale 0.5, mosaic 1.0.',
+    config: {
+      hsv_h: 0.015,
+      hsv_s: 0.7,
+      hsv_v: 0.4,
+      degrees: 0,
+      translate: 0.1,
+      scale: 0.5,
+      shear: 0,
+      perspective: 0,
+      flipud: 0,
+      fliplr: 0.5,
+      mosaic: 1.0,
+      mixup: 0.0,
+      copy_paste: 0.0,
+    },
+  },
+  {
+    value: 'strong',
+    label: 'Strong',
+    description: 'Aggressive augmentation for small datasets.',
+    summary: 'degrees 10, translate 0.2, scale 0.8, mixup 0.2.',
+    config: {
+      hsv_h: 0.02,
+      hsv_s: 0.8,
+      hsv_v: 0.5,
+      degrees: 10,
+      translate: 0.2,
+      scale: 0.8,
+      shear: 2.0,
+      perspective: 0.0,
+      flipud: 0.0,
+      fliplr: 0.5,
+      mosaic: 1.0,
+      mixup: 0.2,
+      copy_paste: 0.1,
+    },
+  },
+  {
+    value: 'custom',
+    label: 'Custom',
+    description: 'Manual overrides.',
+    summary: 'Fine-tuned augmentation settings.',
+    config: null,
+  },
+];
+
+const DEFAULT_AUGMENTATION_PRESET =
+  augmentationPresets.find((preset) => preset.value === 'standard') || augmentationPresets[0];
+const DEFAULT_AUGMENTATION_CONFIG = {
+  preset: DEFAULT_AUGMENTATION_PRESET.value,
+  ...(DEFAULT_AUGMENTATION_PRESET.config || {}),
+};
+
 const DATASET_EXPORT_CONCURRENCY = Math.max(
     1,
     Number(import.meta.env.VITE_DATASET_EXPORT_CONCURRENCY || import.meta.env.VITE_UPLOAD_CONCURRENCY) || 4
@@ -120,6 +221,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         learningRate: 0.001,
         optimizer: 'Adam',
         compute: 'gpu',
+        augmentation: { ...DEFAULT_AUGMENTATION_CONFIG },
         optimizationStrategy: 'manual',
         bayesianConfig: {
             objective: 'maximize_mAP',
@@ -155,70 +257,6 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     }, []);
 
     useEffect(() => {
-        if (!open) {
-            hasInitializedRef.current = false;
-            lastStepIdRef.current = null;
-            return;
-        }
-
-        const stepChanged = lastStepIdRef.current !== stepId;
-        if (hasInitializedRef.current && !stepChanged) {
-            return;
-        }
-
-        hasInitializedRef.current = true;
-        lastStepIdRef.current = stepId;
-
-        let isMounted = true;
-        const newVersion = (existingRuns?.length || 0) + 1;
-        const safeTitle = stepTitle?.replace(/[^a-zA-Z0-9]/g, '_') || 'training';
-        const linkedYamlPath = stepData?.dataset_yaml_path || stepData?.dataset_yaml_url || "";
-        const linkedYamlDisplay = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
-
-        setFormError("");
-        setShowAdvancedSettings(false);
-        setDatasetStatus({ state: "idle", message: "", processed: 0, total: 0 });
-        setDatasetSummary(null);
-        setSelectedPreset('balanced');
-
-        const defaultPreset = presetOptions[0];
-        setConfig(prev => ({
-            ...prev,
-            ...defaultPreset.config,
-            runName: `${safeTitle}_v${newVersion}`,
-            dataYaml: linkedYamlPath || prev.dataYaml
-        }));
-        setAutoYamlSource({ path: linkedYamlPath, display: linkedYamlDisplay });
-
-        const refreshYaml = async () => {
-            if (!stepId) return;
-            try {
-                const [freshStep] = await SOPStep.filter({ id: stepId });
-                if (!isMounted || !freshStep) return;
-                let freshYamlPath = freshStep.dataset_yaml_path || freshStep.dataset_yaml_url || "";
-                let freshYamlDisplay = freshStep.dataset_yaml_url || freshStep.dataset_yaml_path || "";
-                await refreshDatasetSummary(freshStep);
-                if (!freshYamlPath || freshYamlPath === linkedYamlPath) return;
-                setConfig(prev => {
-                    if (prev.dataYaml && prev.dataYaml !== linkedYamlPath) {
-                        return prev;
-                    }
-                    return { ...prev, dataYaml: freshYamlPath };
-                });
-                setAutoYamlSource({ path: freshYamlPath, display: freshYamlDisplay });
-            } catch (error) {
-                console.warn("Failed to refresh dataset YAML:", error);
-            }
-        };
-
-        refreshYaml();
-
-        return () => {
-            isMounted = false;
-        };
-    }, [open, stepId, stepTitle, existingRuns, stepData, buildDatasetYaml]);
-
-    useEffect(() => {
         if (!autoYamlSource.path) return;
         setConfig(prev => (prev.dataYaml ? prev : { ...prev, dataYaml: autoYamlSource.path }));
     }, [autoYamlSource]);
@@ -244,6 +282,18 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     const activePreset = useMemo(() => {
         return presetOptions.find(option => option.value === selectedPreset) || presetOptions[0];
     }, [selectedPreset]);
+    const augmentationConfig = useMemo(() => ({
+        ...DEFAULT_AUGMENTATION_CONFIG,
+        ...(config.augmentation || {}),
+    }), [config.augmentation]);
+    const activeAugmentationPreset = useMemo(() => {
+        const presetValue = augmentationConfig.preset || DEFAULT_AUGMENTATION_CONFIG.preset;
+        return (
+            augmentationPresets.find(option => option.value === presetValue)
+            || augmentationPresets.find(option => option.value === 'custom')
+            || augmentationPresets[0]
+        );
+    }, [augmentationConfig.preset]);
 
     const handleConfigChange = (key, value) => setConfig(prev => ({ ...prev, [key]: value }));
     const handleBayesianConfigChange = (key, value) => setConfig(prev => ({ ...prev, bayesianConfig: { ...prev.bayesianConfig, [key]: value } }));
@@ -268,26 +318,65 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             ...preset.config,
         }));
     };
+    const applyAugmentationPreset = (presetValue) => {
+        const preset = augmentationPresets.find(option => option.value === presetValue);
+        if (!preset) return;
+        setConfig(prev => {
+            const current = { ...DEFAULT_AUGMENTATION_CONFIG, ...(prev.augmentation || {}) };
+            if (preset.config) {
+                return {
+                    ...prev,
+                    augmentation: {
+                        ...current,
+                        ...preset.config,
+                        preset: preset.value,
+                    },
+                };
+            }
+            return {
+                ...prev,
+                augmentation: {
+                    ...current,
+                    preset: preset.value,
+                },
+            };
+        });
+    };
+    const handleAugmentationChange = (key, value) => {
+        setConfig(prev => ({
+            ...prev,
+            augmentation: {
+                ...DEFAULT_AUGMENTATION_CONFIG,
+                ...(prev.augmentation || {}),
+                [key]: value,
+                preset: 'custom',
+            },
+        }));
+    };
+    const coerceNumber = (value, fallback) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    };
 
     const resolveDevice = (compute) => (compute === 'cpu' ? 'cpu' : 0);
 
-    const getSplitName = (groupName) => {
+    const getSplitName = useCallback((groupName) => {
         if (!groupName) return "train";
         const normalized = String(groupName).toLowerCase();
         if (normalized === "training") return "train";
         if (normalized === "inference" || normalized === "validation" || normalized === "val") return "val";
         if (normalized === "test" || normalized === "testing") return "test";
         return "train";
-    };
+    }, []);
 
-    const clamp01 = (value) => Math.min(1, Math.max(0, value));
+    const clamp01 = useCallback((value) => Math.min(1, Math.max(0, value)), []);
 
-    const normalizeNumber = (value) => {
+    const normalizeNumber = useCallback((value) => {
         if (!Number.isFinite(value)) return "0";
         return Number(value).toFixed(6);
-    };
+    }, []);
 
-    const parseClassIndex = (value) => {
+    const parseClassIndex = useCallback((value) => {
         if (value === undefined || value === null) return null;
         if (typeof value === "number" && Number.isInteger(value)) return value;
         const text = String(value).trim();
@@ -296,9 +385,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         if (Number.isInteger(numeric)) return numeric;
         const match = text.match(/^class\s*(\d+)$/i);
         return match ? Number(match[1]) : null;
-    };
+    }, []);
 
-    const resolveAnnotationClassIndex = (annotation, classNames) => {
+    const resolveAnnotationClassIndex = useCallback((annotation, classNames) => {
         if (!annotation) return { index: null, reason: "missing" };
         if (!Array.isArray(classNames) || classNames.length === 0) {
             return { index: null, reason: "no-classes" };
@@ -333,9 +422,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             return { index: 0, reason: "default" };
         }
         return { index: null, reason: "missing" };
-    };
+    }, [parseClassIndex]);
 
-    const extractAnnotations = (imageRow) => {
+    const extractAnnotations = useCallback((imageRow) => {
         const raw = imageRow?.annotations;
         if (!raw) return [];
         if (Array.isArray(raw)) return raw;
@@ -344,9 +433,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             if (Array.isArray(raw.objects)) return raw.objects;
         }
         return [];
-    };
+    }, []);
 
-    const getImageSize = (imageRow) => {
+    const getImageSize = useCallback((imageRow) => {
         const raw = imageRow?.annotations;
         if (raw?.image_natural_size?.width && raw?.image_natural_size?.height) {
             return raw.image_natural_size;
@@ -358,9 +447,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             return { width: imageRow.width, height: imageRow.height };
         }
         return null;
-    };
+    }, []);
 
-    const buildLabelContent = (imageRow, classNames) => {
+    const buildLabelContent = useCallback((imageRow, classNames) => {
         const annotations = extractAnnotations(imageRow);
         const size = getImageSize(imageRow);
         if (!size || !size.width || !size.height) {
@@ -421,9 +510,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             }
         });
         return { content: lines.join("\n"), hasLabels: lines.length > 0, stats: { total, missing, mismatched } };
-    };
+    }, [clamp01, extractAnnotations, getImageSize, normalizeNumber, resolveAnnotationClassIndex]);
 
-    const getAnnotationTypeCounts = (imageRow, classNames) => {
+    const getAnnotationTypeCounts = useCallback((imageRow, classNames) => {
         const annotations = extractAnnotations(imageRow);
         if (!annotations.length) return { boxes: 0, segments: 0 };
         let boxes = 0;
@@ -451,13 +540,13 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
             }
         });
         return { boxes, segments };
-    };
+    }, [extractAnnotations, resolveAnnotationClassIndex]);
 
-    const getClassNames = (stepSnapshot) => {
+    const getClassNames = useCallback((stepSnapshot) => {
         return (stepSnapshot?.classes || stepData?.classes || []).filter(Boolean);
-    };
+    }, [stepData?.classes]);
 
-    const refreshDatasetSummary = async (stepSnapshot) => {
+    const refreshDatasetSummary = useCallback(async (stepSnapshot) => {
         if (!stepId) return;
         setIsCheckingDataset(true);
         try {
@@ -506,7 +595,79 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         } finally {
             setIsCheckingDataset(false);
         }
-    };
+    }, [
+        buildLabelContent,
+        extractAnnotations,
+        getAnnotationTypeCounts,
+        getClassNames,
+        getSplitName,
+        stepId,
+    ]);
+
+    useEffect(() => {
+        if (!open) {
+            hasInitializedRef.current = false;
+            lastStepIdRef.current = null;
+            return;
+        }
+
+        const stepChanged = lastStepIdRef.current !== stepId;
+        if (hasInitializedRef.current && !stepChanged) {
+            return;
+        }
+
+        hasInitializedRef.current = true;
+        lastStepIdRef.current = stepId;
+
+        let isMounted = true;
+        const newVersion = (existingRuns?.length || 0) + 1;
+        const safeTitle = stepTitle?.replace(/[^a-zA-Z0-9]/g, '_') || 'training';
+        const linkedYamlPath = stepData?.dataset_yaml_path || stepData?.dataset_yaml_url || "";
+        const linkedYamlDisplay = stepData?.dataset_yaml_url || stepData?.dataset_yaml_path || "";
+
+        setFormError("");
+        setShowAdvancedSettings(false);
+        setDatasetStatus({ state: "idle", message: "", processed: 0, total: 0 });
+        setDatasetSummary(null);
+        setSelectedPreset('balanced');
+
+        const defaultPreset = presetOptions[0];
+        setConfig(prev => ({
+            ...prev,
+            ...defaultPreset.config,
+            augmentation: { ...DEFAULT_AUGMENTATION_CONFIG },
+            runName: `${safeTitle}_v${newVersion}`,
+            dataYaml: linkedYamlPath || prev.dataYaml
+        }));
+        setAutoYamlSource({ path: linkedYamlPath, display: linkedYamlDisplay });
+
+        const refreshYaml = async () => {
+            if (!stepId) return;
+            try {
+                const [freshStep] = await SOPStep.filter({ id: stepId });
+                if (!isMounted || !freshStep) return;
+                let freshYamlPath = freshStep.dataset_yaml_path || freshStep.dataset_yaml_url || "";
+                let freshYamlDisplay = freshStep.dataset_yaml_url || freshStep.dataset_yaml_path || "";
+                await refreshDatasetSummary(freshStep);
+                if (!freshYamlPath || freshYamlPath === linkedYamlPath) return;
+                setConfig(prev => {
+                    if (prev.dataYaml && prev.dataYaml !== linkedYamlPath) {
+                        return prev;
+                    }
+                    return { ...prev, dataYaml: freshYamlPath };
+                });
+                setAutoYamlSource({ path: freshYamlPath, display: freshYamlDisplay });
+            } catch (error) {
+                console.warn("Failed to refresh dataset YAML:", error);
+            }
+        };
+
+        refreshYaml();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [open, stepId, stepTitle, existingRuns, stepData, buildDatasetYaml, refreshDatasetSummary]);
 
     const ensureDatasetExport = async ({ projectId, stepId: activeStepId, classNames }) => {
         const stepImages = await listStepImages(activeStepId);
@@ -771,7 +932,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     Start New Training Run
                                 </DialogTitle>
                                 <DialogDescription className="text-sm text-slate-600">
-                                    Configure and launch a new model training job for step: "{stepTitle}"
+                                    Configure and launch a new model training job for step: &quot;{stepTitle}&quot;
                                 </DialogDescription>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -985,6 +1146,31 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                 </SelectContent>
                             </Select>
                         </div>
+
+                        <div>
+                            <TooltipLabel tooltipText="Random transforms that improve generalization. Standard matches YOLO defaults.">Augmentation preset</TooltipLabel>
+                            <Select value={augmentationConfig.preset} onValueChange={value => applyAugmentationPreset(value)}>
+                                <SelectTrigger className={fieldBaseClass}><SelectValue /></SelectTrigger>
+                                <SelectContent className={selectContentClass}>
+                                    {augmentationPresets.map(option => (
+                                        <SelectItem key={option.value} value={option.value} className={selectItemClass}>
+                                            <div className="flex flex-col">
+                                                <span>{option.label}</span>
+                                                <span className="text-gray-500 text-xs">{option.description}</span>
+                                            </div>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {activeAugmentationPreset && (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                <p className="font-medium">{activeAugmentationPreset.label} augmentation</p>
+                                <p className="text-xs text-amber-800 mt-1">{activeAugmentationPreset.summary}</p>
+                                <p className="text-xs text-amber-700 mt-2">Fine-tune in Advanced if needed.</p>
+                            </div>
+                        )}
                     </div>
 
                     <Separator />
@@ -1072,11 +1258,156 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         </TabsContent>
 
                         <TabsContent value="advanced" className="space-y-6 mt-4">
-                            <div className="space-y-4">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <h3 className="font-semibold text-gray-900">Advanced optimization</h3>
-                                    <Badge variant="secondary" className="bg-purple-100 text-purple-800">For experienced users</Badge>
+                            <div className="space-y-6">
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <h3 className="font-semibold text-gray-900">Data augmentation</h3>
+                                        <Badge variant="secondary" className="bg-amber-100 text-amber-800">YOLOv8</Badge>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <TooltipLabel tooltipText="Hue jitter amount. Typical range: 0 to 0.1.">HSV Hue</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.005"
+                                                min="0"
+                                                max="0.1"
+                                                value={augmentationConfig.hsv_h}
+                                                onChange={e => handleAugmentationChange('hsv_h', coerceNumber(e.target.value, augmentationConfig.hsv_h))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Saturation jitter amount. Typical range: 0 to 1.">HSV Saturation</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.hsv_s}
+                                                onChange={e => handleAugmentationChange('hsv_s', coerceNumber(e.target.value, augmentationConfig.hsv_s))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Value/brightness jitter amount. Typical range: 0 to 1.">HSV Value</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.hsv_v}
+                                                onChange={e => handleAugmentationChange('hsv_v', coerceNumber(e.target.value, augmentationConfig.hsv_v))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Rotation range in degrees.">Rotate (degrees)</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="1"
+                                                min="0"
+                                                max="45"
+                                                value={augmentationConfig.degrees}
+                                                onChange={e => handleAugmentationChange('degrees', coerceNumber(e.target.value, augmentationConfig.degrees))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Translate fraction of image size.">Translate</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                max="0.5"
+                                                value={augmentationConfig.translate}
+                                                onChange={e => handleAugmentationChange('translate', coerceNumber(e.target.value, augmentationConfig.translate))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Scale gain. 0.5 means 50% zoom in/out range.">Scale</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="2"
+                                                value={augmentationConfig.scale}
+                                                onChange={e => handleAugmentationChange('scale', coerceNumber(e.target.value, augmentationConfig.scale))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Horizontal flip probability.">Flip Left/Right</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.fliplr}
+                                                onChange={e => handleAugmentationChange('fliplr', coerceNumber(e.target.value, augmentationConfig.fliplr))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Vertical flip probability.">Flip Up/Down</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.flipud}
+                                                onChange={e => handleAugmentationChange('flipud', coerceNumber(e.target.value, augmentationConfig.flipud))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Mosaic probability.">Mosaic</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.mosaic}
+                                                onChange={e => handleAugmentationChange('mosaic', coerceNumber(e.target.value, augmentationConfig.mosaic))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Mixup probability.">Mixup</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.mixup}
+                                                onChange={e => handleAugmentationChange('mixup', coerceNumber(e.target.value, augmentationConfig.mixup))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                        <div>
+                                            <TooltipLabel tooltipText="Copy-paste probability (segmentation only).">Copy-Paste</TooltipLabel>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                min="0"
+                                                max="1"
+                                                value={augmentationConfig.copy_paste}
+                                                onChange={e => handleAugmentationChange('copy_paste', coerceNumber(e.target.value, augmentationConfig.copy_paste))}
+                                                className={fieldBaseClass}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
+
+                                <Separator />
+
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <h3 className="font-semibold text-gray-900">Advanced optimization</h3>
+                                        <Badge variant="secondary" className="bg-purple-100 text-purple-800">For experienced users</Badge>
+                                    </div>
 
                                 <div>
                                     <TooltipLabel tooltipText="The optimization algorithm. Adam is highly recommended as it works well for most tasks and is very reliable.">Optimizer</TooltipLabel>
@@ -1261,6 +1592,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                             )}
                         </AnimatePresence>
                     </div>
+                </div>
                         </TabsContent>
                     </Tabs>
 

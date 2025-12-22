@@ -78,7 +78,7 @@ export async function invokeLLM({
 
   try {
     return JSON.parse(content);
-  } catch (err) {
+  } catch {
     throw new Error("Failed to parse OpenAI JSON response");
   }
 }
@@ -112,7 +112,7 @@ export async function generateStepsFromSOP({ sopUrl, prompt, temperature = 0.2 }
   let parsed;
   try {
     parsed = JSON.parse(content);
-  } catch (err) {
+  } catch {
     throw new Error("Failed to parse OpenAI JSON response");
   }
 

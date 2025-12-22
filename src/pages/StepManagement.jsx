@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getProjectById, listStepsByProject, createStep, updateStep, deleteStep as deleteStepApi } from "@/api/db";
 import { Button } from "@/components/ui/button";
@@ -52,18 +52,7 @@ export default function StepManagementPage() {
     is_enabled: true
   });
 
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const id = urlParams.get('projectId');
-    if (id) {
-      setProjectId(id);
-      loadProjectData(id);
-    } else {
-      navigate(createPageUrl('Projects'));
-    }
-  }, []);
-
-  const loadProjectData = async (id) => {
+  const loadProjectData = useCallback(async (id) => {
     try {
       const [projectData, stepsData] = await Promise.all([
         getProjectById(id),
@@ -78,7 +67,18 @@ export default function StepManagementPage() {
       console.error("Error loading project data:", error);
     }
     setIsLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('projectId');
+    if (id) {
+      setProjectId(id);
+      loadProjectData(id);
+    } else {
+      navigate(createPageUrl('Projects'));
+    }
+  }, [loadProjectData, navigate]);
 
   const handleDragEnd = async (result) => {
     if (!result.destination) return;
@@ -623,7 +623,6 @@ export default function StepManagementPage() {
                             dragHandleProps={provided.dragHandleProps}
                             isAnyStepSelected={selectedSteps.size > 0} 
                             isEditingGlobal={editingStepId !== null} 
-                            isDragging={snapshot.isDragging}
                           />
                         </div>
                       )}
@@ -641,7 +640,7 @@ export default function StepManagementPage() {
             <Layers className="w-16 h-16 mx-auto mb-4 text-gray-300" />
             <h3 className="text-xl font-semibold text-gray-900 mb-2">No Steps Found</h3>
             <p className="text-gray-600 mb-6">
-              This project doesn't have any annotation steps yet.
+              This project doesn&apos;t have any annotation steps yet.
             </p>
             <Button onClick={() => handleAddStepAfter(-1)} className="bg-blue-600 hover:bg-blue-700">
               <Plus className="w-4 h-4 mr-2" />
@@ -672,8 +671,7 @@ function StepCard({
   getStatusColor,
   dragHandleProps,
   isAnyStepSelected, 
-  isEditingGlobal,
-  isDragging
+  isEditingGlobal
 }) {
   return (
     <motion.div

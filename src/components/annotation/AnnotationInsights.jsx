@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Target, AlertTriangle, Layers, Palette, ImageIcon } from 'lucide-react';
@@ -56,7 +56,7 @@ export default function AnnotationInsights({ project, steps, logicRules, stepIma
             <Card className="mb-6 bg-white">
                 <CardHeader>
                     <CardTitle className="text-2xl">Annotation Project Insights</CardTitle>
-                    <p className="text-muted-foreground">High-level overview of '{project?.name}'</p>
+                    <p className="text-muted-foreground">High-level overview of &quot;{project?.name}&quot;</p>
                 </CardHeader>
             </Card>
 

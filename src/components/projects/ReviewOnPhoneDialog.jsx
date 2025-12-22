@@ -1,5 +1,4 @@
 
-import React from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,7 +7,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { createPageUrl } from "@/utils";
-import { Smartphone, QrCode } from "lucide-react";
+import { Smartphone } from "lucide-react";
 
 export default function ReviewOnPhoneDialog({ open, project, onOpenChange }) {
   if (!project) return null;

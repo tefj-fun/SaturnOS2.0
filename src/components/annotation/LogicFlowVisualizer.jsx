@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Workflow, CheckCircle, XCircle, ArrowDown, ArrowRight } from "lucide-react";
+import { Workflow, CheckCircle, XCircle, ArrowDown } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function LogicFlowVisualizer({ rules }) {

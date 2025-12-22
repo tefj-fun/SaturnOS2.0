@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TrainingRun } from '@/api/entities';
@@ -180,6 +180,27 @@ const formatDeviceLabel = (device, compute) => {
   return "Default";
 };
 
+const formatAugmentationValue = (value) => {
+  const numeric = toNumber(value);
+  if (numeric === null) return null;
+  const fixed = numeric.toFixed(2);
+  return fixed.endsWith(".00") ? fixed.slice(0, -3) : fixed;
+};
+
+const formatAugmentationSummary = (augmentation) => {
+  if (!augmentation) return "Default";
+  const preset = augmentation.preset;
+  if (preset && preset !== "custom") return preset;
+  const parts = [];
+  const fliplr = formatAugmentationValue(augmentation.fliplr);
+  const mosaic = formatAugmentationValue(augmentation.mosaic);
+  const mixup = formatAugmentationValue(augmentation.mixup);
+  if (fliplr !== null) parts.push(`flip ${fliplr}`);
+  if (mosaic !== null) parts.push(`mosaic ${mosaic}`);
+  if (mixup !== null) parts.push(`mixup ${mixup}`);
+  return parts.length ? `Custom (${parts.join(", ")})` : "Custom";
+};
+
 
 export default function TrainingStatusPage() {
   const navigate = useNavigate();
@@ -190,7 +211,7 @@ export default function TrainingStatusPage() {
   const [isDeploying, setIsDeploying] = useState(false);
   const [deploymentMessage, setDeploymentMessage] = useState('');
 
-  const loadTrainingData = async (runId) => {
+  const loadTrainingData = useCallback(async (runId) => {
     try {
       const runs = await TrainingRun.filter({ id: runId });
       if (runs.length > 0) {
@@ -210,7 +231,7 @@ export default function TrainingStatusPage() {
     } catch (error) {
       console.error("Error loading training data:", error);
     }
-  };
+  }, []);
 
   const location = useLocation();
   const runId = useMemo(() => {
@@ -224,18 +245,20 @@ export default function TrainingStatusPage() {
     } else {
       navigate(createPageUrl('Projects'));
     }
-  }, [runId]);
+  }, [runId, loadTrainingData, navigate]);
+
+  const trainingStatus = trainingRun?.status;
 
   useEffect(() => {
     if (!runId) return;
-    if (!trainingRun || !['queued', 'running', 'canceling'].includes(trainingRun.status)) return;
+    if (!trainingStatus || !['queued', 'running', 'canceling'].includes(trainingStatus)) return;
 
     const interval = setInterval(() => {
       loadTrainingData(runId);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [runId, trainingRun?.status]);
+  }, [runId, trainingStatus, loadTrainingData]);
 
   // Rotate tips every 10 seconds
   useEffect(() => {
@@ -577,6 +600,10 @@ export default function TrainingStatusPage() {
             <span className="font-medium">{trainingRun.configuration?.optimizer || 'Adam'}</span>
           </div>
           <div className="flex justify-between">
+            <span className="text-gray-600">Augmentation:</span>
+            <span className="font-medium">{formatAugmentationSummary(trainingRun.configuration?.augmentation)}</span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-gray-600">Device:</span>
             <span className="font-medium">
               {formatDeviceLabel(trainingRun.configuration?.device, trainingRun.configuration?.compute)}
@@ -891,7 +918,7 @@ export default function TrainingStatusPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-gray-600 mb-4">
-                    Dive deeper into your model's performance by visually inspecting its predictions on the validation dataset. This is the best way to understand where your model excels and where it needs improvement.
+                    Dive deeper into your model&apos;s performance by visually inspecting its predictions on the validation dataset. This is the best way to understand where your model excels and where it needs improvement.
                   </p>
                   <Button
                       asChild

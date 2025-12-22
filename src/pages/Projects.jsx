@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { listProjects, createProject, updateProject, deleteProject, deleteProjects, listStepsByProject } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,6 @@ import {
   PenTool,
   CheckCircle,
   Clock,
-  ArrowRight,
   Folder,
   MoreVertical,
   Search,
@@ -79,15 +78,6 @@ export default function ProjectsPage() {
     loadProjects();
   }, []);
 
-  const getCreatedDate = (project) => {
-    // Normalize date fields coming from Supabase or legacy data
-    return project.created_at ||
-      project.created_date ||
-      project.createdAt ||
-      project.createdDate ||
-      new Date().toISOString();
-  };
-
   useEffect(() => {
     let processedProjects = projects;
 
@@ -111,7 +101,7 @@ export default function ProjectsPage() {
           return a.name.localeCompare(b.name);
         case 'name_desc':
           return b.name.localeCompare(a.name);
-        case 'status':
+        case 'status': {
           const statusOrder = ['created', 'sop_uploaded', 'steps_generated', 'annotation_in_progress', 'completed'];
           const statusA = statusOrder.indexOf(a.status);
           const statusB = statusOrder.indexOf(b.status);
@@ -119,6 +109,7 @@ export default function ProjectsPage() {
           if (statusA === -1) return 1;
           if (statusB === -1) return -1;
           return statusA - statusB;
+        }
         case 'newest':
         default:
           return new Date(getCreatedDate(b)) - new Date(getCreatedDate(a));
@@ -145,7 +136,7 @@ export default function ProjectsPage() {
       if (steps.length === 0) return 0;
       const annotatedSteps = steps.filter(step => step.is_annotated).length;
       return Math.round((annotatedSteps / steps.length) * 100);
-    } catch (error) {
+    } catch {
       return 0;
     }
   };
@@ -482,10 +473,10 @@ export default function ProjectsPage() {
           <p className="text-sm text-gray-600">
             Showing {filteredProjects.length} of {projects.length} projects
             {searchQuery && (
-              <span> matching "{searchQuery}"</span>
+                <span> matching &quot;{searchQuery}&quot;</span>
             )}
             {statusFilter !== "all" && (
-              <span> with status "{getStatusConfig(statusFilter).label}"</span>
+              <span> with status &quot;{getStatusConfig(statusFilter).label}&quot;</span>
             )}
           </p>
 
@@ -631,7 +622,6 @@ function ProjectCard({
   projectActions,
   onEdit,
   onDelete,
-  onReview,
   onMembers,
   isDeleting
 }) {
@@ -738,16 +728,6 @@ function ProjectCard({
                     </Button>
                   </Link>
                 )}
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onReview(project)}
-                  disabled={isDeleting}
-                  className="px-3"
-                >
-                  Review
-                </Button>
 
                 {canAccess("manage_members") && (
                   <Button

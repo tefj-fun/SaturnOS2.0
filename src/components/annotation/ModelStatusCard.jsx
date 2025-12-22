@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TrainingRun } from '@/api/entities';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { 
-  Brain,
   Spline,
   CheckCircle,
   AlertTriangle,
@@ -21,11 +19,7 @@ export default function ModelStatusCard({ projectId, currentStep }) {
   const [trainingRuns, setTrainingRuns] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadTrainingRuns();
-  }, [projectId]);
-
-  const loadTrainingRuns = async () => {
+  const loadTrainingRuns = useCallback(async () => {
     if (!projectId) return;
     
     setIsLoading(true);
@@ -36,7 +30,11 @@ export default function ModelStatusCard({ projectId, currentStep }) {
       console.error('Error loading training runs:', error);
     }
     setIsLoading(false);
-  };
+  }, [projectId]);
+
+  useEffect(() => {
+    loadTrainingRuns();
+  }, [loadTrainingRuns]);
 
   const latestRun = trainingRuns.length > 0 ? trainingRuns[0] : null;
   const completedRuns = trainingRuns.filter(run => run.status === 'completed');
