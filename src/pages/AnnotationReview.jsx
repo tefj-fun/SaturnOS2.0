@@ -844,7 +844,7 @@ export default function AnnotationReviewPage() {
     <div className="h-screen w-full flex flex-col bg-gray-100">
       {/* Header */}
       <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 w-full">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <Button
               variant="outline"
@@ -858,7 +858,7 @@ export default function AnnotationReviewPage() {
               <p className="text-sm text-gray-600">Reviewing predictions for model: <span className="font-semibold">{trainingRun.run_name}</span></p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
             <Badge className={`${
               overallLogicPassRate === null
                 ? 'bg-slate-100 text-slate-700'
@@ -885,7 +885,7 @@ export default function AnnotationReviewPage() {
       <div className="flex-1 flex overflow-hidden">
         <Tabs defaultValue="logic-results" className="flex-1 flex flex-col">
           <div className="bg-white border-b px-6 py-2">
-            <TabsList>
+            <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
               <TabsTrigger value="logic-results" className="flex items-center gap-2">
                 <Target className="w-4 h-4" />
                 Logic Rule Results

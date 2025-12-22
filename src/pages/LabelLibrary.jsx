@@ -245,8 +245,8 @@ const LabelCard = ({ label, onSelect, isSelected, viewMode }) => {
         }`}
         onClick={() => onSelect(label)}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
             <div 
               className="w-4 h-4 rounded-full border-2"
               style={{ backgroundColor: label.color_hex }}
@@ -256,7 +256,7 @@ const LabelCard = ({ label, onSelect, isSelected, viewMode }) => {
               <p className="text-sm text-gray-600 truncate max-w-md">{label.description}</p>
             </div>
           </div>
-          <div className="flex items-center gap-4 text-sm text-gray-500">
+          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
             <span className="flex items-center gap-1">
               <Hash className="w-3 h-3" />
               {label.total_annotations}
@@ -707,10 +707,10 @@ export default function LabelLibraryPage() {
               </div>
 
               {/* Category Filter */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <Filter className="w-4 h-4 text-gray-500" />
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-48">
+                  <SelectTrigger className="w-full sm:w-48">
                     <SelectValue placeholder="Filter by category" />
                   </SelectTrigger>
                   <SelectContent>
@@ -746,7 +746,7 @@ export default function LabelLibraryPage() {
         </Card>
 
         {/* Results Summary */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-6">
           <p className="text-sm text-gray-600">
             Showing {filteredLabels.length} of {labels.length} labels
             {searchQuery && <span> matching &quot;{searchQuery}&quot;</span>}

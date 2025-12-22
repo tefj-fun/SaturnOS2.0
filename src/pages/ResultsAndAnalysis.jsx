@@ -514,7 +514,7 @@ export default function ResultsAndAnalysisPage() {
     <div className="min-h-screen bg-slate-50/40 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0 bg-white">
               <ArrowLeft className="w-4 h-4" />
@@ -527,7 +527,7 @@ export default function ResultsAndAnalysisPage() {
               <p className="text-gray-600 mt-1">Run live inference, review outcomes, and track history.</p>
             </div>
           </div>
-          <Button variant="outline" onClick={() => setShowHistory((prev) => !prev)}>
+          <Button variant="outline" onClick={() => setShowHistory((prev) => !prev)} className="w-full sm:w-auto">
             <History className="w-4 h-4 mr-2" />
             {showHistory ? "Back to Testing" : "Inference History"}
           </Button>
@@ -539,7 +539,7 @@ export default function ResultsAndAnalysisPage() {
             <div className={`w-full ${isLibraryCollapsed ? "lg:w-16" : "lg:w-72"} transition-all`}>
               <Card className="shadow-lg h-full">
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle className="flex items-center gap-2 text-sm">
                       <Database className="w-5 h-5 text-blue-600" />
                       {!isLibraryCollapsed && "Image Library"}
@@ -667,7 +667,7 @@ export default function ResultsAndAnalysisPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-gray-500">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-xs text-gray-500">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline">{selectedRun?.run_name || "Select a model"}</Badge>
                       <span>{previewLabel}</span>
@@ -820,15 +820,15 @@ export default function ResultsAndAnalysisPage() {
                   )}
 
                   <div className="rounded-lg border bg-white p-3 text-xs space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-gray-500">Model</span>
                       <span className="font-medium">{selectedRun?.run_name || "None selected"}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-gray-500">Image</span>
                       <span className="font-medium truncate max-w-[140px]">{previewLabel}</span>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-gray-500">Project</span>
                       <span className="font-medium truncate max-w-[140px]">{previewProject}</span>
                     </div>
@@ -909,7 +909,7 @@ export default function ResultsAndAnalysisPage() {
                       </div>
 
                       {inferenceResults.logic_evaluation && (
-                        <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg text-xs">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 bg-green-50 rounded-lg text-xs">
                           <div className="flex items-center gap-2">
                             <CheckCircle className="w-4 h-4 text-green-600" />
                             <span className="font-medium text-green-800">
@@ -925,7 +925,7 @@ export default function ResultsAndAnalysisPage() {
                       )}
 
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <h4 className="text-sm font-medium">Detections</h4>
                           <Badge variant="outline" className="text-xs">
                             {predictionsSummary.length}
@@ -944,7 +944,7 @@ export default function ResultsAndAnalysisPage() {
                                   hoveredPredictionId === pred.id ? "border-yellow-400 bg-yellow-50" : "border-gray-100 bg-gray-50"
                                 }`}
                               >
-                                <div className="flex justify-between items-center">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                   <span className="font-medium">{pred.class}</span>
                                   {pred.confidence !== null && (
                                     <Badge variant="outline">
@@ -1000,7 +1000,7 @@ export default function ResultsAndAnalysisPage() {
                   />
                 </div>
                 <Select value={historyFilter} onValueChange={setHistoryFilter}>
-                  <SelectTrigger className="w-48">
+                <SelectTrigger className="w-full sm:w-48">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1013,71 +1013,73 @@ export default function ResultsAndAnalysisPage() {
               </div>
 
               <ScrollArea className="max-h-[60vh]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Run Name</TableHead>
-                      <TableHead>Model</TableHead>
-                      <TableHead>Project</TableHead>
-                      <TableHead>Image</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead>Created By</TableHead>
-                      <TableHead>Results</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredHistory.map((item) => {
-                      const status = statusConfig[item.status] || statusConfig.completed;
-                      const logicStatus = item.results?.logic_status || "N/A";
-                      const logicBadgeClass =
-                        logicStatus === "PASS"
-                          ? "bg-green-100 text-green-800"
-                          : logicStatus === "FAIL"
-                            ? "bg-red-100 text-red-800"
-                            : "bg-gray-100 text-gray-700";
-                      const avgConfidence = item.results?.avg_confidence;
-                      const createdAt = item.created_date ? new Date(item.created_date).toLocaleDateString() : "N/A";
-                      const createdBy = item.created_by ? item.created_by.split("@")[0] : "system";
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[960px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Run Name</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead>Project</TableHead>
+                        <TableHead>Image</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Created By</TableHead>
+                        <TableHead>Results</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredHistory.map((item) => {
+                        const status = statusConfig[item.status] || statusConfig.completed;
+                        const logicStatus = item.results?.logic_status || "N/A";
+                        const logicBadgeClass =
+                          logicStatus === "PASS"
+                            ? "bg-green-100 text-green-800"
+                            : logicStatus === "FAIL"
+                              ? "bg-red-100 text-red-800"
+                              : "bg-gray-100 text-gray-700";
+                        const avgConfidence = item.results?.avg_confidence;
+                        const createdAt = item.created_date ? new Date(item.created_date).toLocaleDateString() : "N/A";
+                        const createdBy = item.created_by ? item.created_by.split("@")[0] : "system";
 
-                      return (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-medium">{item.run_name}</TableCell>
-                          <TableCell>{item.model_name}</TableCell>
-                          <TableCell>{item.project_name}</TableCell>
-                          <TableCell>{item.image_name}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {status.icon}
-                              <Badge className={status.color}>{status.label}</Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell>{createdAt}</TableCell>
-                          <TableCell>{createdBy}</TableCell>
-                          <TableCell>
-                            {item.results ? (
-                              <div className="text-sm">
-                                <div>Objects: {item.results.total_predictions}</div>
-                                <div>
-                                  Confidence: {typeof avgConfidence === "number" ? `${(avgConfidence * 100).toFixed(1)}%` : "N/A"}
-                                </div>
-                                <Badge className={logicBadgeClass}>{logicStatus}</Badge>
+                        return (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.run_name}</TableCell>
+                            <TableCell>{item.model_name}</TableCell>
+                            <TableCell>{item.project_name}</TableCell>
+                            <TableCell>{item.image_name}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {status.icon}
+                                <Badge className={status.color}>{status.label}</Badge>
                               </div>
-                            ) : (
-                              <span className="text-gray-400">N/A</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="outline" size="sm">
-                              <ChevronRight className="w-4 h-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                            </TableCell>
+                            <TableCell>{createdAt}</TableCell>
+                            <TableCell>{createdBy}</TableCell>
+                            <TableCell>
+                              {item.results ? (
+                                <div className="text-sm">
+                                  <div>Objects: {item.results.total_predictions}</div>
+                                  <div>
+                                    Confidence: {typeof avgConfidence === "number" ? `${(avgConfidence * 100).toFixed(1)}%` : "N/A"}
+                                  </div>
+                                  <Badge className={logicBadgeClass}>{logicStatus}</Badge>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400">N/A</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="outline" size="sm">
+                                <ChevronRight className="w-4 h-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               </ScrollArea>
             </CardContent>
           </Card>

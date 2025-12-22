@@ -185,7 +185,7 @@ export default function BuildVariantsPage() {
     <div className="p-6 md:p-8 h-full overflow-hidden">
       <div className="max-w-7xl mx-auto h-full flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Build Variant Configurator</h1>
             <p className="text-gray-600">
@@ -194,7 +194,7 @@ export default function BuildVariantsPage() {
           </div>
           <Button
             onClick={() => setShowCreateDialog(true)}
-            className="bg-blue-600 hover:bg-blue-700"
+            className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
           >
             <Plus className="w-4 h-4 mr-2" />
             New Build Variant
@@ -202,9 +202,9 @@ export default function BuildVariantsPage() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex gap-6 overflow-hidden">
+        <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
           {/* Left Panel - Build Variants List */}
-          <Card className="w-1/3 flex flex-col">
+          <Card className="w-full lg:w-1/3 flex flex-col">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Package className="w-5 h-5" />
@@ -235,7 +235,7 @@ export default function BuildVariantsPage() {
                       }`}
                       onClick={() => setSelectedVariant(variant)}
                     >
-                      <div className="flex items-start justify-between">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex-1 min-w-0">
                           <h4 className="font-medium text-gray-900 truncate">
                             {variant.name}
@@ -251,7 +251,7 @@ export default function BuildVariantsPage() {
                             </Badge>
                           </div>
                         </div>
-                        <div className="flex gap-1 ml-2">
+                        <div className="flex gap-1 sm:ml-2">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -297,7 +297,7 @@ export default function BuildVariantsPage() {
               </CardTitle>
               
               {selectedVariant && (
-                <div className="flex gap-4 mt-4">
+                <div className="flex flex-col sm:flex-row gap-4 mt-4">
                   <div className="flex-1 relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <Input
@@ -308,7 +308,7 @@ export default function BuildVariantsPage() {
                     />
                   </div>
                   <Select value={projectFilter} onValueChange={setProjectFilter}>
-                    <SelectTrigger className="w-48">
+                    <SelectTrigger className="w-full sm:w-48">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -346,7 +346,7 @@ export default function BuildVariantsPage() {
                           config ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200"
                         }`}
                       >
-                        <div className="flex items-start justify-between">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
                               {config ? (
@@ -405,7 +405,7 @@ export default function BuildVariantsPage() {
                             )}
                           </div>
                           
-                          <div className="flex gap-2 ml-4">
+                          <div className="flex flex-wrap gap-2 sm:ml-4">
                             <Button
                               variant={config ? "default" : "outline"}
                               size="sm"

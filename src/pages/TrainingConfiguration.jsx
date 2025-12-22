@@ -42,6 +42,16 @@ const Section = ({ title, icon, children, count }) => (
     </div>
 );
 
+const DATASET_SUMMARY_TIMEOUT_MS = 15000;
+
+const withTimeout = (promise, ms, message) => {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+};
+
 
 export default function TrainingConfigurationPage() {
     const navigate = useNavigate();
@@ -225,7 +235,11 @@ export default function TrainingConfigurationPage() {
         }
         setIsDatasetLoading(true);
         try {
-            const stepImages = await listStepImages(step.id);
+            const stepImages = await withTimeout(
+                listStepImages(step.id),
+                DATASET_SUMMARY_TIMEOUT_MS,
+                "Dataset summary request timed out."
+            );
             const splits = { train: 0, val: 0, test: 0 };
             let labeled = 0;
             const classNames = (step.classes || []).filter(Boolean);
@@ -444,7 +458,7 @@ export default function TrainingConfigurationPage() {
         <div className="h-full flex flex-col">
             <div className="p-6 w-full">
                 <div className="w-full max-w-none">
-                    <div className="flex items-center justify-between mb-8">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8">
                         <div className="flex items-center gap-4">
                             <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0">
                                 <ArrowLeft className="w-4 h-4" />
@@ -457,9 +471,9 @@ export default function TrainingConfigurationPage() {
                                 </p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <div className="flex flex-col items-end gap-1">
-                            <div className="flex items-center justify-end gap-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
+                          <div className="flex flex-col items-start md:items-end gap-1">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
                                 <Popover onOpenChange={(open) => { if (!open) setShowTrainerAdvanced(false); }}>
                                     <PopoverTrigger
                                         className="appearance-none border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded-md"
@@ -476,7 +490,7 @@ export default function TrainingConfigurationPage() {
                                                 <p className="text-sm font-semibold text-gray-900">Trainer status</p>
                                                 <p className="text-xs text-gray-600 mt-1">{trainerStatusDescription}</p>
                                             </div>
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                                 <Badge className={`${currentTrainerStatus.color} border-0 font-medium`}>
                                                     {currentTrainerStatus.icon}
                                                     <span>{currentTrainerStatus.label}</span>
@@ -517,7 +531,7 @@ export default function TrainingConfigurationPage() {
                                                             const hardwareLabel = getWorkerHardwareLabel(worker);
                                                             return (
                                                                 <div key={worker.worker_id || index} className="rounded-md bg-gray-50 p-2 text-xs text-gray-600">
-                                                                    <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-[11px] text-gray-500">
                                                                         <span className="font-medium text-gray-700">Worker {index + 1}</span>
                                                                         <span>Last seen: {formatTime(worker?.last_seen)}</span>
                                                                     </div>
@@ -548,11 +562,11 @@ export default function TrainingConfigurationPage() {
                                     <RefreshCw className="h-4 w-4" />
                                 </Button>
                             </div>
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-gray-500 self-start md:self-auto">
                                 running: {trainerStatus.running}, queued: {trainerStatus.queued}, workers: {trainerStatus.workersOnline}
                             </span>
                             {isTrainerOffline && (
-                                <span className="text-xs text-amber-600">Runs will stay queued while offline</span>
+                                <span className="text-xs text-amber-600 self-start md:self-auto">Runs will stay queued while offline</span>
                             )}
                         </div>
                         </div>
@@ -585,7 +599,7 @@ export default function TrainingConfigurationPage() {
                             <div className="grid gap-6 lg:grid-cols-3">
                                 <Card className="border-0 shadow-sm">
                                     <CardHeader>
-                                        <div className="flex items-center justify-between">
+                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                             <CardTitle>Dataset readiness</CardTitle>
                                             <Badge className={datasetStatusClass}>
                                                 {datasetStatusLabel}
@@ -594,7 +608,7 @@ export default function TrainingConfigurationPage() {
                                         <CardDescription>Check images, labels, splits, and classes before training.</CardDescription>
                                     </CardHeader>
                                     <CardContent className="space-y-3 text-sm text-gray-600">
-                                        <div className="flex items-start justify-between gap-4">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                             <div className="space-y-1">
                                                 <p><span className="font-medium text-gray-800">Images:</span> {datasetSummary ? datasetSummary.total : (isDatasetLoading ? "Checking..." : "Not checked")}</p>
                                                 <p><span className="font-medium text-gray-800">Labeled images:</span> {datasetSummary ? datasetSummary.labeled : "n/a"}</p>
@@ -671,7 +685,7 @@ export default function TrainingConfigurationPage() {
                                             <p className="text-sm text-gray-500">No runs yet for this step.</p>
                                         )}
                                         {recentRuns.map(run => (
-                                            <div key={run.id} className="flex items-center justify-between gap-3">
+                                            <div key={run.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                                 <div>
                                                     <p className="text-sm font-medium text-gray-900">{run.run_name}</p>
                                                     <p className="text-xs text-gray-500">{run.created_date ? new Date(run.created_date).toLocaleString() : "Unknown date"}</p>

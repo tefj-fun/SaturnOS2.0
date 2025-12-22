@@ -50,4 +50,14 @@ export default [
       },
     },
   },
+  {
+    files: [
+      'src/components/ui/**/*.{js,jsx}',
+      'src/components/rbac/PermissionGate.jsx',
+      'src/contexts/AuthContext.jsx',
+    ],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ]

@@ -164,7 +164,7 @@ export default function ResultsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button variant="outline" onClick={clearFilters}>
+              <Button variant="outline" onClick={clearFilters} className="w-full sm:w-auto">
                 <X className="w-4 h-4 mr-2" /> Clear
               </Button>
             </div>
@@ -196,39 +196,41 @@ export default function ResultsPage() {
                  </p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead onClick={() => handleSort('run_name')} className="cursor-pointer">Run <ArrowUpDown className="w-3 h-3 inline" /></TableHead>
-                    <TableHead onClick={() => handleSort('projectName')} className="cursor-pointer">Project <ArrowUpDown className="w-3 h-3 inline" /></TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Submitted By</TableHead>
-                    <TableHead onClick={() => handleSort('created_date')} className="cursor-pointer">Date <ArrowUpDown className="w-3 h-3 inline" /></TableHead>
-                    <TableHead>Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {processedRuns.map(run => (
-                    <TableRow key={run.id} className="hover:bg-gray-50">
-                      <TableCell className="font-medium">{run.run_name}</TableCell>
-                      <TableCell>{run.projectName}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`${statusConfig[run.status]?.color || ''} border`}>
-                          {statusConfig[run.status]?.icon}
-                          <span className="ml-1.5">{statusConfig[run.status]?.label || 'Unknown'}</span>
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-gray-600">{run.created_by.split('@')[0]}</TableCell>
-                      <TableCell className="text-gray-600">{new Date(run.created_date).toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => navigate(createPageUrl(`TrainingStatus?runId=${run.id}`))}>
-                          View Details <ChevronRight className="w-4 h-4 ml-1" />
-                        </Button>
-                      </TableCell>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[720px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead onClick={() => handleSort('run_name')} className="cursor-pointer">Run <ArrowUpDown className="w-3 h-3 inline" /></TableHead>
+                      <TableHead onClick={() => handleSort('projectName')} className="cursor-pointer">Project <ArrowUpDown className="w-3 h-3 inline" /></TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Submitted By</TableHead>
+                      <TableHead onClick={() => handleSort('created_date')} className="cursor-pointer">Date <ArrowUpDown className="w-3 h-3 inline" /></TableHead>
+                      <TableHead>Action</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {processedRuns.map(run => (
+                      <TableRow key={run.id} className="hover:bg-gray-50">
+                        <TableCell className="font-medium">{run.run_name}</TableCell>
+                        <TableCell>{run.projectName}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`${statusConfig[run.status]?.color || ''} border`}>
+                            {statusConfig[run.status]?.icon}
+                            <span className="ml-1.5">{statusConfig[run.status]?.label || 'Unknown'}</span>
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-gray-600">{run.created_by.split('@')[0]}</TableCell>
+                        <TableCell className="text-gray-600">{new Date(run.created_date).toLocaleString()}</TableCell>
+                        <TableCell>
+                          <Button variant="outline" size="sm" onClick={() => navigate(createPageUrl(`TrainingStatus?runId=${run.id}`))}>
+                            View Details <ChevronRight className="w-4 h-4 ml-1" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>

@@ -225,7 +225,7 @@ export default function SettingsPage() {
     <div className="min-h-screen p-6 md:p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center mb-8">
           <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
             <SettingsIcon className="w-6 h-6 text-white" />
           </div>
@@ -236,7 +236,7 @@ export default function SettingsPage() {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="grid w-full max-w-md grid-cols-2 sm:grid-cols-3">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <UserIcon className="w-4 h-4" />
               Profile
@@ -266,7 +266,7 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="flex items-center gap-6">
+                <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
                   <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
                     <UserIcon className="w-8 h-8 text-blue-600" />
                   </div>
@@ -324,13 +324,13 @@ export default function SettingsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <Label>Theme</Label>
                       <p className="text-sm text-gray-600">Choose your preferred theme</p>
                     </div>
                     <Select value={userSettings.theme} onValueChange={(value) => handleSettingChange('theme', null, value)}>
-                      <SelectTrigger className="w-32">
+                      <SelectTrigger className="w-full sm:w-32">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -352,7 +352,7 @@ export default function SettingsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <Label>Email Notifications</Label>
                       <p className="text-sm text-gray-600">Receive notifications via email</p>
@@ -362,7 +362,7 @@ export default function SettingsPage() {
                       onCheckedChange={(checked) => handleSettingChange('notifications', 'email', checked)}
                     />
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <Label>Training Complete</Label>
                       <p className="text-sm text-gray-600">Notify when training finishes</p>
@@ -372,7 +372,7 @@ export default function SettingsPage() {
                       onCheckedChange={(checked) => handleSettingChange('notifications', 'training_complete', checked)}
                     />
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <Label>Weekly Summary</Label>
                       <p className="text-sm text-gray-600">Weekly progress reports</p>
@@ -423,7 +423,7 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <Label>Auto-save</Label>
                         <p className="text-sm text-gray-600">Save work automatically</p>
@@ -450,7 +450,7 @@ export default function SettingsPage() {
             <TabsContent value="team" className="space-y-6">
               <Card className="glass-effect border-0 shadow-lg">
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <Shield className="w-5 h-5 text-red-600" />
@@ -462,7 +462,7 @@ export default function SettingsPage() {
                     </div>
                     <Dialog open={showAddUserDialog} onOpenChange={setShowAddUserDialog}>
                       <DialogTrigger asChild>
-                        <Button className="bg-blue-600 hover:bg-blue-700">
+                        <Button className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
                           <Plus className="w-4 h-4 mr-2" />
                           Add User
                         </Button>
@@ -563,81 +563,83 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Team Members Table */}
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Last Login</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {teamMembers.map((member) => (
-                        <TableRow key={member.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
-                                <UserIcon className="w-4 h-4 text-blue-600" />
-                              </div>
-                              <div>
-                                <p className="font-medium text-gray-900">{member.full_name}</p>
-                                <p className="text-sm text-gray-600">{member.email}</p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={`${roleConfig[member.role]?.color} border-0`}>
-                              {roleConfig[member.role]?.icon}
-                              <span className="ml-1">{roleConfig[member.role]?.label}</span>
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={member.status === 'active' ? 'default' : 'secondary'}>
-                              {member.status === 'active' ? (
-                                <CheckCircle className="w-3 h-3 mr-1" />
-                              ) : (
-                                <AlertTriangle className="w-3 h-3 mr-1" />
-                              )}
-                              {member.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-gray-600">
-                            {member.last_login ? new Date(member.last_login).toLocaleDateString() : 'Never'}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Select 
-                                value={member.role} 
-                                onValueChange={(value) => handleUpdateUserRole(member.id, value)}
-                                disabled={member.id === currentUser.id}
-                              >
-                                <SelectTrigger className="w-32">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="viewer">Viewer</SelectItem>
-                                  <SelectItem value="annotator">Annotator</SelectItem>
-                                  <SelectItem value="admin">Admin</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {member.id !== currentUser.id && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleRemoveUser(member.id)}
-                                  className="text-red-600 hover:text-red-700"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[720px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>User</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Last Login</TableHead>
+                          <TableHead>Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {teamMembers.map((member) => (
+                          <TableRow key={member.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
+                                  <UserIcon className="w-4 h-4 text-blue-600" />
+                                </div>
+                                <div>
+                                  <p className="font-medium text-gray-900">{member.full_name}</p>
+                                  <p className="text-sm text-gray-600">{member.email}</p>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={`${roleConfig[member.role]?.color} border-0`}>
+                                {roleConfig[member.role]?.icon}
+                                <span className="ml-1">{roleConfig[member.role]?.label}</span>
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={member.status === 'active' ? 'default' : 'secondary'}>
+                                {member.status === 'active' ? (
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                ) : (
+                                  <AlertTriangle className="w-3 h-3 mr-1" />
+                                )}
+                                {member.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              {member.last_login ? new Date(member.last_login).toLocaleDateString() : 'Never'}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Select 
+                                  value={member.role} 
+                                  onValueChange={(value) => handleUpdateUserRole(member.id, value)}
+                                  disabled={member.id === currentUser.id}
+                                >
+                                  <SelectTrigger className="w-32">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="viewer">Viewer</SelectItem>
+                                    <SelectItem value="annotator">Annotator</SelectItem>
+                                    <SelectItem value="admin">Admin</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {member.id !== currentUser.id && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleRemoveUser(member.id)}
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>

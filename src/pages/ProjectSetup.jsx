@@ -289,7 +289,7 @@ export default function ProjectSetupPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6 md:p-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center mb-8">
           <Button
             variant="outline"
             size="icon"
@@ -308,7 +308,7 @@ export default function ProjectSetupPage() {
 
         {/* Progress Steps */}
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             {[1, 2, 3].map((step) => (
               <div key={step} className="flex items-center">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm border-2 transition-all duration-300 ${
@@ -321,14 +321,14 @@ export default function ProjectSetupPage() {
                   {currentStep > step ? <CheckCircle className="w-5 h-5" /> : step}
                 </div>
                 {step < 3 && (
-                  <div className={`h-0.5 w-24 md:w-32 mx-4 transition-all duration-300 ${
+                  <div className={`h-0.5 w-12 sm:w-20 md:w-32 mx-4 transition-all duration-300 ${
                     currentStep > step ? 'bg-blue-600' : 'bg-gray-300'
                   }`} />
                 )}
               </div>
             ))}
           </div>
-          <div className="flex justify-between text-sm text-gray-600">
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-between text-sm text-gray-600">
             <span>Choose Method</span>
             <span>Upload SOP</span>
             <span>Generate Steps</span>
@@ -539,7 +539,7 @@ export default function ProjectSetupPage() {
                       <p className="text-gray-600 mb-4">
                         AI is analyzing your SOP and creating structured annotation steps
                       </p>
-                      <Progress value={generationProgress} className="w-64 mx-auto mb-6" />
+                      <Progress value={generationProgress} className="w-full max-w-xs mx-auto mb-6" />
                     </div>
 
                     {/* Live Log */}

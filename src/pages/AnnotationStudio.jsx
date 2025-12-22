@@ -781,7 +781,7 @@ export default function AnnotationStudioPage() {
     <Tabs value={activeTab} onValueChange={setActiveTab} className="h-screen w-full flex flex-col bg-gray-50">
       {/* Full-width Header */}
       <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 w-full">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-4">
             <Button
               variant="outline"
@@ -795,7 +795,7 @@ export default function AnnotationStudioPage() {
               <h1 className="text-xl font-bold text-gray-900">
                 {project?.name} - Annotation Studio
               </h1>
-              <div className="flex items-center gap-4 mt-1">
+              <div className="flex flex-wrap items-center gap-3 mt-1">
                  <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" className="h-7 w-7" onClick={goToPrevStep} disabled={currentStepIndex === 0}>
                         <ChevronLeft className="w-4 h-4" />
@@ -825,8 +825,8 @@ export default function AnnotationStudioPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-8">
-             <TabsList className="grid grid-cols-4 max-w-xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-8">
+             <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-xl">
                 <TabsTrigger value="canvas" className="flex items-center gap-2">
                   <PenTool className="w-4 h-4" />
                   Canvas
@@ -844,7 +844,7 @@ export default function AnnotationStudioPage() {
                   Insights
                 </TabsTrigger>
             </TabsList>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {project?.sop_file_url && (
                 <>
                   <Button
@@ -965,7 +965,7 @@ export default function AnnotationStudioPage() {
                 animate={{ width: 400, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ duration: 0.3 }}
-                className="w-96 border-l border-gray-200 bg-white overflow-hidden flex flex-col"
+                className="w-96 max-w-full border-l border-gray-200 bg-white overflow-hidden flex flex-col"
               >
                 <AnnotationChat
                   messages={chatMessages}

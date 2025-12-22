@@ -183,6 +183,7 @@ const DATASET_EXPORT_CONCURRENCY = Math.max(
     1,
     Number(import.meta.env.VITE_DATASET_EXPORT_CONCURRENCY || import.meta.env.VITE_UPLOAD_CONCURRENCY) || 4
 );
+const DATASET_SUMMARY_TIMEOUT_MS = 15000;
 
 const runWithConcurrency = async (items, limit, worker) => {
     if (!items.length) return;
@@ -195,6 +196,14 @@ const runWithConcurrency = async (items, limit, worker) => {
         }
     });
     await Promise.all(runners);
+};
+
+const withTimeout = (promise, ms, message) => {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 };
 
 export default function StartTrainingDialog({ open, onOpenChange, onSubmit, stepId, stepTitle, existingRuns, stepData, trainerOffline }) {
@@ -556,7 +565,11 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                 activeStep = freshStep;
             }
             const classNames = getClassNames(activeStep);
-            const stepImages = await listStepImages(stepId);
+            const stepImages = await withTimeout(
+                listStepImages(stepId),
+                DATASET_SUMMARY_TIMEOUT_MS,
+                "Dataset summary request timed out."
+            );
             const splits = { train: 0, val: 0, test: 0 };
             let labeled = 0;
             const labelTypes = { boxes: 0, segments: 0 };

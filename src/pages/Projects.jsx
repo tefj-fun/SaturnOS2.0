@@ -339,7 +339,7 @@ export default function ProjectsPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center flex-wrap">
             {/* Search */}
-            <div className="flex-1 relative min-w-[250px]">
+            <div className="flex-1 relative min-w-0 w-full sm:min-w-[250px]">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
                 placeholder="Search projects by name or description..."
@@ -362,10 +362,10 @@ export default function ProjectsPage() {
             </div>
 
             {/* Status Filter */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Filter className="w-4 h-4 text-gray-500" />
               <Select value={statusFilter} onValueChange={setStatusFilter} disabled={isDeleting}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Filter by status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -380,10 +380,10 @@ export default function ProjectsPage() {
             </div>
 
             {/* Sort Dropdown */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <ArrowUpDown className="w-4 h-4 text-gray-500" />
               <Select value={sortOrder} onValueChange={setSortOrder} disabled={isDeleting}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="w-full sm:w-48">
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
                 <SelectContent>
@@ -398,7 +398,7 @@ export default function ProjectsPage() {
 
             {/* Clear Filters */}
             {(searchQuery || statusFilter !== "all" || sortOrder !== "newest") && (
-              <Button variant="outline" onClick={clearFilters} size="sm" disabled={isDeleting}>
+              <Button variant="outline" onClick={clearFilters} size="sm" className="w-full sm:w-auto" disabled={isDeleting}>
                 Clear Filters
               </Button>
             )}
@@ -407,10 +407,10 @@ export default function ProjectsPage() {
           {/* Bulk Actions */}
           {selectedProjects.size > 0 && (
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Badge variant="secondary">
-                    {selectedProjects.size} selected
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <Badge variant="secondary">
+                  {selectedProjects.size} selected
                   </Badge>
                   <Button
                     variant="outline"
@@ -439,7 +439,7 @@ export default function ProjectsPage() {
         {showBulkDeleteAlert && (
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
-            <AlertDescription className="flex items-center justify-between">
+            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span>
                 Are you sure you want to delete {selectedProjects.size} selected project(s)?
                 This action cannot be undone and will also delete all associated steps and data.
@@ -448,7 +448,7 @@ export default function ProjectsPage() {
                   Note: Large deletions may take a few moments to complete.
                 </small>
               </span>
-              <div className="flex gap-2 ml-4">
+              <div className="flex gap-2 sm:ml-4">
                 <Button
                   variant="destructive"
                   size="sm"
@@ -469,7 +469,7 @@ export default function ProjectsPage() {
         )}
 
         {/* Results Summary */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <p className="text-sm text-gray-600">
             Showing {filteredProjects.length} of {projects.length} projects
             {searchQuery && (

@@ -109,7 +109,7 @@ export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
   const locationRef = useRef(location.pathname);
-  const { user, profile, authChecked } = useAuth();
+  const { user, profile, authChecked, setProfile } = useAuth();
   const [authError, setAuthError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
   const [authMode, setAuthMode] = useState("signin");

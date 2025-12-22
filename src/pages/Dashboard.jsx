@@ -212,7 +212,7 @@ export default function DashboardPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex items-center justify-between">
+            className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -222,7 +222,7 @@ export default function DashboardPage() {
                 Here&apos;s what&apos;s happening with your annotation projects
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 self-start md:self-auto">
               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
                 <Sparkles className="w-3 h-3 mr-1" />
                 {user?.role === 'admin' ? 'Administrator' : 'User'}
@@ -453,7 +453,7 @@ export default function DashboardPage() {
                     const progress = getProjectProgress(project);
 
                     return (
-                      <div key={project.id} className="flex items-center justify-between px-4 py-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                      <div key={project.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
                               <h4 className="font-semibold text-gray-900">{project.name}</h4>

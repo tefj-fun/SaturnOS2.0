@@ -452,14 +452,14 @@ export default function TrainingStatusPage() {
 
           <div className="space-y-4">
             <div>
-              <div className="flex justify-between text-sm text-gray-600 mb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-600 mb-2">
                 <span>Training Progress</span>
                 <span>{progressLabel}</span>
               </div>
               <Progress value={progress} className="h-3" />
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-center">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
               <div>
                 <p className="text-2xl font-bold text-blue-600">{currentEpochDisplay}</p>
                 <p className="text-sm text-gray-600">Current Epoch</p>
@@ -474,7 +474,7 @@ export default function TrainingStatusPage() {
       </Card>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <MetricCard
           icon={<Target />}
           label="mAP"
@@ -583,34 +583,34 @@ export default function TrainingStatusPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <span className="text-gray-600">Base Model:</span>
             <Badge variant="outline">{trainingRun.base_model}</Badge>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <span className="text-gray-600">Batch Size:</span>
             <span className="font-medium">{trainingRun.configuration?.batchSize || 16}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <span className="text-gray-600">Image Size:</span>
             <span className="font-medium">{trainingRun.configuration?.imgSize || 640}px</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <span className="text-gray-600">Optimizer:</span>
             <span className="font-medium">{trainingRun.configuration?.optimizer || 'Adam'}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <span className="text-gray-600">Augmentation:</span>
             <span className="font-medium">{formatAugmentationSummary(trainingRun.configuration?.augmentation)}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
             <span className="text-gray-600">Device:</span>
             <span className="font-medium">
               {formatDeviceLabel(trainingRun.configuration?.device, trainingRun.configuration?.compute)}
             </span>
           </div>
           {dataYaml && (
-            <div className="flex justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
               <span className="text-gray-600">Dataset YAML:</span>
               <span className="font-medium text-right truncate" title={dataYaml}>
                 {dataYaml}
@@ -618,13 +618,13 @@ export default function TrainingStatusPage() {
             </div>
           )}
           {trainingRun.started_at && (
-            <div className="flex justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <span className="text-gray-600">Started:</span>
               <span className="font-medium">{new Date(trainingRun.started_at).toLocaleString()}</span>
             </div>
           )}
           {trainingRun.completed_at && (
-            <div className="flex justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
               <span className="text-gray-600">Completed:</span>
               <span className="font-medium">{new Date(trainingRun.completed_at).toLocaleString()}</span>
             </div>
@@ -707,7 +707,7 @@ export default function TrainingStatusPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
       <div className="max-w-7xl mx-auto"> {/* Increased max-width */}
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div className="flex items-center gap-4">
             <Button
               variant="outline"
@@ -762,7 +762,7 @@ export default function TrainingStatusPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
             <Badge
               className={`px-4 py-2 text-sm font-semibold capitalize ${
                 isCompleted
@@ -784,7 +784,7 @@ export default function TrainingStatusPage() {
             </Badge>
 
             {isCompleted && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {trainingRun.trained_model_url ? (
                   <Button asChild variant="outline" size="sm" className="glass-effect">
                     <a href={trainingRun.trained_model_url} target="_blank" rel="noopener noreferrer">
@@ -805,7 +805,7 @@ export default function TrainingStatusPage() {
 
         <Card className="glass-effect border-0 shadow-lg mb-6">
           <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs text-gray-500">Current phase</p>
                 <p className="text-sm font-semibold text-gray-900">{currentPhaseLabel}</p>
@@ -821,7 +821,7 @@ export default function TrainingStatusPage() {
         {/* Content Tabs for Completed Models */}
         {isCompleted && hasResults ? (
           <Tabs defaultValue="results" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 md:grid-cols-3 lg:grid-cols-3">
+            <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
               <TabsTrigger value="results">Validation Results</TabsTrigger>
               <TabsTrigger value="training">Training Progress</TabsTrigger>
               <TabsTrigger value="logs">Training Logs</TabsTrigger>
@@ -868,7 +868,7 @@ export default function TrainingStatusPage() {
                     {artifacts.length > 0 ? (
                       <div className="space-y-2">
                         {artifacts.map((artifact) => (
-                          <div key={artifact.path || artifact.name} className="flex items-center justify-between rounded border border-gray-200 p-2">
+                        <div key={artifact.path || artifact.name} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded border border-gray-200 p-2">
                             <span className="text-sm text-gray-700">{artifact.name}</span>
                             <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">Download</a>
                           </div>
@@ -888,11 +888,11 @@ export default function TrainingStatusPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm text-gray-600">
-                    <div className="flex justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                       <span>Run Directory:</span>
                       <span className="font-medium text-gray-800">{results.run_dir || 'N/A'}</span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                       <span>Trained Model:</span>
                       {trainingRun.trained_model_url ? (
                         <a href={trainingRun.trained_model_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Download</a>
@@ -900,7 +900,7 @@ export default function TrainingStatusPage() {
                         <span className="font-medium text-gray-800">N/A</span>
                       )}
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                       <span>Worker:</span>
                       <span className="font-medium text-gray-800">{workerLabel}</span>
                     </div>

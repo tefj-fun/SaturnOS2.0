@@ -338,24 +338,26 @@ export default function StepManagementPage() {
     <div className="p-6 md:p-8 h-full overflow-y-auto">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => navigate(createPageUrl('Projects'))}
-            className="glass-effect border-0"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <div className="flex-1">
-            <h1 className="text-3xl font-bold text-gray-900">
-              Step Management
-            </h1>
-            <p className="text-gray-600">
-              {project?.name} - Review, edit, and manage your annotation steps
-            </p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate(createPageUrl('Projects'))}
+              className="glass-effect border-0"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold text-gray-900">
+                Step Management
+              </h1>
+              <p className="text-gray-600">
+                {project?.name} - Review, edit, and manage your annotation steps
+              </p>
+            </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
             <Button
               onClick={() => handleAddStepAfter(-1)} // Add at end
               variant="outline"
@@ -431,7 +433,7 @@ export default function StepManagementPage() {
         {/* Multi-select Controls */}
         {steps.length > 0 && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <Checkbox
                   checked={steps.length > 0 && selectedSteps.size === steps.length}
@@ -447,7 +449,7 @@ export default function StepManagementPage() {
               </div>
               
               {selectedSteps.size > 0 && (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -473,12 +475,12 @@ export default function StepManagementPage() {
         {showBulkDeleteAlert && (
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
-            <AlertDescription className="flex items-center justify-between">
+            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span>
                 Are you sure you want to delete {selectedSteps.size} selected step(s)? 
                 This action cannot be undone.
               </span>
-              <div className="flex gap-2 ml-4">
+              <div className="flex gap-2 sm:ml-4">
                 <Button
                   variant="destructive"
                   size="sm"
@@ -502,14 +504,14 @@ export default function StepManagementPage() {
         {showAddStep && (
           <Card className="mb-6 border-2 border-dashed border-blue-200 bg-blue-50">
             <CardHeader>
-              <CardTitle className="flex items-center justify-between">
+              <CardTitle className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-blue-800">
                   {insertAfterIndex === -1 
                     ? "Add New Step" 
                     : `Insert Step After Step ${steps[insertAfterIndex].step_number}`
                   }
                 </span>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <Button size="sm" onClick={addNewStep} className="bg-blue-600 hover:bg-blue-700">
                     <Save className="w-3 h-3 mr-1" />
                     Save
@@ -686,7 +688,7 @@ function StepCard({
                 `}
     >
       <Card className="w-full">
-        <CardHeader className="flex flex-row items-start justify-between gap-4 p-4 bg-white/50 border-b border-gray-200/80">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between p-4 bg-white/50 border-b border-gray-200/80">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {/* Multi-select checkbox */}
             {!isEditing && (
@@ -740,7 +742,7 @@ function StepCard({
           </div>
 
           {/* Right side: Actions (Save/Cancel or Edit/Delete/Toggle) */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             {isEditing ? (
               <>
                 <Button size="sm" onClick={onSaveEdit} className="bg-blue-600 hover:bg-blue-700">
@@ -867,7 +869,7 @@ function StepCard({
               
               {step.needs_clarification && (
                 <div className="mb-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs font-medium text-amber-800">
                       ⚠️ This step needs clarification
                     </p>
