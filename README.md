@@ -46,7 +46,10 @@ VITE_INVITE_USER_URL=http://localhost:8888/.netlify/functions/invite-user
 VITE_STEP_IMAGES_BUCKET=step-images
 VITE_DATASET_BUCKET=datasets
 VITE_SUPABASE_REQUIRE_AUTH=false
+VITE_BYPASS_PERMISSIONS=false
 ```
+
+Set `VITE_SUPABASE_REQUIRE_AUTH=true` to enforce auth for project creation and permission checks. Set `VITE_BYPASS_PERMISSIONS=true` to bypass project-level RBAC in local demos.
 
 Netlify functions:
 ```
@@ -108,7 +111,7 @@ npm run dev
 - `trainer_workers` - Training worker heartbeats.
 - `label_library_view` - Aggregated label analytics view.
 
-RLS is enabled on `profiles` and `project_members` with the `is_admin()` helper and a trigger to seed profiles on sign-up.
+RLS is enabled across core tables. Most app tables currently allow anon + authenticated access (`using (true)`), while `profiles` and `project_members` are protected via `is_admin()` and self-access rules (with a trigger to seed profiles on sign-up).
 
 ## Serverless helpers
 - `netlify/functions/openai.js` proxies chat completions (default model `gpt-4o-mini`) and supports JSON response mode.
@@ -119,6 +122,8 @@ RLS is enabled on `profiles` and `project_members` with the `is_admin()` helper 
 - `npm run build` - Production build.
 - `npm run preview` - Preview build output.
 - `npm run lint` - ESLint.
+- `npm run test` - Vitest watch mode.
+- `npm run test:run` - Vitest single run.
 
 ## Notes
 - Annotation state is stored in `step_images.annotations` (JSONB).
