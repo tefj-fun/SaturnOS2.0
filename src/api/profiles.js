@@ -1,9 +1,9 @@
 import { supabase } from "./supabaseClient";
 
 export async function getCurrentAuthUser() {
-  const { data, error } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
-  return data?.user || null;
+  return data?.session?.user || null;
 }
 
 export async function getProfile(userId) {

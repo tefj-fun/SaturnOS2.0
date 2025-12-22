@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/api/supabaseClient';
 import { inviteUser } from '@/api/invitations';
-import { getProfile } from '@/api/profiles';
 import {
   listProjectMembers,
   updateProjectMember,
   deleteProjectMember,
 } from '@/api/projectMembers';
 import { getPermissionsForProjectRole } from '@/api/rbac';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Dialog,
   DialogContent,
@@ -85,6 +84,7 @@ const PERMISSION_LABELS = {
 };
 
 export default function ProjectMembersDialog({ open, onOpenChange, project }) {
+  const { user, profile } = useAuth();
   const [members, setMembers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -93,26 +93,17 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
   const [customPermissions, setCustomPermissions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const loadCurrentUser = useCallback(async () => {
-    try {
-      const { data } = await supabase.auth.getUser();
-      const user = data?.user;
-      if (!user) return;
-      let profile = null;
-      try {
-        profile = await getProfile(user.id);
-      } catch {
-        profile = null;
-      }
-      setCurrentUser({
-        id: user.id,
-        email: user.email,
-        role: profile?.role || null
-      });
-    } catch (error) {
-      console.error('Error loading current user:', error);
+  useEffect(() => {
+    if (!user) {
+      setCurrentUser(null);
+      return;
     }
-  }, []);
+    setCurrentUser({
+      id: user.id,
+      email: user.email,
+      role: profile?.role || null
+    });
+  }, [profile?.role, user]);
 
   const loadProjectMembers = useCallback(async () => {
     if (!project?.id) return;
@@ -127,9 +118,8 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
   useEffect(() => {
     if (open && project) {
       loadProjectMembers();
-      loadCurrentUser();
     }
-  }, [open, project, loadProjectMembers, loadCurrentUser]);
+  }, [open, project, loadProjectMembers]);
 
   const handleInviteMember = async () => {
     if (!inviteEmail || !project) return;

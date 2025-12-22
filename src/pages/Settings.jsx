@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { inviteUser } from '@/api/invitations';
 import {
-  getCurrentAuthUser,
-  getProfile,
   listProfiles,
   updateProfile,
   upsertProfile,
 } from '@/api/profiles';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -75,6 +74,7 @@ const roleConfig = {
 };
 
 export default function SettingsPage() {
+  const { user, profile, authChecked, loadProfile, setProfile } = useAuth();
   const [currentUser, setCurrentUser] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -99,18 +99,19 @@ export default function SettingsPage() {
 
   const loadCurrentUser = useCallback(async () => {
     try {
-      const user = await getCurrentAuthUser();
-      if (!user) return;
+      if (!authChecked || !user) return;
 
-      let profile = null;
-      try {
-        profile = await getProfile(user.id);
-      } catch {
-        profile = null;
+      let resolvedProfile = profile;
+      if (!resolvedProfile) {
+        try {
+          resolvedProfile = await loadProfile(user.id, { force: true });
+        } catch {
+          resolvedProfile = null;
+        }
       }
 
-      if (!profile) {
-        profile = await upsertProfile({
+      if (!resolvedProfile) {
+        resolvedProfile = await upsertProfile({
           id: user.id,
           email: user.email,
           full_name: user.user_metadata?.full_name || user.email,
@@ -119,19 +120,20 @@ export default function SettingsPage() {
           preferences: DEFAULT_PREFERENCES,
           last_login: new Date().toISOString()
         });
+        setProfile(resolvedProfile);
       } else {
         await updateProfile(user.id, { last_login: new Date().toISOString() });
       }
 
-      setCurrentUser(profile);
-      setUserSettings(profile.preferences || DEFAULT_PREFERENCES);
-      if (profile.role === 'admin') {
+      setCurrentUser(resolvedProfile);
+      setUserSettings(resolvedProfile?.preferences || DEFAULT_PREFERENCES);
+      if (resolvedProfile?.role === 'admin') {
         await loadTeamMembers();
       }
     } catch (error) {
       console.error('Error loading user:', error);
     }
-  }, [loadTeamMembers]);
+  }, [authChecked, loadProfile, loadTeamMembers, profile, setProfile, user]);
 
   useEffect(() => {
     loadCurrentUser();
@@ -146,6 +148,7 @@ export default function SettingsPage() {
         preferences: userSettings
       });
       setCurrentUser(updated);
+      setProfile(updated);
     } catch (error) {
       console.error('Error saving profile:', error);
     }

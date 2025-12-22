@@ -2,8 +2,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { supabase } from "@/api/supabaseClient";
 import { listProjects, listAllSteps, listTrainingRuns } from "@/api/db";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ import {
 import { motion } from "framer-motion";
 
 export default function DashboardPage() {
+  const { user: authUser, profile } = useAuth();
   const [user, setUser] = useState(null);
   const [projects, setProjects] = useState([]);
   const [allSteps, setAllSteps] = useState([]);
@@ -48,14 +49,11 @@ export default function DashboardPage() {
 
   const loadDashboardData = useCallback(async () => {
     try {
-      const [{ data: authUser }, projectsData, stepsData, runsData] = await Promise.all([
-        supabase.auth.getUser(),
+      const [projectsData, stepsData, runsData] = await Promise.all([
         listProjects(),
         listAllSteps(),
         listTrainingRuns(10)
       ]);
-
-      setUser(authUser?.user ? { full_name: authUser.user.email, role: "admin" } : { full_name: "Local User", role: "admin" });
       setProjects(projectsData);
       setAllSteps(stepsData);
 
@@ -123,6 +121,17 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  useEffect(() => {
+    if (authUser) {
+      setUser({
+        full_name: profile?.full_name || authUser.user_metadata?.full_name || authUser.email,
+        role: profile?.role || "admin"
+      });
+    } else {
+      setUser({ full_name: "Local User", role: "admin" });
+    }
+  }, [authUser, profile?.full_name, profile?.role]);
 
   const generateRecentActivity = (projects, runs) => {
     const activities = [];

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/api/supabaseClient';
+import { useAuth } from '@/contexts/AuthContext';
 import { getPermissionsForProjectRole } from '@/api/rbac';
 
 /**
@@ -15,24 +16,24 @@ export default function PermissionGate({
   fallback = null, 
   children 
 }) {
+  const { user, profile, authChecked, profileLoading } = useAuth();
   const [hasPermission, setHasPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkPermission = useCallback(async () => {
     try {
-      const { data } = await supabase.auth.getUser();
-      const currentUser = data?.user;
-      if (!currentUser) {
+      if (!authChecked) {
+        return;
+      }
+      setIsLoading(true);
+      if (!user) {
         setHasPermission(false);
         setIsLoading(false);
         return;
       }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", currentUser.id)
-        .single();
+      if (profileLoading) {
+        return;
+      }
 
       if (profile?.role === "admin") {
         setHasPermission(true);
@@ -50,7 +51,7 @@ export default function PermissionGate({
         .from("project_members")
         .select("permissions, role")
         .eq("project_id", projectId)
-        .eq("user_id", currentUser.id)
+        .eq("user_id", user.id)
         .single();
 
       const permissions = member?.permissions?.length
@@ -68,7 +69,7 @@ export default function PermissionGate({
       setHasPermission(false);
       setIsLoading(false);
     }
-  }, [projectId, permission]);
+  }, [authChecked, profile?.role, profileLoading, projectId, permission, user]);
 
   useEffect(() => {
     checkPermission();
@@ -85,26 +86,26 @@ export default function PermissionGate({
  * useProjectPermissions - Hook to check permissions programmatically
  */
 export function useProjectPermissions(projectId) {
+  const { user, profile, authChecked, profileLoading } = useAuth();
   const [permissions, setPermissions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [userRole, setUserRole] = useState(null);
 
   const loadUserPermissions = useCallback(async () => {
     try {
-      const { data } = await supabase.auth.getUser();
-      const currentUser = data?.user;
-      if (!currentUser) {
+      if (!authChecked) {
+        return;
+      }
+      setIsLoading(true);
+      if (!user) {
         setUserRole(null);
         setPermissions([]);
         setIsLoading(false);
         return;
       }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", currentUser.id)
-        .single();
+      if (profileLoading) {
+        return;
+      }
 
       if (profile?.role === "admin") {
         setUserRole("admin");
@@ -124,7 +125,7 @@ export function useProjectPermissions(projectId) {
         .from("project_members")
         .select("role, permissions")
         .eq("project_id", projectId)
-        .eq("user_id", currentUser.id)
+        .eq("user_id", user.id)
         .single();
 
       const derivedPermissions = member?.permissions?.length
@@ -140,7 +141,7 @@ export function useProjectPermissions(projectId) {
       setPermissions([]);
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [authChecked, profile?.role, profileLoading, projectId, user]);
 
   useEffect(() => {
     loadUserPermissions();

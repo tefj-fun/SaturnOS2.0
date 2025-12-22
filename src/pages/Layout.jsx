@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   FolderPlus,
   Spline,
@@ -108,9 +109,7 @@ export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
   const locationRef = useRef(location.pathname);
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const { user, profile, authChecked } = useAuth();
   const [authError, setAuthError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
   const [authMode, setAuthMode] = useState("signin");
@@ -134,78 +133,42 @@ export default function Layout({ children, currentPageName }) {
   }, [location.pathname]);
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        if (data?.user) {
-          setUser(data.user);
-        } else if (!user) {
-          setUser(null);
-        }
-      } catch {
-        // If there is no session, keep user null and continue to the auth screen
-        if (!user) {
-          setUser(null);
-        }
-      } finally {
-        setAuthChecked(true);
-      }
-    };
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      if (!session) {
-        setProfile(null);
-        lastRoleRef.current = null;
-        if (roleStorageKeyRef.current) {
-          localStorage.removeItem(roleStorageKeyRef.current);
-        } else {
-          localStorage.removeItem("saturnos_role");
-        }
-        roleStorageKeyRef.current = null;
-        setCachedRole(null);
-      }
-      setAuthChecked(true);
-      if (!session && locationRef.current !== "/") {
-        navigate("/", { replace: true });
-        setEmail("");
-        setPassword("");
-        setFirstName("");
-        setLastName("");
-        setAuthMode("signin");
-        setConfirmPassword("");
-      }
-    });
-
-    init();
-    return () => listener?.subscription?.unsubscribe();
-  }, [navigate, user]);
+    if (!authChecked) {
+      return;
+    }
+    if (user) {
+      return;
+    }
+    lastRoleRef.current = null;
+    if (roleStorageKeyRef.current) {
+      localStorage.removeItem(roleStorageKeyRef.current);
+    } else {
+      localStorage.removeItem("saturnos_role");
+    }
+    roleStorageKeyRef.current = null;
+    setCachedRole(null);
+    if (locationRef.current !== "/") {
+      navigate("/", { replace: true });
+      setEmail("");
+      setPassword("");
+      setFirstName("");
+      setLastName("");
+      setAuthMode("signin");
+      setConfirmPassword("");
+    }
+  }, [authChecked, navigate, user]);
 
   useEffect(() => {
-    const loadProfile = async () => {
-      if (!user?.id) {
-        setProfile(null);
-        return;
-      }
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("role, preferences")
-        .eq("id", user.id)
-        .single();
-      if (!error) {
-        setProfile(data);
-        if (data?.role) {
-          lastRoleRef.current = data.role;
-          const key = `saturnos_role_${user.id}`;
-          roleStorageKeyRef.current = key;
-          localStorage.setItem(key, data.role);
-          localStorage.setItem("saturnos_role", data.role);
-          setCachedRole(data.role);
-        }
-      }
-    };
-    loadProfile();
-  }, [user]);
+    if (!user?.id || !profile?.role) {
+      return;
+    }
+    lastRoleRef.current = profile.role;
+    const key = `saturnos_role_${user.id}`;
+    roleStorageKeyRef.current = key;
+    localStorage.setItem(key, profile.role);
+    localStorage.setItem("saturnos_role", profile.role);
+    setCachedRole(profile.role);
+  }, [profile?.role, user?.id]);
 
   useEffect(() => {
     if (!user?.id) {

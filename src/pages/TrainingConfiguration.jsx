@@ -443,7 +443,7 @@ export default function TrainingConfigurationPage() {
     return (
         <div className="h-full flex flex-col">
             <div className="p-6 w-full">
-                <div className="max-w-7xl mx-auto">
+                <div className="w-full max-w-none">
                     <div className="flex items-center justify-between mb-8">
                         <div className="flex items-center gap-4">
                             <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0">
@@ -579,7 +579,7 @@ export default function TrainingConfigurationPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 pt-0">
-                <div className="max-w-7xl mx-auto">
+                <div className="w-full max-w-none">
                     {selectedStep ? (
                         <div className="space-y-8">
                             <div className="grid gap-6 lg:grid-cols-3">

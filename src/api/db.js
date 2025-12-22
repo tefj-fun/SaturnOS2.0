@@ -22,8 +22,8 @@ export async function getProjectById(id) {
 }
 
 export async function createProject(projectData) {
-  const { data: authData } = await supabase.auth.getUser();
-  const currentUser = authData?.user;
+  const { data: authData } = await supabase.auth.getSession();
+  const currentUser = authData?.session?.user;
   const requireAuth = import.meta.env.VITE_SUPABASE_REQUIRE_AUTH === "true";
   if (!currentUser && requireAuth) {
     throw new Error("Sign in required to create a project.");
