@@ -77,6 +77,7 @@ export default function AnnotationStudioPage() {
   const [showStepsPopup, setShowStepsPopup] = useState(false);
   const [brushSize, setBrushSize] = useState(10);
   const canvasRef = useRef(null);
+  const stepImagesRequestIdRef = useRef(0);
   const initialStepAppliedRef = useRef(false);
   const initialImageAppliedRef = useRef(false);
   const classPromptedStepsRef = useRef(new Set());
@@ -264,6 +265,7 @@ export default function AnnotationStudioPage() {
 
   const loadStepImages = useCallback(async (options = {}) => {
     if (!currentStep) return;
+    const requestId = ++stepImagesRequestIdRef.current;
     const { preserveIndex = false, resetLoading = true } = options;
     if (resetLoading) {
       setHasLoadedImages(false);
@@ -271,59 +273,98 @@ export default function AnnotationStudioPage() {
     }
     try {
       const images = await listStepImages(currentStep.id);
-      const signedImages = await Promise.all(
-        images.map(async (image) => {
-          const baseUrl = image.image_url || image.display_url || image.thumbnail_url;
-          let bucket = STEP_IMAGES_BUCKET;
-          let path = getStoragePathFromUrl(baseUrl, STEP_IMAGES_BUCKET);
-          if (!path) {
-            bucket = DATASET_BUCKET;
-            path = getStoragePathFromUrl(baseUrl, DATASET_BUCKET);
-          }
-          if (!path) return image;
+      if (stepImagesRequestIdRef.current !== requestId) return;
 
-          const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
-            createSignedImageUrl(bucket, path, {
-              expiresIn: 3600,
-              transform: { width: 300, height: 300, resize: "cover" },
-            }),
-            createSignedImageUrl(bucket, path, {
-              expiresIn: 3600,
-              transform: { width: 1200, resize: "contain" },
-            }),
-            createSignedImageUrl(bucket, path, { expiresIn: 3600 }),
-          ]);
+      const resolvedImages = images.map((image) => {
+        const baseUrl = image.image_url || image.display_url || image.thumbnail_url;
+        let bucket = STEP_IMAGES_BUCKET;
+        let path = getStoragePathFromUrl(baseUrl, STEP_IMAGES_BUCKET);
+        if (!path) {
+          bucket = DATASET_BUCKET;
+          path = getStoragePathFromUrl(baseUrl, DATASET_BUCKET);
+        }
+        return { image, bucket, path };
+      });
 
-          return {
-            ...image,
-            storage_path: path,
-            thumbnail_url: thumbnailUrl || image.thumbnail_url,
-            display_url: displayUrl || image.display_url,
-            image_url: fullUrl || image.image_url,
-          };
-        })
+      const seedImages = resolvedImages.map(({ image, path }) =>
+        path ? { ...image, storage_path: path } : image
       );
 
-      setStepImages(signedImages);
-      if (preserveIndex) {
-        setCurrentImageIndex(prevIndex => {
-          if (!signedImages.length) return 0;
-          return Math.min(prevIndex, signedImages.length - 1);
-        });
-      } else {
-        setCurrentImageIndex(0);
-      }
+      setStepImages(seedImages);
+      const initialIndex = preserveIndex
+        ? Math.min(currentImageIndex, Math.max(seedImages.length - 1, 0))
+        : 0;
+      setCurrentImageIndex(initialIndex);
       setHasLoadedImages(true);
-      if (!signedImages.length) {
+
+      if (!seedImages.length) {
+        setIsInitialImageReady(true);
+        return;
+      }
+
+      const updateImageById = (imageId, updates) => {
+        if (stepImagesRequestIdRef.current !== requestId) return;
+        setStepImages((prev) => {
+          if (stepImagesRequestIdRef.current !== requestId) return prev;
+          return prev.map((item) => (item.id === imageId ? { ...item, ...updates } : item));
+        });
+      };
+
+      const signImage = async ({ image, bucket, path }) => {
+        if (!path) return null;
+        const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
+          createSignedImageUrl(bucket, path, {
+            expiresIn: 3600,
+            transform: { width: 300, height: 300, resize: "cover" },
+          }),
+          createSignedImageUrl(bucket, path, {
+            expiresIn: 3600,
+            transform: { width: 1200, resize: "contain" },
+          }),
+          createSignedImageUrl(bucket, path, { expiresIn: 3600 }),
+        ]);
+
+        return {
+          storage_path: path,
+          thumbnail_url: thumbnailUrl || image.thumbnail_url,
+          display_url: displayUrl || image.display_url,
+          image_url: fullUrl || image.image_url,
+        };
+      };
+
+      const primaryEntry = resolvedImages[initialIndex];
+      if (primaryEntry?.path) {
+        try {
+          const signed = await signImage(primaryEntry);
+          if (signed) {
+            updateImageById(primaryEntry.image.id, signed);
+          }
+        } catch (error) {
+          console.error("Error loading primary step image:", error);
+          setIsInitialImageReady(true);
+        }
+      } else {
         setIsInitialImageReady(true);
       }
+
+      resolvedImages.forEach((entry, index) => {
+        if (!entry.path || index === initialIndex) return;
+        signImage(entry)
+          .then((signed) => {
+            if (!signed) return;
+            updateImageById(entry.image.id, signed);
+          })
+          .catch((error) => {
+            console.error("Error loading step image:", error);
+          });
+      });
     } catch (error) {
       console.error("Error loading step images:", error);
       setStepImages([]);
       setHasLoadedImages(true);
       setIsInitialImageReady(true);
     }
-  }, [currentStep, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
+  }, [currentStep, currentImageIndex, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
 
   useEffect(() => {
     const imageUrl = stepImages[currentImageIndex]?.image_url;

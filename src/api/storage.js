@@ -1,6 +1,9 @@
 import { supabase } from "./supabaseClient";
 
 const DEFAULT_BUCKET = "sops";
+const SIGNED_URL_CONCURRENCY = 6;
+const SIGNED_URL_CACHE_BUFFER_MS = 30 * 1000;
+const SIGNED_URL_CACHE_MAX_ENTRIES = 2000;
 const CONTENT_TYPE_BY_EXT = {
   ".yaml": "text/plain",
   ".yml": "text/plain",
@@ -18,6 +21,68 @@ const CONTENT_TYPE_BY_EXT = {
 };
 
 const YAML_TYPES = new Set(["text/yaml", "application/x-yaml", "application/yaml"]);
+const signedUrlCache = new Map();
+const signedUrlInFlight = new Map();
+
+const createLimiter = (limit) => {
+  let activeCount = 0;
+  const queue = [];
+
+  const next = () => {
+    if (activeCount >= limit || queue.length === 0) return;
+    const { fn, resolve, reject } = queue.shift();
+    activeCount += 1;
+    Promise.resolve()
+      .then(fn)
+      .then(resolve, reject)
+      .finally(() => {
+        activeCount -= 1;
+        next();
+      });
+  };
+
+  return (fn) =>
+    new Promise((resolve, reject) => {
+      queue.push({ fn, resolve, reject });
+      next();
+    });
+};
+
+const signedUrlLimiter = createLimiter(SIGNED_URL_CONCURRENCY);
+
+const stableStringify = (value) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return String(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${key}:${stableStringify(value[key])}`).join(",")}}`;
+};
+
+const buildSignedUrlCacheKey = (bucket, path, expiresIn, transform) =>
+  `${bucket}::${path}::${expiresIn}::${stableStringify(transform)}`;
+
+const getCachedSignedUrl = (key) => {
+  const entry = signedUrlCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt - Date.now() <= SIGNED_URL_CACHE_BUFFER_MS) {
+    signedUrlCache.delete(key);
+    return null;
+  }
+  return entry.url;
+};
+
+const pruneSignedUrlCache = () => {
+  if (signedUrlCache.size <= SIGNED_URL_CACHE_MAX_ENTRIES) return;
+  const now = Date.now();
+  for (const [key, entry] of signedUrlCache.entries()) {
+    if (!entry || entry.expiresAt <= now) {
+      signedUrlCache.delete(key);
+    }
+    if (signedUrlCache.size <= SIGNED_URL_CACHE_MAX_ENTRIES) return;
+  }
+};
 
 const guessContentType = (file, path, options) => {
   if (options?.contentType) return options.contentType;
@@ -63,16 +128,37 @@ export function getStoragePathFromUrl(url, bucket) {
 
 export async function createSignedImageUrl(bucket, path, { expiresIn = 3600, transform } = {}) {
   if (!path) return null;
+  const cacheKey = buildSignedUrlCacheKey(bucket, path, expiresIn, transform);
+  const cached = getCachedSignedUrl(cacheKey);
+  if (cached) return cached;
+  if (signedUrlInFlight.has(cacheKey)) return signedUrlInFlight.get(cacheKey);
   const storage = supabase.storage.from(bucket);
 
-  if (transform) {
-    const { data, error } = await storage.createSignedUrl(path, expiresIn, { transform });
-    if (!error && data?.signedUrl) return data.signedUrl;
-  }
+  const requestPromise = signedUrlLimiter(async () => {
+    if (transform) {
+      const { data, error } = await storage.createSignedUrl(path, expiresIn, { transform });
+      if (!error && data?.signedUrl) return data.signedUrl;
+    }
 
-  const { data, error } = await storage.createSignedUrl(path, expiresIn);
-  if (error) throw error;
-  return data?.signedUrl || null;
+    const { data, error } = await storage.createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  });
+
+  signedUrlInFlight.set(cacheKey, requestPromise);
+  try {
+    const signedUrl = await requestPromise;
+    if (signedUrl) {
+      signedUrlCache.set(cacheKey, {
+        url: signedUrl,
+        expiresAt: Date.now() + Math.max(expiresIn, 1) * 1000,
+      });
+      pruneSignedUrlCache();
+    }
+    return signedUrl;
+  } finally {
+    signedUrlInFlight.delete(cacheKey);
+  }
 }
 
 export async function uploadToSupabaseStorage(file, path, bucketOrOptions = DEFAULT_BUCKET) {
