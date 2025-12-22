@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { UploadCloud, File, X, ChevronRight, ChevronLeft, Sprout, TestTube2, Folder, Loader2, AlertTriangle } from "lucide-react";
+import { UploadCloud, File as FileIcon, X, ChevronRight, ChevronLeft, Sprout, TestTube2, Folder, Loader2, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Helper function to shuffle an array
@@ -924,7 +924,7 @@ export default function ImageUploadDialog({
                 onDragEnter={(e) => e.preventDefault()}
                 onClick={() => document.getElementById('class-upload-input')?.click()}
               >
-                <File className="w-8 h-8 mx-auto text-slate-500" />
+                <FileIcon className="w-8 h-8 mx-auto text-slate-500" />
                 <p className="mt-2 text-sm font-semibold text-slate-800">Upload classes file</p>
                 <p className="text-xs text-slate-600">One class per line, or a YOLO YAML file.</p>
                 <Input
@@ -971,7 +971,7 @@ export default function ImageUploadDialog({
                     <div className="space-y-2">
                       {visibleLabelFiles.map(fileWrapper => (
                         <div key={fileWrapper.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                          <File className="h-4 w-4 text-slate-500" />
+                          <FileIcon className="h-4 w-4 text-slate-500" />
                           <div className="flex-1 min-w-0">
                             <p className="truncate text-xs font-medium text-slate-700">{fileWrapper.file.name}</p>
                             <p className="text-[11px] text-slate-500">{(fileWrapper.file.size / 1024).toFixed(1)} KB</p>
@@ -995,7 +995,7 @@ export default function ImageUploadDialog({
                 <div className="mt-4 rounded-xl border border-slate-200/70 bg-white/80 p-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
-                      <File className="h-4 w-4 text-slate-500" />
+                      <FileIcon className="h-4 w-4 text-slate-500" />
                       {classFile.file.name}
                     </div>
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-slate-500 hover:bg-rose-100 hover:text-rose-600" onClick={removeClassFile}>
