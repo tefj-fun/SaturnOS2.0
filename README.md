@@ -20,6 +20,10 @@ SaturnOS 2.0 helps QA teams turn SOPs into structured steps, upload datasets and
 - Serverless: Netlify functions for OpenAI proxy and user invites.
 - Optional: Python trainer worker for YOLOv8 runs in `.trainer-tmp`.
 
+## Companion services
+- Trainer worker: https://github.com/tefj-fun/saturnos-trainer
+- Inference worker: https://github.com/tefj-fun/saturnos-inference
+
 ## Repo layout
 - `src/` - React app (pages, components, API clients).
 - `supabase/migrations/` - SQL schema and RLS policies.

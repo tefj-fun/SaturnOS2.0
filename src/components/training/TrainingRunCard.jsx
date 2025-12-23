@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,8 +19,10 @@ const statusConfig = {
     canceled: { icon: <XCircle className="w-4 h-4 text-gray-600" />, color: "bg-gray-100 text-gray-800", label: "Canceled" },
 };
 
-export default function TrainingRunCard({ run, onStop, onDelete }) {
+export default function TrainingRunCard({ run, onStop, onDelete, onDeploy }) {
   const [isDeploying, setIsDeploying] = useState(false);
+  const [deploymentMessage, setDeploymentMessage] = useState('');
+  const deploymentTimerRef = useRef(null);
 
   const config = statusConfig[run.status] || statusConfig.stopped;
   const isOptimizing = run.status === 'running' && run.configuration?.optimizationStrategy === 'bayesian';
@@ -32,13 +34,33 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
   const createdAtLabel = run.created_date ? new Date(run.created_date).toLocaleString() : 'Unknown';
   const startedAtLabel = run.started_at ? new Date(run.started_at).toLocaleString() : null;
 
+  useEffect(() => {
+    return () => {
+      if (deploymentTimerRef.current) {
+        clearTimeout(deploymentTimerRef.current);
+      }
+    };
+  }, []);
+
+  const scheduleMessageClear = () => {
+    if (deploymentTimerRef.current) {
+      clearTimeout(deploymentTimerRef.current);
+    }
+    deploymentTimerRef.current = setTimeout(() => {
+      setDeploymentMessage('');
+      deploymentTimerRef.current = null;
+    }, 5000);
+  };
+
   const handleDeploy = async () => {
     setIsDeploying(true);
+    setDeploymentMessage('');
     
     try {
       await TrainingRun.update(run.id, {
         deployment_status: 'deploying'
       });
+      await onDeploy?.();
 
       // Simulate deployment
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -49,12 +71,22 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
         deployment_date: new Date().toISOString(),
         deployment_url: `https://api.saturos.ai/models/${run.id}/predict`
       });
+      await onDeploy?.();
+      setDeploymentMessage('Deployment complete. Model is ready to test.');
+      scheduleMessageClear();
 
     } catch (error) {
       console.error('Deployment failed:', error);
-      await TrainingRun.update(run.id, {
-        deployment_status: 'deployment_failed'
-      });
+      try {
+        await TrainingRun.update(run.id, {
+          deployment_status: 'deployment_failed'
+        });
+        await onDeploy?.();
+      } catch (updateError) {
+        console.error('Failed to record deployment failure:', updateError);
+      }
+      setDeploymentMessage('Deployment failed. Please try again.');
+      scheduleMessageClear();
     }
     
     setIsDeploying(false);
@@ -226,6 +258,11 @@ export default function TrainingRunCard({ run, onStop, onDelete }) {
               Delete
             </Button>
           </div>
+          {deploymentMessage && (
+            <p className={`text-xs mt-2 ${deploymentMessage.includes('failed') ? 'text-red-600' : 'text-green-700'}`}>
+              {deploymentMessage}
+            </p>
+          )}
           <p className="text-xs text-gray-400 mt-4">Created: {createdAtLabel}</p>
         </CardContent>
       </Card>

@@ -248,17 +248,21 @@ export default function TrainingStatusPage() {
   }, [runId, loadTrainingData, navigate]);
 
   const trainingStatus = trainingRun?.status;
+  const deploymentStatus = trainingRun?.deployment_status;
 
   useEffect(() => {
     if (!runId) return;
-    if (!trainingStatus || !['queued', 'running', 'canceling'].includes(trainingStatus)) return;
+    const shouldPoll = Boolean(
+      trainingStatus && ['queued', 'running', 'canceling'].includes(trainingStatus)
+    ) || deploymentStatus === 'deploying';
+    if (!shouldPoll) return;
 
     const interval = setInterval(() => {
       loadTrainingData(runId);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [runId, trainingStatus, loadTrainingData]);
+  }, [runId, trainingStatus, deploymentStatus, loadTrainingData]);
 
   // Rotate tips every 10 seconds
   useEffect(() => {
@@ -295,25 +299,11 @@ export default function TrainingStatusPage() {
     setDeploymentMessage('');
 
     try {
-      // Update deployment status to "deploying"
       await TrainingRun.update(runId, {
         deployment_status: 'deploying'
       });
 
-      // Simulate deployment process (in real app, this would be an API call)
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      // Update to deployed status
-      await TrainingRun.update(runId, {
-        is_deployed: true,
-        deployment_status: 'deployed',
-        deployment_date: new Date().toISOString(),
-        deployment_url: `https://api.saturos.ai/models/${runId}/predict`
-      });
-
-      setDeploymentMessage(`Model "${trainingRun.run_name}" deployed successfully!`);
-
-      // Refresh the run data
+      setDeploymentMessage('Deployment requested. The inference worker will register this model shortly.');
       loadTrainingData(runId);
 
     } catch (error) {

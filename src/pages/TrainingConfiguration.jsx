@@ -291,6 +291,19 @@ export default function TrainingConfigurationPage() {
         refreshDatasetSummary(step);
     }, [projectSteps, refreshDatasetSummary]);
 
+    const refreshTrainingRuns = useCallback(async () => {
+        if (!selectedStepId || !selectedProjectId) return;
+        try {
+            const runs = await TrainingRun.filter(
+                { step_id: selectedStepId, project_id: selectedProjectId },
+                '-created_date'
+            );
+            setTrainingRuns(runs);
+        } catch (error) {
+            console.error('Error refreshing training runs:', error);
+        }
+    }, [selectedProjectId, selectedStepId]);
+
     const loadProjectData = useCallback(async (projectId, stepId = null) => {
         setIsLoading(true);
         setSelectedProjectId(projectId);
@@ -364,16 +377,11 @@ export default function TrainingConfigurationPage() {
         if (!hasActiveRuns) return;
 
         const interval = setInterval(() => {
-            TrainingRun.filter(
-                { step_id: selectedStepId, project_id: selectedProjectId },
-                '-created_date'
-            )
-                .then(setTrainingRuns)
-                .catch(error => console.error('Error refreshing training runs:', error));
+            refreshTrainingRuns();
         }, 5000);
 
         return () => clearInterval(interval);
-    }, [selectedStepId, selectedProjectId, trainingRuns]);
+    }, [refreshTrainingRuns, selectedStepId, trainingRuns]);
 
     const handleStartTraining = async (trainingConfig) => {
         if (!selectedProjectId || !selectedStepId) return;
@@ -710,7 +718,15 @@ export default function TrainingConfigurationPage() {
                                 {groupedRuns.running.length > 0 && (
                                     <Section title="Live training" icon={<Rocket className="w-5 h-5 text-blue-600" />} count={groupedRuns.running.length}>
                                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            {groupedRuns.running.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                            {groupedRuns.running.map(run => (
+                                                <TrainingRunCard
+                                                    key={run.id}
+                                                    run={run}
+                                                    onStop={handleStopTraining}
+                                                    onDelete={handleDeleteTraining}
+                                                    onDeploy={refreshTrainingRuns}
+                                                />
+                                            ))}
                                         </div>
                                     </Section>
                                 )}
@@ -718,7 +734,15 @@ export default function TrainingConfigurationPage() {
                                 {groupedRuns.queued.length > 0 && (
                                     <Section title="Queued runs" icon={<Clock className="w-5 h-5 text-amber-600" />} count={groupedRuns.queued.length}>
                                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            {groupedRuns.queued.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                            {groupedRuns.queued.map(run => (
+                                                <TrainingRunCard
+                                                    key={run.id}
+                                                    run={run}
+                                                    onStop={handleStopTraining}
+                                                    onDelete={handleDeleteTraining}
+                                                    onDeploy={refreshTrainingRuns}
+                                                />
+                                            ))}
                                         </div>
                                     </Section>
                                 )}
@@ -726,7 +750,15 @@ export default function TrainingConfigurationPage() {
                                 {groupedRuns.completed.length > 0 && (
                                     <Section title="Completed models" icon={<CheckCircle className="w-5 h-5 text-green-600" />} count={groupedRuns.completed.length}>
                                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            {groupedRuns.completed.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                            {groupedRuns.completed.map(run => (
+                                                <TrainingRunCard
+                                                    key={run.id}
+                                                    run={run}
+                                                    onStop={handleStopTraining}
+                                                    onDelete={handleDeleteTraining}
+                                                    onDeploy={refreshTrainingRuns}
+                                                />
+                                            ))}
                                         </div>
                                     </Section>
                                 )}
@@ -734,7 +766,15 @@ export default function TrainingConfigurationPage() {
                                 {groupedRuns.history.length > 0 && (
                                     <Section title="History" icon={<History className="w-5 h-5 text-gray-600" />} count={groupedRuns.history.length}>
                                          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            {groupedRuns.history.map(run => <TrainingRunCard key={run.id} run={run} onStop={handleStopTraining} onDelete={handleDeleteTraining} />)}
+                                            {groupedRuns.history.map(run => (
+                                                <TrainingRunCard
+                                                    key={run.id}
+                                                    run={run}
+                                                    onStop={handleStopTraining}
+                                                    onDelete={handleDeleteTraining}
+                                                    onDeploy={refreshTrainingRuns}
+                                                />
+                                            ))}
                                         </div>
                                     </Section>
                                 )}

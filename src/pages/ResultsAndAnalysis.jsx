@@ -1,15 +1,17 @@
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { TrainingRun } from '@/api/entities';
 import { Project } from '@/api/entities';
 import { SOPStep } from '@/api/entities';
 import { StepImage } from '@/api/entities';
 import { PredictedAnnotation } from '@/api/entities';
+import { InferenceWorker } from '@/api/entities';
 import { createSignedImageUrl, getStoragePathFromUrl } from '@/api/storage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
@@ -23,13 +25,18 @@ import {
   ArrowLeft,
   Search,
   CheckCircle,
+  Cpu,
   AlertTriangle,
   Play,
   Loader2,
+  WifiOff,
+  RefreshCw,
+  Info,
   BarChart3,
   Rocket,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   History,
   Database,
   Spline
@@ -44,6 +51,7 @@ const statusConfig = {
 
 const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
 const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
+const INFERENCE_HEARTBEAT_TIMEOUT_MS = 60000;
 
 const deriveImageName = (imageUrl) => {
   if (!imageUrl) return "Unknown image";
@@ -54,6 +62,34 @@ const deriveImageName = (imageUrl) => {
 const toNumber = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const formatTime = (value) => {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const getWorkerHardwareLabel = (worker) => {
+  if (!worker) return null;
+  const parts = [];
+  const deviceType = worker.device_type || worker.compute_type;
+  if (deviceType) parts.push(`device: ${deviceType}`);
+  const gpuName = worker.gpu_name || worker.gpu_model || worker.gpu;
+  if (gpuName) parts.push(`GPU: ${gpuName}`);
+  const vramGb = toNumber(worker.gpu_memory_gb ?? worker.gpu_vram_gb);
+  const vramMb = toNumber(worker.gpu_memory_mb ?? worker.gpu_vram_mb);
+  if (vramGb && vramGb > 0) {
+    parts.push(`VRAM: ${vramGb} GB`);
+  } else if (vramMb && vramMb > 0) {
+    parts.push(`VRAM: ${(vramMb / 1024).toFixed(1)} GB`);
+  }
+  const cpuModel = worker.cpu_model || worker.cpu;
+  if (cpuModel) parts.push(`CPU: ${cpuModel}`);
+  const ramGb = toNumber(worker.ram_gb);
+  if (ramGb && ramGb > 0) parts.push(`RAM: ${ramGb} GB`);
+  return parts.length ? parts.join(" | ") : null;
 };
 
 const normalizePredictions = (annotations) => {
@@ -179,6 +215,19 @@ const resolveImageUrl = async (image) => {
   return datasetUrl || fallbackUrl;
 };
 
+const buildInferenceUrl = (endpoint, saveResults) => {
+  if (!endpoint) return "";
+  if (!saveResults) return endpoint;
+  try {
+    const url = new URL(endpoint, window.location.origin);
+    url.searchParams.set("save", "1");
+    return url.toString();
+  } catch {
+    const separator = endpoint.includes("?") ? "&" : "?";
+    return `${endpoint}${separator}save=1`;
+  }
+};
+
 export default function ResultsAndAnalysisPage() {
   const navigate = useNavigate();
   const [showHistory, setShowHistory] = useState(false);
@@ -190,6 +239,14 @@ export default function ResultsAndAnalysisPage() {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadPreview, setUploadPreview] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [inferenceStatus, setInferenceStatus] = useState({
+    state: "checking",
+    workersOnline: 0,
+    lastCheckedAt: null,
+    activeWorkers: [],
+    isSupported: true,
+  });
+  const [showInferenceAdvanced, setShowInferenceAdvanced] = useState(false);
   const [inferenceResults, setInferenceResults] = useState(null);
   const [hoveredPredictionId, setHoveredPredictionId] = useState(null);
   const [imageSearch, setImageSearch] = useState('');
@@ -201,6 +258,47 @@ export default function ResultsAndAnalysisPage() {
   const fileInputRef = useRef(null);
   const imageContainerRef = useRef(null);
   const imageRef = useRef(null);
+
+  const loadInferenceStatus = useCallback(async (force = false) => {
+    if (!force && !inferenceStatus.isSupported) return;
+    try {
+      const workers = await InferenceWorker.list('-last_seen');
+      const now = Date.now();
+      const activeWorkers = (workers || []).filter((worker) => {
+        if (!worker?.last_seen) return false;
+        const lastSeen = new Date(worker.last_seen).getTime();
+        return Number.isFinite(lastSeen) && (now - lastSeen) <= INFERENCE_HEARTBEAT_TIMEOUT_MS;
+      });
+      const workersOnline = activeWorkers.length;
+      const state = workersOnline === 0 ? 'offline' : 'idle';
+      setInferenceStatus({
+        state,
+        workersOnline,
+        lastCheckedAt: new Date().toISOString(),
+        activeWorkers,
+        isSupported: true,
+      });
+    } catch (error) {
+      if (error?.code === "PGRST205") {
+        setInferenceStatus({
+          state: 'unsupported',
+          workersOnline: 0,
+          lastCheckedAt: new Date().toISOString(),
+          activeWorkers: [],
+          isSupported: false,
+        });
+        return;
+      }
+      console.error('Error loading inference worker status:', error);
+      setInferenceStatus({
+        state: 'unknown',
+        workersOnline: 0,
+        lastCheckedAt: new Date().toISOString(),
+        activeWorkers: [],
+        isSupported: true,
+      });
+    }
+  }, [inferenceStatus.isSupported]);
 
   useEffect(() => {
     loadDeployedModels();
@@ -214,6 +312,13 @@ export default function ResultsAndAnalysisPage() {
       setSelectedModel(modelId);
     }
   }, []);
+
+  useEffect(() => {
+    loadInferenceStatus();
+    if (!inferenceStatus.isSupported) return undefined;
+    const interval = setInterval(loadInferenceStatus, 15000);
+    return () => clearInterval(interval);
+  }, [loadInferenceStatus, inferenceStatus.isSupported]);
 
   useEffect(() => {
     setZoomLevel(1);
@@ -320,13 +425,18 @@ export default function ResultsAndAnalysisPage() {
         const project = step ? projectsById.get(step.project_id) : null;
         const normalizedPredictions = normalizePredictions(prediction.annotations);
         const avgConfidence = averageConfidence(normalizedPredictions);
+        const hasStepImage = Boolean(prediction.step_image_id);
+        const imageName = image
+          ? (image.image_name || deriveImageName(image.display_url || image.image_url))
+          : (hasStepImage ? "Unknown image" : "Uploaded image");
+        const projectName = project?.name || (hasStepImage ? "Unknown project" : "Uploaded image");
 
         return {
           id: prediction.id,
           run_name: run?.run_name || "Inference run",
           model_name: run?.base_model || run?.run_name || "Unknown model",
-          project_name: project?.name || "Unknown project",
-          image_name: image?.image_name || deriveImageName(image?.display_url || image?.image_url),
+          project_name: projectName,
+          image_name: imageName,
           status: run?.status || "completed",
           created_date: prediction.created_date,
           created_by: run?.created_by || "system",
@@ -379,33 +489,46 @@ export default function ResultsAndAnalysisPage() {
     }
 
     const run = deployedModels.find((model) => model.id === selectedModel);
-    const endpoint = run?.deployment_url || `https://api.saturos.ai/models/${selectedModel}/predict`;
+    if (!run) {
+      setInferenceResults({
+        status: "error",
+        message: "Select a deployed model before running inference.",
+      });
+      return;
+    }
+    const endpoint = run?.deployment_url;
 
     if (!endpoint) {
       setInferenceResults({
         status: "error",
-        message: "This model does not have a deployment endpoint yet.",
+        message: "This model does not have a deployment endpoint yet. Deploy it and wait for the inference worker.",
       });
       return;
     }
 
+    const requestUrl = buildInferenceUrl(endpoint, true);
     setIsProcessing(true);
     setInferenceResults({ status: "processing" });
 
     try {
       let requestBody = null;
       let headers = {};
+      const stepImageId = selectedImage?.id || null;
 
       if (uploadFile) {
         const formData = new FormData();
         formData.append("image", uploadFile);
         formData.append("file", uploadFile);
+        if (stepImageId) {
+          formData.append("step_image_id", stepImageId);
+        }
         requestBody = formData;
       } else if (selectedImage?.url) {
         headers = { "Content-Type": "application/json" };
         requestBody = JSON.stringify({
           image_url: selectedImage.url,
           url: selectedImage.url,
+          step_image_id: stepImageId,
         });
       }
 
@@ -413,7 +536,7 @@ export default function ResultsAndAnalysisPage() {
         throw new Error("Select an image to run inference.");
       }
 
-      const response = await fetch(endpoint, {
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers,
         body: requestBody,
@@ -470,6 +593,7 @@ export default function ResultsAndAnalysisPage() {
         },
         ...prev,
       ]);
+      loadInferenceHistory();
     } catch (error) {
       console.error("Error running inference:", error);
       setInferenceResults({
@@ -510,6 +634,31 @@ export default function ResultsAndAnalysisPage() {
     }
     return true;
   });
+
+  const inferenceStatusConfig = {
+    checking: { label: 'Checking inference...', color: 'bg-gray-100 text-gray-700', icon: <Loader2 className="w-3 h-3 mr-1 animate-spin" /> },
+    busy: { label: 'Inference running', color: 'bg-amber-100 text-amber-800', icon: <Cpu className="w-3 h-3 mr-1" /> },
+    idle: { label: 'Inference available', color: 'bg-green-100 text-green-800', icon: <CheckCircle className="w-3 h-3 mr-1" /> },
+    offline: { label: 'Inference offline', color: 'bg-red-100 text-red-800', icon: <WifiOff className="w-3 h-3 mr-1" /> },
+    unknown: { label: 'Inference status unknown', color: 'bg-red-100 text-red-800', icon: <Info className="w-3 h-3 mr-1" /> },
+    unsupported: { label: 'Inference status unavailable', color: 'bg-gray-100 text-gray-700', icon: <Info className="w-3 h-3 mr-1" /> },
+  };
+  const inferenceStatusDescriptions = {
+    checking: 'Checking the inference worker status.',
+    busy: 'Inference worker is processing a request.',
+    idle: 'Inference worker is online and ready to serve requests.',
+    offline: 'No inference workers were seen recently. Requests may fail.',
+    unknown: 'Inference worker status could not be determined.',
+    unsupported: 'Inference worker status table is not configured in Supabase.',
+  };
+  const effectiveInferenceState = isProcessing ? 'busy' : inferenceStatus.state;
+  const currentInferenceStatus = inferenceStatusConfig[effectiveInferenceState] || inferenceStatusConfig.unknown;
+  const inferenceStatusDescription = inferenceStatusDescriptions[effectiveInferenceState] || inferenceStatusDescriptions.unknown;
+  const isInferenceOffline = effectiveInferenceState === 'offline' || effectiveInferenceState === 'unknown';
+  const isInferenceStatusUnsupported = effectiveInferenceState === 'unsupported';
+  const activeInferenceWorkers = inferenceStatus.activeWorkers || [];
+  const inferenceProcessingCount = isProcessing ? 1 : 0;
+  const workersOnlineLabel = inferenceStatus.isSupported ? inferenceStatus.workersOnline : "n/a";
   return (
     <div className="min-h-screen bg-slate-50/40 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -527,10 +676,111 @@ export default function ResultsAndAnalysisPage() {
               <p className="text-gray-600 mt-1">Run live inference, review outcomes, and track history.</p>
             </div>
           </div>
-          <Button variant="outline" onClick={() => setShowHistory((prev) => !prev)} className="w-full sm:w-auto">
-            <History className="w-4 h-4 mr-2" />
-            {showHistory ? "Back to Testing" : "Inference History"}
-          </Button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex flex-col items-start sm:items-end gap-1">
+              <div className="flex items-center gap-2">
+                <Popover onOpenChange={(open) => { if (!open) setShowInferenceAdvanced(false); }}>
+                  <PopoverTrigger
+                    className="appearance-none border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded-md"
+                    type="button"
+                  >
+                    <Badge className={`${currentInferenceStatus.color} border-0 font-medium`}>
+                      {currentInferenceStatus.icon}
+                      <span>{currentInferenceStatus.label}</span>
+                    </Badge>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-80">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">Inference worker status</p>
+                        <p className="text-xs text-gray-600 mt-1">{inferenceStatusDescription}</p>
+                      </div>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <Badge className={`${currentInferenceStatus.color} border-0 font-medium`}>
+                          {currentInferenceStatus.icon}
+                          <span>{currentInferenceStatus.label}</span>
+                        </Badge>
+                        <span className="text-xs text-gray-500">
+                          Last checked: {formatTime(inferenceStatus.lastCheckedAt)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-md bg-gray-50 p-2 text-center">
+                          <div className="text-sm font-semibold text-gray-900">{workersOnlineLabel}</div>
+                          <div className="text-[11px] text-gray-500">Workers</div>
+                        </div>
+                        <div className="rounded-md bg-gray-50 p-2 text-center">
+                          <div className="text-sm font-semibold text-gray-900">{inferenceProcessingCount}</div>
+                          <div className="text-[11px] text-gray-500">Processing</div>
+                        </div>
+                      </div>
+                      <div className="border-t border-gray-100 pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setShowInferenceAdvanced((prev) => !prev)}
+                          className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                        >
+                          Advanced details
+                          <ChevronDown className={`w-3 h-3 transition-transform ${showInferenceAdvanced ? 'rotate-180' : ''}`} />
+                        </button>
+                        {showInferenceAdvanced && (
+                          <div className="mt-2 space-y-2">
+                            {!inferenceStatus.isSupported && (
+                              <p className="text-xs text-gray-500">Inference worker table not configured.</p>
+                            )}
+                            {inferenceStatus.isSupported && activeInferenceWorkers.length === 0 && (
+                              <p className="text-xs text-gray-500">No active inference workers detected.</p>
+                            )}
+                            {inferenceStatus.isSupported && activeInferenceWorkers.map((worker, index) => {
+                              const hardwareLabel = getWorkerHardwareLabel(worker);
+                              return (
+                                <div key={worker.worker_id || index} className="rounded-md bg-gray-50 p-2 text-xs text-gray-600">
+                                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-[11px] text-gray-500">
+                                    <span className="font-medium text-gray-700">Worker {index + 1}</span>
+                                    <span>Last seen: {formatTime(worker?.last_seen)}</span>
+                                  </div>
+                                  <div className="mt-1 text-gray-700">
+                                    {hardwareLabel || "Hardware not reported by this worker."}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-gray-600 hover:text-gray-900"
+                  onClick={() => {
+                    setInferenceStatus((prev) => ({ ...prev, state: "checking" }));
+                    loadInferenceStatus(true);
+                  }}
+                  aria-label="Refresh inference status"
+                  title="Refresh inference status"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+              <span className="text-xs text-gray-500 self-start sm:self-auto">
+                workers: {workersOnlineLabel}
+              </span>
+              {isInferenceStatusUnsupported && (
+                <span className="text-xs text-gray-500 self-start sm:self-auto">Inference worker status not configured</span>
+              )}
+              {isInferenceOffline && !isInferenceStatusUnsupported && (
+                <span className="text-xs text-amber-600 self-start sm:self-auto">Inference requests may fail while offline</span>
+              )}
+            </div>
+            <Button variant="outline" onClick={() => setShowHistory((prev) => !prev)} className="w-full sm:w-auto">
+              <History className="w-4 h-4 mr-2" />
+              {showHistory ? "Back to Testing" : "Inference History"}
+            </Button>
+          </div>
         </div>
 
         {!showHistory ? (

@@ -115,6 +115,7 @@ export const ProjectMember = createEntity("project_members");
 export const BuildVariant = createEntity("build_variants");
 export const StepVariantConfig = createEntity("step_variant_configs");
 export const TrainerWorker = createEntity("trainer_workers");
+export const InferenceWorker = createEntity("inference_workers");
 
 export { TrainingRun };
 
