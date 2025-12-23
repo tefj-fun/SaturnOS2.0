@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -36,7 +37,12 @@ import {
   Trash2,
   Crown,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  CreditCard,
+  Activity,
+  BarChart3,
+  KeyRound,
+  Clock
 } from 'lucide-react';
 
 const DEFAULT_PREFERENCES = {
@@ -53,9 +59,9 @@ const DEFAULT_PREFERENCES = {
 };
 
 const roleConfig = {
-  admin: { 
-    label: 'Administrator', 
-    color: 'bg-red-100 text-red-800', 
+  admin: {
+    label: 'Administrator',
+    color: 'bg-red-100 text-red-800',
     icon: <Crown className="w-3 h-3" />,
     permissions: ['all']
   },
@@ -72,6 +78,84 @@ const roleConfig = {
     permissions: ['view_projects', 'view_results']
   }
 };
+
+const PLAN_FEATURES = [
+  'Unlimited projects and datasets',
+  'Priority model training queue',
+  'Team workspaces with RBAC',
+  'API & webhook access',
+  'SOC2-aligned security controls'
+];
+
+const USAGE_METRICS = [
+  {
+    label: 'Projects',
+    value: '8 / 15',
+    percentage: 53,
+    description: 'Active vs included in plan'
+  },
+  {
+    label: 'Annotations',
+    value: '126k / 200k',
+    percentage: 63,
+    description: 'Total annotations processed this month'
+  },
+  {
+    label: 'Training hours',
+    value: '42 / 60',
+    percentage: 70,
+    description: 'GPU hours consumed in current cycle'
+  },
+  {
+    label: 'Storage',
+    value: '820 GB / 1 TB',
+    percentage: 80,
+    description: 'Media and artifact storage'
+  }
+];
+
+const API_USAGE = [
+  {
+    keyName: 'Production key',
+    token: 'sk_live_****************42',
+    status: 'Active',
+    requests: 14200,
+    limit: 25000,
+    lastUsed: '2m ago'
+  },
+  {
+    keyName: 'Staging key',
+    token: 'sk_test_****************98',
+    status: 'Limited',
+    requests: 8200,
+    limit: 10000,
+    lastUsed: '11m ago'
+  }
+];
+
+const API_ENDPOINTS = [
+  {
+    name: 'List projects',
+    method: 'GET',
+    path: '/v1/projects',
+    status: '200 OK',
+    latency: '312 ms'
+  },
+  {
+    name: 'Create annotations',
+    method: 'POST',
+    path: '/v1/annotations',
+    status: '201 Created',
+    latency: '441 ms'
+  },
+  {
+    name: 'Webhook delivery',
+    method: 'POST',
+    path: '/v1/webhooks',
+    status: '200 OK',
+    latency: '238 ms'
+  }
+];
 
 export default function SettingsPage() {
   const { user, profile, authChecked, loadProfile, setProfile } = useAuth();
@@ -236,7 +320,7 @@ export default function SettingsPage() {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2 sm:grid-cols-3">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3 sm:grid-cols-4">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <UserIcon className="w-4 h-4" />
               Profile
@@ -244,6 +328,10 @@ export default function SettingsPage() {
             <TabsTrigger value="preferences" className="flex items-center gap-2">
               <Bell className="w-4 h-4" />
               Preferences
+            </TabsTrigger>
+            <TabsTrigger value="billing" className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4" />
+              Pricing & Usage
             </TabsTrigger>
             {isAdmin && (
               <TabsTrigger value="team" className="flex items-center gap-2">
@@ -443,6 +531,153 @@ export default function SettingsPage() {
                 {isLoading ? 'Saving...' : 'Save Preferences'}
               </Button>
             </div>
+          </TabsContent>
+
+          <TabsContent value="billing" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <Card className="glass-effect border-0 shadow-lg lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-blue-600" />
+                    Current plan
+                  </CardTitle>
+                  <CardDescription>
+                    Track your subscription, usage, and platform limits.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">You are on</p>
+                      <p className="text-2xl font-semibold text-gray-900">Scale Team — $249 / month</p>
+                      <p className="text-sm text-gray-600">Renews Mar 28, includes 10 seats</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button variant="outline">View limits</Button>
+                      <Button className="bg-blue-600 hover:bg-blue-700">Upgrade</Button>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {PLAN_FEATURES.map((feature) => (
+                      <div key={feature} className="flex items-start gap-3">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-1" />
+                        <p className="text-sm text-gray-700">{feature}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-effect border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-green-600" />
+                    Usage health
+                  </CardTitle>
+                  <CardDescription>Live snapshot of your quotas</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600">Overall consumption</p>
+                      <p className="text-lg font-semibold text-gray-900">68% of monthly allocation</p>
+                    </div>
+                    <Badge className="bg-green-100 text-green-800 border-0">On track</Badge>
+                  </div>
+                  <Progress value={68} />
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-700">
+                      <Clock className="w-4 h-4 text-gray-500" /> Next reset: Mar 1, 12:00 UTC
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-gray-700">
+                      <BarChart3 className="w-4 h-4 text-gray-500" /> Forecast: 92% by period end
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="glass-effect border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-purple-600" />
+                  Usage by resource
+                </CardTitle>
+                <CardDescription>Monitor how your team consumes SaturnOS</CardDescription>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                {USAGE_METRICS.map((metric) => (
+                  <div key={metric.label} className="p-4 rounded-xl border bg-white/60 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-900">{metric.label}</p>
+                      <Badge variant="secondary" className="text-xs">{metric.value}</Badge>
+                    </div>
+                    <Progress value={metric.percentage} />
+                    <p className="text-xs text-gray-600">{metric.description}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="glass-effect border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <KeyRound className="w-5 h-5 text-indigo-600" />
+                  API & webhooks
+                </CardTitle>
+                <CardDescription>Track API key activity and recent calls</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {API_USAGE.map((api) => (
+                    <div key={api.keyName} className="p-4 rounded-xl border bg-white/60 shadow-sm space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">{api.keyName}</p>
+                          <p className="text-xs text-gray-600 font-mono">{api.token}</p>
+                        </div>
+                        <Badge variant={api.status === 'Active' ? 'default' : 'secondary'}>{api.status}</Badge>
+                      </div>
+                      <Progress value={Math.min(100, Math.round((api.requests / api.limit) * 100))} />
+                      <div className="flex items-center justify-between text-xs text-gray-600">
+                        <span>{api.requests.toLocaleString()} / {api.limit.toLocaleString()} requests</span>
+                        <span>Last used {api.lastUsed}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[720px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Endpoint</TableHead>
+                        <TableHead>Method</TableHead>
+                        <TableHead>Path</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Latency</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {API_ENDPOINTS.map((endpoint) => (
+                        <TableRow key={endpoint.path}>
+                          <TableCell className="font-medium text-gray-900">{endpoint.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="secondary">{endpoint.method}</Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm text-gray-700">{endpoint.path}</TableCell>
+                          <TableCell>
+                            <Badge className="bg-green-100 text-green-800 border-0">{endpoint.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-gray-700">{endpoint.latency}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Team & RBAC (Admin Only) */}
