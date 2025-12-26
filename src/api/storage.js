@@ -110,6 +110,8 @@ export function getStoragePathFromUrl(url, bucket) {
     const publicPrefix = `/storage/v1/object/public/${bucket}/`;
     const signedPrefix = `/storage/v1/object/sign/${bucket}/`;
     const objectPrefix = `/storage/v1/object/${bucket}/`;
+    const renderPublicPrefix = `/storage/v1/render/image/public/${bucket}/`;
+    const renderSignedPrefix = `/storage/v1/render/image/sign/${bucket}/`;
 
     if (path.includes(publicPrefix)) {
       return decodeURIComponent(path.split(publicPrefix)[1]);
@@ -119,6 +121,12 @@ export function getStoragePathFromUrl(url, bucket) {
     }
     if (path.includes(objectPrefix)) {
       return decodeURIComponent(path.split(objectPrefix)[1]);
+    }
+    if (path.includes(renderPublicPrefix)) {
+      return decodeURIComponent(path.split(renderPublicPrefix)[1]);
+    }
+    if (path.includes(renderSignedPrefix)) {
+      return decodeURIComponent(path.split(renderSignedPrefix)[1]);
     }
   } catch {
     return null;

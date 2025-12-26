@@ -428,6 +428,35 @@ export default function ImagePortal({
   };
 
   // Utility functions
+  const isSupabaseSignedUrl = (url) => {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      if (
+        parsed.pathname.includes("/storage/v1/object/sign/") ||
+        parsed.pathname.includes("/storage/v1/render/image/sign/")
+      ) {
+        return true;
+      }
+      return parsed.searchParams.has("token");
+    } catch {
+      return false;
+    }
+  };
+
+  const isSupabasePublicUrl = (url) => {
+    if (!url) return false;
+    try {
+      const parsed = new URL(url);
+      return (
+        parsed.pathname.includes("/storage/v1/object/public/") ||
+        parsed.pathname.includes("/storage/v1/render/image/public/")
+      );
+    } catch {
+      return false;
+    }
+  };
+
   const normalizeStorageUrl = (url) => {
     if (!url) return url;
     try {
@@ -452,48 +481,52 @@ export default function ImagePortal({
     }
   };
 
-  const buildRenderUrl = (url, { width, height, resize } = {}) => {
-    if (!url) return url;
-    try {
-      const parsed = new URL(normalizeStorageUrl(url));
-      const publicPrefix = "/storage/v1/object/public/";
-      const renderPrefix = "/storage/v1/render/image/public/";
+  const shouldBlockPublicUrl = (image, url) => {
+    if (!url) return false;
+    if (!image?.storage_path) return false;
+    if (isSupabaseSignedUrl(url)) return false;
+    return isSupabasePublicUrl(url);
+  };
 
-      if (parsed.pathname.includes(renderPrefix)) {
-        // Keep as render endpoint, just update params.
-      } else if (parsed.pathname.includes(publicPrefix)) {
-        parsed.pathname = parsed.pathname.replace(publicPrefix, renderPrefix);
-      } else {
-        return url;
-      }
-
-      const params = new URLSearchParams(parsed.search);
-      if (width) params.set("width", String(width));
-      if (height) params.set("height", String(height));
-      if (resize) params.set("resize", resize);
-      parsed.search = params.toString();
-      return parsed.toString();
-    } catch {
-      return url;
-    }
+  const pickImageUrl = (image, url) => {
+    if (!url) return null;
+    if (shouldBlockPublicUrl(image, url)) return null;
+    return normalizeStorageUrl(url);
   };
 
   const getImageUrl = (image, context = 'full') => {
-    const baseUrl = image?.image_url || image?.display_url || image?.thumbnail_url;
     switch (context) {
       case 'thumbnail':
-        return buildRenderUrl(
-          image.thumbnail_url || image.display_url || image.image_url,
-          { width: 300, height: 300, resize: "cover" }
-        );
+        if (image?.thumbnail_url) return pickImageUrl(image, image.thumbnail_url);
+        if (!image?.storage_path) {
+          return pickImageUrl(
+            image,
+            image?.display_url ||
+              image?.image_url ||
+              image?.source_display_url ||
+              image?.source_image_url
+          );
+        }
+        return null;
       case 'display':
-        return buildRenderUrl(
-          image.display_url || image.image_url,
-          { width: 1200, resize: "contain" }
+        return pickImageUrl(
+          image,
+          image?.display_url ||
+            image?.image_url ||
+            image?.source_display_url ||
+            image?.source_image_url
         );
       case 'full':
       default:
-        return normalizeStorageUrl(baseUrl);
+        return pickImageUrl(
+          image,
+          image?.image_url ||
+            image?.display_url ||
+            image?.source_image_url ||
+            image?.source_display_url ||
+            image?.thumbnail_url ||
+            image?.source_thumbnail_url
+        );
     }
   };
 
@@ -512,7 +545,17 @@ export default function ImagePortal({
     if (!image) return "Untitled";
     const rawName = image.image_name || image.name || image.filename;
     if (rawName) return String(rawName);
-    const url = image.image_url || image.display_url || image.thumbnail_url;
+    const url =
+      image.image_url ||
+      image.display_url ||
+      image.thumbnail_url ||
+      image.source_image_url ||
+      image.source_display_url ||
+      image.source_thumbnail_url;
+    if (!url && image.storage_path) {
+      const parts = String(image.storage_path).split("/");
+      return parts[parts.length - 1] || "Untitled";
+    }
     if (!url) return "Untitled";
     try {
       const parsed = new URL(url);
@@ -796,7 +839,7 @@ export default function ImagePortal({
                 }}
               >
                 <Edit className="w-4 h-4 mr-2" />
-                Rename Group
+                Rename Folder
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -807,7 +850,7 @@ export default function ImagePortal({
                 className="text-red-600 focus:text-red-600"
               >
                 <Trash2 className="w-4 h-4 mr-2" />
-                Delete Group
+                Delete Folder
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -832,7 +875,7 @@ export default function ImagePortal({
     <div className="h-full flex flex-col bg-gray-50">
       {/* Enhanced Header with Current Image Highlight */}
       <div className="p-4 border-b border-gray-200 bg-white">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-gray-900">Images</h2>
             <Badge variant="outline" className="text-sm">
@@ -858,7 +901,7 @@ export default function ImagePortal({
                 variant="outline"
                 size="sm"
                 onClick={expandAllGroups}
-                title="Expand all groups"
+                title="Expand all folders"
               >
                 <Expand className="w-4 h-4" />
               </Button>
@@ -866,7 +909,7 @@ export default function ImagePortal({
                 variant="outline"
                 size="sm"
                 onClick={collapseAllGroups}
-                title="Collapse all groups"
+                title="Collapse all folders"
               >
                 <Minimize2 className="w-4 h-4" />
               </Button>
@@ -898,7 +941,7 @@ export default function ImagePortal({
               onClick={() => setShowGroupDialog(true)}
             >
               <FolderPlus className="w-4 h-4 mr-2" />
-              New Group
+              New Folder
             </Button>
 
             {/* Upload button */}
@@ -912,6 +955,9 @@ export default function ImagePortal({
             </Button>
           </div>
         </div>
+        <p className="mb-4 text-xs text-gray-500">
+          Folders are for organization only and do not affect training splits.
+        </p>
 
         {/* Selection Controls */}
         <AnimatePresence>
@@ -952,7 +998,7 @@ export default function ImagePortal({
                     <>
                       <Select onValueChange={moveSelectedToGroup}>
                         <SelectTrigger className="w-40">
-                          <SelectValue placeholder="Move to group..." />
+                          <SelectValue placeholder="Move to folder..." />
                         </SelectTrigger>
                         <SelectContent>
                           {allAvailableGroups.map(group => (
@@ -1037,7 +1083,7 @@ export default function ImagePortal({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Groups</SelectItem>
+                  <SelectItem value="all">All Folders</SelectItem>
                   {allAvailableGroups.map(group => (
                     <SelectItem key={group} value={group}>{group}</SelectItem>
                   ))}
@@ -1155,14 +1201,27 @@ export default function ImagePortal({
                           </div>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-gray-100 rounded-lg overflow-hidden">
-                            <img
-                              src={getImageUrl(currentImage, 'display')}
-                              alt={getImageName(currentImage)}
-                              className="max-w-full max-h-full object-contain"
-                              style={{ imageRendering: 'high-quality' }}
-                              loading="lazy"
-                              decoding="async"
-                            />
+                            {(() => {
+                              const displaySrc = getImageUrl(currentImage, 'display');
+                              if (!displaySrc) {
+                                return (
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
+                                    <ImageIcon className="w-8 h-8 mb-2" />
+                                    <p className="text-sm">Loading image...</p>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <img
+                                  src={displaySrc}
+                                  alt={getImageName(currentImage)}
+                                  className="max-w-full max-h-full object-contain"
+                                  style={{ imageRendering: 'high-quality' }}
+                                  loading="lazy"
+                                  decoding="async"
+                                />
+                              );
+                            })()}
                           </div>
                         )
                       ) : (
@@ -1204,7 +1263,7 @@ export default function ImagePortal({
 
                         <div>
                           <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-medium text-gray-900">Group</h4>
+                            <h4 className="font-medium text-gray-900">Folder</h4>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1225,11 +1284,11 @@ export default function ImagePortal({
                                 </SelectTrigger>
                                 <SelectContent>
                                   {allAvailableGroups.map(group => (
-                                    <SelectItem key={group} value={group}>{group}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <div className="flex gap-2">
+                                  <SelectItem key={group} value={group}>{group}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <div className="flex gap-2">
                                 <Button
                                   size="sm"
                                   onClick={() => setEditingImageId(null)}
@@ -1297,8 +1356,8 @@ export default function ImagePortal({
                                 {images.length === 0 ? (
                                   <div className="text-center py-8 text-gray-500">
                                     <FolderOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                    <p className="text-sm">This group is empty</p>
-                                    <p className="text-xs mt-1">Upload images or move them here</p>
+                                    <p className="text-sm">This folder is empty</p>
+                                    <p className="text-xs mt-1">Move images here after upload.</p>
                                   </div>
                                 ) : (
                                   <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 2xl:grid-cols-16 gap-2">
@@ -1329,14 +1388,26 @@ export default function ImagePortal({
                                                 <div className="w-3 h-3 border border-teal-500 border-t-transparent rounded-full animate-spin"></div>
                                               </div>
                                             ) : (
-                                              <img
-                                                src={getImageUrl(image, 'thumbnail')}
-                                                alt={getImageName(image)}
-                                                className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-110"
-                                                loading="lazy"
-                                                decoding="async"
-                                                style={{ imageRendering: 'crisp-edges' }}
-                                              />
+                                              (() => {
+                                                const thumbnailSrc = getImageUrl(image, 'thumbnail');
+                                                if (!thumbnailSrc) {
+                                                  return (
+                                                    <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+                                                      <ImageIcon className="w-4 h-4 text-gray-400" />
+                                                    </div>
+                                                  );
+                                                }
+                                                return (
+                                                  <img
+                                                    src={thumbnailSrc}
+                                                    alt={getImageName(image)}
+                                                    className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-110"
+                                                    loading="lazy"
+                                                    decoding="async"
+                                                    style={{ imageRendering: 'crisp-edges' }}
+                                                  />
+                                                );
+                                              })()
                                             )}
                                             {/* Overlay for selection and status */}
                                             <div
@@ -1469,13 +1540,25 @@ export default function ImagePortal({
                                             <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
                                           </div>
                                         ) : (
-                                          <img
-                                            src={getImageUrl(image, 'thumbnail')}
-                                            alt={getImageName(image)}
-                                            className="w-full h-full object-cover rounded-lg"
-                                            loading="lazy"
-                                            decoding="async"
-                                          />
+                                          (() => {
+                                            const thumbnailSrc = getImageUrl(image, 'thumbnail');
+                                            if (!thumbnailSrc) {
+                                              return (
+                                                <div className="w-full h-full bg-gray-100 rounded-lg flex items-center justify-center">
+                                                  <ImageIcon className="w-4 h-4 text-gray-400" />
+                                                </div>
+                                              );
+                                            }
+                                            return (
+                                              <img
+                                                src={thumbnailSrc}
+                                                alt={getImageName(image)}
+                                                className="w-full h-full object-cover rounded-lg"
+                                                loading="lazy"
+                                                decoding="async"
+                                              />
+                                            );
+                                          })()
                                         )}
                                       </div>
 
@@ -1559,12 +1642,25 @@ export default function ImagePortal({
           </DialogHeader>
           {previewImage && (
             <div className="flex items-center justify-center max-h-[80vh]">
-              <img
-                src={getImageUrl(previewImage, 'full')}
-                alt={getImageName(previewImage)}
-                className="max-w-full max-h-full object-contain"
-                style={{ imageRendering: 'high-quality' }}
-              />
+              {(() => {
+                const fullSrc = getImageUrl(previewImage, 'full');
+                if (!fullSrc) {
+                  return (
+                    <div className="flex flex-col items-center justify-center text-gray-500">
+                      <ImageIcon className="w-10 h-10 mb-2" />
+                      <p className="text-sm">Loading image...</p>
+                    </div>
+                  );
+                }
+                return (
+                  <img
+                    src={fullSrc}
+                    alt={getImageName(previewImage)}
+                    className="max-w-full max-h-full object-contain"
+                    style={{ imageRendering: 'high-quality' }}
+                  />
+                );
+              })()}
             </div>
           )}
         </DialogContent>
@@ -1574,14 +1670,14 @@ export default function ImagePortal({
       <Dialog open={showGroupDialog} onOpenChange={setShowGroupDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create New Group</DialogTitle>
+            <DialogTitle>Create New Folder</DialogTitle>
             <DialogDescription>
-              Enter a name for the new image group. You can then move images into this group.
+              Enter a name for the new folder. You can then move images into it.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Input
-              placeholder="Group name (e.g., Validation, Test Set)"
+              placeholder="Folder name (e.g., Front Shelf, Back Room)"
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               onKeyDown={(e) => {
@@ -1597,7 +1693,7 @@ export default function ImagePortal({
               Cancel
             </Button>
             <Button onClick={createNewGroup} disabled={!newGroupName.trim()}>
-              Create Group
+              Create Folder
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -54,9 +54,10 @@ const stripQuotes = (value) => value.replace(/^['"]|['"]$/g, "");
 
 const resolveSplitName = (groupName) => {
   const normalized = String(groupName || "").toLowerCase();
-  if (normalized === "training") return "train";
+  if (normalized === "training" || normalized === "train") return "train";
   if (normalized === "inference" || normalized === "validation" || normalized === "val") return "val";
-  return "test";
+  if (normalized === "test" || normalized === "testing") return "test";
+  return "train";
 };
 
 const runWithConcurrency = async (items, limit, worker, shouldContinue) => {
@@ -754,7 +755,7 @@ export default function ImageUploadDialog({
 
       if (!classFile || !isYamlFile(classFile.file)) {
         const hasTestSplit = Object.keys(assignments).some(
-          (name) => name !== "Training" && name !== "Validation"
+          (name) => resolveSplitName(name) === "test"
         );
         setYamlUploadStatus({ state: "uploading", message: "Generating dataset YAML..." });
         await generateDatasetYaml(hasTestSplit);
@@ -806,6 +807,7 @@ export default function ImageUploadDialog({
               <p className="text-xs font-semibold tracking-[0.2em] text-amber-700 uppercase">Upload Studio</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-900">Bring your dataset to life</h2>
               <p className="mt-2 text-sm text-slate-600">Drop images, optionally add labels, then split or send everything to Training.</p>
+              <p className="mt-1 text-xs text-slate-500">Splits are set here; folders are just for organization.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-slate-900 text-white">Step 1 of 3</Badge>

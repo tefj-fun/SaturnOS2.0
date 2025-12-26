@@ -532,7 +532,7 @@ export default function AnnotationReviewPage() {
         const isValidationGroup = (group) => {
           const normalized = String(group || "").toLowerCase();
           if (!normalized) return false;
-          return normalized !== "training" && normalized !== "train";
+          return ["validation", "val", "inference", "test", "testing"].includes(normalized);
         };
 
         let validationSet = sortedImages.filter((image) => isValidationGroup(image.image_group));

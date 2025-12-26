@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { TrainingRun } from '@/api/entities';
 import { Project } from '@/api/entities';
@@ -51,17 +51,167 @@ const statusConfig = {
 
 const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
 const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const INFERENCE_HEARTBEAT_TIMEOUT_MS = 60000;
 const THUMBNAIL_SIZE = 96;
 const THUMBNAIL_TRANSFORM = { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, resize: "cover" };
 const THUMBNAIL_PREFETCH_LIMIT = 80;
-const THUMBNAIL_PREFETCH_BATCH = 20;
+const USE_THUMBNAIL_TRANSFORM = true;
+const THUMBNAIL_FALLBACK_TO_FULL = false;
 
 const deriveImageName = (imageUrl) => {
   if (!imageUrl) return "Unknown image";
   const last = imageUrl.split("?")[0].split("/").pop();
   return last || "Unknown image";
 };
+
+const buildAbsoluteUrl = (url) => {
+  if (!url || typeof url !== "string") return null;
+  try {
+    const base = SUPABASE_URL || window.location.origin;
+    return new URL(url, base);
+  } catch {
+    return null;
+  }
+};
+
+const isSupabaseSignedUrl = (url) => {
+  if (!url) return false;
+  try {
+    const parsed = buildAbsoluteUrl(url);
+    if (!parsed) return false;
+    return (
+      parsed.pathname.includes("/storage/v1/object/sign/") ||
+      parsed.pathname.includes("/storage/v1/render/image/sign/") ||
+      parsed.searchParams.has("token")
+    );
+  } catch {
+    return false;
+  }
+};
+
+const parseSupabaseRenderUrl = (url) => {
+  if (!url) return null;
+  try {
+    const parsed = buildAbsoluteUrl(url);
+    if (!parsed) return null;
+    const match = parsed.pathname.match(/\/storage\/v1\/render\/image\/(public|sign)\/([^/]+)\/(.+)/);
+    if (!match) return null;
+    return {
+      access: match[1],
+      bucket: match[2],
+      path: decodeURIComponent(match[3]),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const toPublicObjectUrl = (bucket, path) => {
+  if (!SUPABASE_URL || !bucket || !path) return null;
+  const base = SUPABASE_URL.replace(/\/+$/, "");
+  const encodedPath = path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${base}/storage/v1/object/public/${bucket}/${encodedPath}`;
+};
+
+const normalizeSupabaseSourceUrl = (url) => {
+  if (!url || typeof url !== "string") return "";
+  const renderInfo = parseSupabaseRenderUrl(url);
+  if (renderInfo) {
+    if (renderInfo.access === "public") {
+      return toPublicObjectUrl(renderInfo.bucket, renderInfo.path) || url;
+    }
+    return url;
+  }
+  return url;
+};
+
+const resolveSignedStorageUrl = async (url, { transform } = {}) => {
+  const normalized = normalizeSupabaseSourceUrl(url);
+  if (!normalized) return null;
+  const renderInfo = parseSupabaseRenderUrl(normalized);
+  if (renderInfo) {
+    return createSignedImageUrl(renderInfo.bucket, renderInfo.path, { expiresIn: 3600, transform });
+  }
+  const absolute = buildAbsoluteUrl(normalized);
+  const storageUrl = absolute ? absolute.toString() : normalized;
+  const datasetPath = getStoragePathFromUrl(storageUrl, DATASET_BUCKET);
+  if (datasetPath) {
+    return createSignedImageUrl(DATASET_BUCKET, datasetPath, { expiresIn: 3600, transform });
+  }
+  const stepPath = getStoragePathFromUrl(storageUrl, STEP_IMAGES_BUCKET);
+  if (stepPath) {
+    return createSignedImageUrl(STEP_IMAGES_BUCKET, stepPath, { expiresIn: 3600, transform });
+  }
+  return normalized;
+};
+
+function ImageLibraryItem({ image, selected, onSelect, onRequestSigned, onThumbnailError }) {
+  const itemRef = useRef(null);
+  const thumbnailSrc = image?.thumbnail || (THUMBNAIL_FALLBACK_TO_FULL ? image?.url : "");
+
+  useEffect(() => {
+    if (!itemRef.current || !image?.id || image?.thumbnailFailed) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onRequestSigned(image);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px", threshold: 0.1 }
+    );
+    observer.observe(itemRef.current);
+    return () => observer.disconnect();
+  }, [image, onRequestSigned]);
+
+  return (
+    <div
+      ref={itemRef}
+      onClick={() => onSelect(image)}
+      className={`p-3 rounded-lg border cursor-pointer transition-all ${
+        selected ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-gray-300"
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        {image.thumbnailFailed ? (
+          <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-400">
+            <ImageIcon className="w-5 h-5" />
+          </div>
+        ) : thumbnailSrc ? (
+          <img
+            src={normalizeSupabaseSourceUrl(thumbnailSrc)}
+            alt={image.name}
+            className="w-12 h-12 rounded object-cover"
+            loading="lazy"
+            decoding="async"
+            onError={() => onThumbnailError(image)}
+          />
+        ) : (
+          <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-400">
+            <ImageIcon className="w-5 h-5" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm truncate">{image.name}</p>
+          <p className="text-xs text-gray-500">{image.project}</p>
+          {image.tags.length > 0 && (
+            <div className="flex gap-1 mt-1 flex-wrap">
+              {image.tags.map((tag) => (
+                <Badge key={tag} variant="outline" className="text-xs">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const toNumber = (value) => {
   const numeric = Number(value);
@@ -197,27 +347,6 @@ const formatDateTime = (value) => {
   return Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleString();
 };
 
-const resolveSignedUrl = async (url, { transform } = {}) => {
-  if (!url || typeof url !== "string") return url;
-  if (url.startsWith("blob:") || url.startsWith("data:")) return url;
-
-  const trySignedUrl = async (bucket) => {
-    const path = getStoragePathFromUrl(url, bucket);
-    if (!path) return null;
-    try {
-      const signed = await createSignedImageUrl(bucket, path, { expiresIn: 3600, transform });
-      return signed || url;
-    } catch {
-      return url;
-    }
-  };
-
-  const stepImageUrl = await trySignedUrl(STEP_IMAGES_BUCKET);
-  if (stepImageUrl) return stepImageUrl;
-  const datasetUrl = await trySignedUrl(DATASET_BUCKET);
-  return datasetUrl || url;
-};
-
 const buildInferenceUrl = (endpoint, saveResults) => {
   if (!endpoint) return "";
   if (!saveResults) return endpoint;
@@ -259,9 +388,13 @@ export default function ResultsAndAnalysisPage() {
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [historyFilter, setHistoryFilter] = useState('all');
+  const [imagePage, setImagePage] = useState(1);
   const fileInputRef = useRef(null);
   const imageContainerRef = useRef(null);
   const imageRef = useRef(null);
+  const thumbnailRetryRef = useRef(new Map());
+  const signedRequestRef = useRef(new Set());
+  const fullImageRequestRef = useRef(new Set());
 
   const loadInferenceStatus = useCallback(async (force = false) => {
     if (!force && !inferenceStatus.isSupported) return;
@@ -358,37 +491,6 @@ export default function ResultsAndAnalysisPage() {
     });
   };
 
-  const prefetchImageThumbnails = async (images) => {
-    if (!Array.isArray(images) || images.length === 0) return;
-    const targets = images.slice(0, THUMBNAIL_PREFETCH_LIMIT);
-    for (let i = 0; i < targets.length; i += THUMBNAIL_PREFETCH_BATCH) {
-      const batch = targets.slice(i, i + THUMBNAIL_PREFETCH_BATCH);
-      try {
-        const signedBatch = await Promise.all(batch.map(async (image) => {
-          const rawThumbnail = image.rawThumbnail || image.thumbnail || image.rawUrl || image.url;
-          if (!rawThumbnail) return null;
-          const signedThumbnail = await resolveSignedUrl(rawThumbnail, { transform: THUMBNAIL_TRANSFORM });
-          return { id: image.id, thumbnail: signedThumbnail || rawThumbnail };
-        }));
-        const signedById = new Map(
-          signedBatch.filter(Boolean).map((entry) => [entry.id, entry.thumbnail])
-        );
-        if (signedById.size === 0) continue;
-        setDbImages((prev) => prev.map((item) => {
-          const signedThumbnail = signedById.get(item.id);
-          return signedThumbnail ? { ...item, thumbnail: signedThumbnail } : item;
-        }));
-        setSelectedImage((prev) => {
-          if (!prev) return prev;
-          const signedThumbnail = signedById.get(prev.id);
-          return signedThumbnail ? { ...prev, thumbnail: signedThumbnail } : prev;
-        });
-      } catch (error) {
-        console.warn("Failed to prefetch image thumbnails:", error);
-      }
-    }
-  };
-
   const loadDeployedModels = async () => {
     try {
       const allRuns = await TrainingRun.list();
@@ -419,15 +521,27 @@ export default function ResultsAndAnalysisPage() {
         const tags = [];
         if (image.image_group) tags.push(image.image_group);
         if (image.processing_status) tags.push(image.processing_status);
-        const fallbackUrl = image.display_url || image.image_url || image.thumbnail_url || "";
-        const thumbnailFallback = image.thumbnail_url || image.display_url || image.image_url || "";
+        const fallbackUrl = normalizeSupabaseSourceUrl(
+          image.display_url || image.image_url || image.thumbnail_url || ""
+        );
+        const thumbnailFallback = normalizeSupabaseSourceUrl(
+          image.thumbnail_url || image.display_url || image.image_url || ""
+        );
+        const effectiveThumbnail = thumbnailFallback === fallbackUrl ? "" : thumbnailFallback;
+        const hasStoragePath =
+          Boolean(getStoragePathFromUrl(fallbackUrl, DATASET_BUCKET)) ||
+          Boolean(getStoragePathFromUrl(fallbackUrl, STEP_IMAGES_BUCKET)) ||
+          Boolean(getStoragePathFromUrl(effectiveThumbnail, DATASET_BUCKET)) ||
+          Boolean(getStoragePathFromUrl(effectiveThumbnail, STEP_IMAGES_BUCKET));
+        const shouldDeferUrl = hasStoragePath || isSupabaseSignedUrl(fallbackUrl);
+        const shouldDeferThumbnail = hasStoragePath || isSupabaseSignedUrl(effectiveThumbnail);
         return {
           id: image.id,
           name: image.image_name || deriveImageName(image.display_url || image.image_url),
-          url: fallbackUrl,
-          thumbnail: thumbnailFallback,
+          url: shouldDeferUrl ? null : fallbackUrl,
+          thumbnail: shouldDeferThumbnail ? null : effectiveThumbnail,
           rawUrl: fallbackUrl,
-          rawThumbnail: thumbnailFallback,
+          rawThumbnail: effectiveThumbnail,
           isSigned: false,
           project: project?.name || "Unknown project",
           date: image.created_date,
@@ -436,7 +550,6 @@ export default function ResultsAndAnalysisPage() {
       });
 
       setDbImages(normalized);
-      prefetchImageThumbnails(normalized);
     } catch (error) {
       console.error('Error loading image database:', error);
     } finally {
@@ -498,27 +611,93 @@ export default function ResultsAndAnalysisPage() {
     }
   };
 
-  const ensureSignedImage = async (image) => {
+  const ensureSignedThumbnail = async (image) => {
     if (!image) return null;
-    if (image.isSigned) return image;
-    const rawUrl = image.rawUrl || image.url;
-    const rawThumbnail = image.rawThumbnail || image.thumbnail || rawUrl;
-    const [signedUrl, signedThumbnail] = await Promise.all([
-      rawUrl ? resolveSignedUrl(rawUrl) : null,
-      rawThumbnail ? resolveSignedUrl(rawThumbnail, { transform: THUMBNAIL_TRANSFORM }) : null,
-    ]);
-    const nextImage = {
-      ...image,
-      url: signedUrl || rawUrl,
-      thumbnail: signedThumbnail || rawThumbnail,
-      isSigned: true,
-    };
-    setDbImages((prev) => prev.map((item) => (
-      item.id === image.id ? { ...item, ...nextImage } : item
-    )));
-    setSelectedImage((prev) => (prev?.id === image.id ? nextImage : prev));
-    return nextImage;
+    if (image.thumbnail || image.thumbnailFailed) return image;
+    const rawThumbnail = image.rawThumbnail ? normalizeSupabaseSourceUrl(image.rawThumbnail) : null;
+    const rawUrl = image.rawUrl ? normalizeSupabaseSourceUrl(image.rawUrl) : null;
+    const thumbnailSource = rawThumbnail || (USE_THUMBNAIL_TRANSFORM ? rawUrl : null);
+    if (!thumbnailSource) return image;
+    const useTransform = USE_THUMBNAIL_TRANSFORM && !rawThumbnail;
+    try {
+      const signedThumbnail = await resolveSignedStorageUrl(
+        thumbnailSource,
+        useTransform ? { transform: THUMBNAIL_TRANSFORM } : undefined
+      );
+      if (!signedThumbnail) return image;
+      setDbImages((prev) => prev.map((item) => (
+        item.id === image.id ? { ...item, thumbnail: signedThumbnail } : item
+      )));
+      setSelectedImage((prev) =>
+        prev?.id === image.id ? { ...prev, thumbnail: signedThumbnail } : prev
+      );
+      return { ...image, thumbnail: signedThumbnail };
+    } catch (error) {
+      console.warn("Failed to load thumbnail:", error);
+      return image;
+    }
   };
+
+  const ensureSignedFullImage = async (image) => {
+    if (!image) return null;
+    if (image.isSigned && image.url) return image;
+    const rawUrl = normalizeSupabaseSourceUrl(image.rawUrl || image.url);
+    if (!rawUrl) return null;
+    try {
+      const signedUrl = await resolveSignedStorageUrl(rawUrl);
+      if (!signedUrl) return image;
+      const nextImage = {
+        ...image,
+        url: signedUrl,
+        isSigned: true,
+      };
+      setDbImages((prev) => prev.map((item) => (
+        item.id === image.id ? { ...item, ...nextImage } : item
+      )));
+      setSelectedImage((prev) => (prev?.id === image.id ? nextImage : prev));
+      return nextImage;
+    } catch (error) {
+      console.warn("Failed to load full image:", error);
+      return image;
+    }
+  };
+
+  const requestSignedThumbnail = useCallback((image) => {
+    if (!image?.id) return;
+    if (image.thumbnail || image.thumbnailFailed) return;
+    if (signedRequestRef.current.has(image.id)) return;
+    signedRequestRef.current.add(image.id);
+    Promise.resolve(ensureSignedThumbnail(image)).finally(() => {
+      signedRequestRef.current.delete(image.id);
+    });
+  }, [ensureSignedThumbnail]);
+
+  const requestSignedFullImage = useCallback((image) => {
+    if (!image?.id) return;
+    if (image.url && image.isSigned) return;
+    if (fullImageRequestRef.current.has(image.id)) return;
+    fullImageRequestRef.current.add(image.id);
+    Promise.resolve(ensureSignedFullImage(image)).finally(() => {
+      fullImageRequestRef.current.delete(image.id);
+    });
+  }, [ensureSignedFullImage]);
+
+  const handleThumbnailError = useCallback((image) => {
+    if (!image?.id) return;
+    const retryCount = thumbnailRetryRef.current.get(image.id) || 0;
+    if (retryCount >= 1) {
+      setDbImages((prev) =>
+        prev.map((item) =>
+          item.id === image.id ? { ...item, thumbnailFailed: true, thumbnail: null, url: null } : item
+        )
+      );
+      return;
+    }
+    thumbnailRetryRef.current.set(image.id, retryCount + 1);
+    Promise.resolve(ensureSignedThumbnail(image)).finally(() => {
+      thumbnailRetryRef.current.delete(image.id);
+    });
+  }, [ensureSignedThumbnail]);
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
@@ -540,7 +719,7 @@ export default function ResultsAndAnalysisPage() {
     setUploadPreview(null);
     setInferenceResults(null);
     if (image) {
-      ensureSignedImage(image);
+      requestSignedFullImage(image);
     }
   };
 
@@ -588,7 +767,7 @@ export default function ResultsAndAnalysisPage() {
       let headers = {};
       let imageForInference = selectedImage;
       if (imageForInference) {
-        imageForInference = await ensureSignedImage(imageForInference);
+        imageForInference = await ensureSignedFullImage(imageForInference);
       }
       const stepImageId = imageForInference?.id || null;
 
@@ -683,21 +862,36 @@ export default function ResultsAndAnalysisPage() {
   };
 
   const selectedRun = deployedModels.find((model) => model.id === selectedModel);
-  const previewSrc = uploadPreview || selectedImage?.url || selectedImage?.thumbnail || null;
+  const previewSrc = normalizeSupabaseSourceUrl(
+    uploadPreview || selectedImage?.url || selectedImage?.thumbnail || null
+  );
   const previewLabel = selectedImage?.name || uploadFile?.name || "No image selected";
   const previewProject = selectedImage?.project || (uploadFile ? "Uploaded image" : "N/A");
   const predictionsSummary = inferenceResults?.predictions || [];
   const predictionsAvgConfidence = averageConfidence(predictionsSummary);
 
-  const filteredImages = dbImages.filter((image) => {
-    if (!imageSearch) return true;
-    const haystack = [
-      image.name,
-      image.project,
-      ...(image.tags || []),
-    ].join(" ").toLowerCase();
-    return haystack.includes(imageSearch.toLowerCase());
-  });
+  const filteredImages = useMemo(() => {
+    if (!imageSearch) return dbImages;
+    const query = imageSearch.toLowerCase();
+    return dbImages.filter((image) => {
+      const haystack = [
+        image.name,
+        image.project,
+        ...(image.tags || []),
+      ].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [dbImages, imageSearch]);
+
+  const pageEnd = imagePage * THUMBNAIL_PREFETCH_LIMIT;
+  const visibleImages = useMemo(
+    () => filteredImages.slice(0, pageEnd),
+    [filteredImages, pageEnd]
+  );
+
+  useEffect(() => {
+    setImagePage(1);
+  }, [imageSearch, dbImages.length]);
 
   const displayScale = imageMetrics ? imageMetrics.fitScale * zoomLevel : 1;
   const stageWidth = imageMetrics ? imageMetrics.naturalWidth * displayScale : 0;
@@ -922,48 +1116,27 @@ export default function ResultsAndAnalysisPage() {
                               No images found yet.
                             </div>
                           )}
-                          {filteredImages.map((image) => (
-                            <div
+                          {visibleImages.map((image) => (
+                            <ImageLibraryItem
                               key={image.id}
-                              onClick={() => handleSelectImage(image)}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                                selectedImage?.id === image.id
-                                  ? "border-blue-500 bg-blue-50"
-                                  : "border-gray-200 hover:border-gray-300"
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                {image.thumbnail || image.url ? (
-                                  <img
-                                    src={image.thumbnail || image.url}
-                                    alt={image.name}
-                                    className="w-12 h-12 rounded object-cover"
-                                    loading="lazy"
-                                    decoding="async"
-                                  />
-                                ) : (
-                                  <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-400">
-                                    <ImageIcon className="w-5 h-5" />
-                                  </div>
-                                )}
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-medium text-sm truncate">{image.name}</p>
-                                  <p className="text-xs text-gray-500">{image.project}</p>
-                                  {image.tags.length > 0 && (
-                                    <div className="flex gap-1 mt-1 flex-wrap">
-                                      {image.tags.map((tag) => (
-                                        <Badge key={tag} variant="outline" className="text-xs">
-                                          {tag}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
+                              image={image}
+                              selected={selectedImage?.id === image.id}
+                              onSelect={handleSelectImage}
+                              onRequestSigned={requestSignedThumbnail}
+                              onThumbnailError={handleThumbnailError}
+                            />
                           ))}
                         </div>
                       </ScrollArea>
+                      {visibleImages.length < filteredImages.length && (
+                        <Button
+                          variant="outline"
+                          onClick={() => setImagePage((prev) => prev + 1)}
+                          className="w-full"
+                        >
+                          Load more images
+                        </Button>
+                      )}
 
                       <Button
                         variant="outline"

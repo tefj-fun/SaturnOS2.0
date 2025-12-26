@@ -608,10 +608,16 @@ export default forwardRef(function AnnotationCanvas({
   }, [imageGroups, currentImageGroup, currentImageIndex]);
 
   const totalInGroup = imageGroups[currentImageGroup]?.length || 0;
+  const activeImageUrl = currentImage?.display_url || currentImage?.image_url;
 
   useEffect(() => {
-    if (!currentImage?.image_url) {
+    if (!currentImage) {
       setIsImageLoading(false);
+      setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
+      return;
+    }
+    if (!activeImageUrl) {
+      setIsImageLoading(true);
       setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
       return;
     }
@@ -629,7 +635,7 @@ export default forwardRef(function AnnotationCanvas({
 
     setIsImageLoading(true);
     setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
-  }, [currentImage?.id, currentImage?.image_url, onImageLoaded]);
+  }, [currentImage?.id, activeImageUrl, onImageLoaded]);
 
   // MODIFIED EFFECT: Load annotations FROM currentImage's data
   useEffect(() => {
@@ -2688,7 +2694,7 @@ export default forwardRef(function AnnotationCanvas({
       >
         <img
           ref={imageRef}
-          src={currentImage.image_url}
+          src={activeImageUrl || undefined}
           alt={currentImage.image_name}
           className="absolute top-0 left-0 select-none"
           onLoad={handleImageLoad}

@@ -53,6 +53,64 @@ import LogicBuilder from "../components/annotation/LogicBuilder";
 import ImagePortal from "../components/annotation/ImagePortal";
 import AnnotationInsights from "../components/annotation/AnnotationInsights";
 
+const isSupabaseSignedUrl = (url) => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.pathname.includes("/storage/v1/object/sign/") ||
+      parsed.pathname.includes("/storage/v1/render/image/sign/")
+    ) {
+      return true;
+    }
+    return parsed.searchParams.has("token");
+  } catch {
+    return false;
+  }
+};
+
+const decodeJwtPayload = (token) => {
+  if (!token || typeof token !== "string") return null;
+  try {
+    const payloadSegment = token.split(".")[1];
+    if (!payloadSegment) return null;
+    const normalized = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
+const isSignedUrlFresh = (url, bufferSeconds = 60) => {
+  if (!isSupabaseSignedUrl(url)) return false;
+  try {
+    const parsed = new URL(url);
+    const token = parsed.searchParams.get("token");
+    if (!token) return false;
+    const payload = decodeJwtPayload(token);
+    if (!payload?.exp) return false;
+    const nowSeconds = Date.now() / 1000;
+    return payload.exp - bufferSeconds > nowSeconds;
+  } catch {
+    return false;
+  }
+};
+
+const isSupabasePublicUrl = (url) => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.pathname.includes("/storage/v1/object/public/") ||
+      parsed.pathname.includes("/storage/v1/render/image/public/")
+    );
+  } catch {
+    return false;
+  }
+};
+
 export default function AnnotationStudioPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -283,12 +341,35 @@ export default function AnnotationStudioPage() {
           bucket = DATASET_BUCKET;
           path = getStoragePathFromUrl(baseUrl, DATASET_BUCKET);
         }
-        return { image, bucket, path };
+        const seeded = {
+          ...image,
+          source_image_url: image.image_url,
+          source_display_url: image.display_url,
+          source_thumbnail_url: image.thumbnail_url,
+        };
+        if (!path) return { image: seeded, bucket, path };
+        const hasSignedUrl = [seeded.image_url, seeded.display_url, seeded.thumbnail_url].some(
+          isSupabaseSignedUrl
+        );
+        return {
+          image: {
+            ...seeded,
+            storage_path: path,
+            storage_bucket: bucket,
+            ...(hasSignedUrl
+              ? {}
+              : {
+                  image_url: null,
+                  display_url: null,
+                  thumbnail_url: null,
+                }),
+          },
+          bucket,
+          path,
+        };
       });
 
-      const seedImages = resolvedImages.map(({ image, path }) =>
-        path ? { ...image, storage_path: path } : image
-      );
+      const seedImages = resolvedImages.map(({ image }) => image);
 
       setStepImages(seedImages);
       const initialIndex = preserveIndex
@@ -310,25 +391,69 @@ export default function AnnotationStudioPage() {
         });
       };
 
+      const pickFallbackUrl = (image, candidates, path) => {
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+          if (path && isSupabasePublicUrl(candidate) && !isSupabaseSignedUrl(candidate)) {
+            continue;
+          }
+          return candidate;
+        }
+        return null;
+      };
+
       const signImage = async ({ image, bucket, path }) => {
         if (!path) return null;
+        const existingThumbnail = [image.thumbnail_url, image.source_thumbnail_url, image.source_display_url]
+          .find((candidate) => isSignedUrlFresh(candidate));
+        const existingDisplay = [image.display_url, image.source_display_url, image.image_url]
+          .find((candidate) => isSignedUrlFresh(candidate));
+        const existingFull = [image.image_url, image.source_image_url, image.display_url]
+          .find((candidate) => isSignedUrlFresh(candidate));
+
         const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
-          createSignedImageUrl(bucket, path, {
-            expiresIn: 3600,
-            transform: { width: 300, height: 300, resize: "cover" },
-          }),
-          createSignedImageUrl(bucket, path, {
-            expiresIn: 3600,
-            transform: { width: 1200, resize: "contain" },
-          }),
-          createSignedImageUrl(bucket, path, { expiresIn: 3600 }),
+          existingThumbnail
+            ? null
+            : createSignedImageUrl(bucket, path, {
+                expiresIn: 3600,
+                transform: { width: 300, height: 300, resize: "cover" },
+              }),
+          existingDisplay
+            ? null
+            : createSignedImageUrl(bucket, path, {
+                expiresIn: 3600,
+                transform: { width: 1200, resize: "contain" },
+              }),
+          existingFull ? null : createSignedImageUrl(bucket, path, { expiresIn: 3600 }),
         ]);
 
         return {
           storage_path: path,
-          thumbnail_url: thumbnailUrl || image.thumbnail_url,
-          display_url: displayUrl || image.display_url,
-          image_url: fullUrl || image.image_url,
+          storage_bucket: bucket,
+          thumbnail_url:
+            thumbnailUrl ||
+            existingThumbnail ||
+            pickFallbackUrl(
+              image,
+              [image.thumbnail_url, image.source_thumbnail_url, image.source_display_url, image.source_image_url],
+              path
+            ),
+          display_url:
+            displayUrl ||
+            existingDisplay ||
+            pickFallbackUrl(
+              image,
+              [image.display_url, image.source_display_url, image.image_url, image.source_image_url],
+              path
+            ),
+          image_url:
+            fullUrl ||
+            existingFull ||
+            pickFallbackUrl(
+              image,
+              [image.image_url, image.source_image_url, image.display_url, image.source_display_url],
+              path
+            ),
         };
       };
 
@@ -367,9 +492,14 @@ export default function AnnotationStudioPage() {
   }, [currentStep, currentImageIndex, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
 
   useEffect(() => {
-    const imageUrl = stepImages[currentImageIndex]?.image_url;
+    const currentImage = stepImages[currentImageIndex];
+    if (!currentImage) {
+      setIsInitialImageReady(true);
+      return;
+    }
+    const imageUrl = currentImage.display_url || currentImage.image_url;
     if (!imageUrl) {
-      if (stepImages.length > 0) {
+      if (!currentImage.storage_path) {
         setIsInitialImageReady(true);
       }
       return;
