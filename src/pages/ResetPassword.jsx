@@ -21,6 +21,7 @@ export default function ResetPassword() {
 
     const syncSession = (session) => {
       if (!isMounted) return;
+      if (didUpdate) return;
       setSessionEmail(session?.user?.email || "");
       setStatus(session ? "ready" : "missing");
     };
@@ -44,7 +45,16 @@ export default function ResetPassword() {
       isMounted = false;
       listener?.subscription?.unsubscribe();
     };
-  }, []);
+  }, [didUpdate]);
+
+  useEffect(() => {
+    if (!didUpdate) return;
+    setStatus("success");
+    const timer = setTimeout(() => {
+      navigate("/", { replace: true });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [didUpdate, navigate]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -87,6 +97,12 @@ export default function ResetPassword() {
           eyebrow: "Link missing",
           title: "Open the reset email.",
           body: "We could not find a recovery session. Please use the reset link from your inbox.",
+        };
+      case "success":
+        return {
+          eyebrow: "Done",
+          title: "Password updated.",
+          body: "Redirecting you to sign in.",
         };
       default:
         return {
