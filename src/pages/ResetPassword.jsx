@@ -14,6 +14,7 @@ export default function ResetPassword() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [didUpdate, setDidUpdate] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -64,7 +65,9 @@ export default function ResetPassword() {
     if (updateError) {
       setError(updateError.message);
     } else {
-      setNotice("Password updated. You can continue to SaturnOS.");
+      await supabase.auth.signOut({ scope: "local" });
+      setDidUpdate(true);
+      setNotice("Password updated. Please sign in again.");
       setPassword("");
       setConfirmPassword("");
     }
@@ -201,13 +204,15 @@ export default function ResetPassword() {
                 >
                   {isSubmitting ? "Updating..." : "Update password"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => navigate("/", { replace: true })}
-                  className="w-full border border-gray-200 text-gray-700 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
-                >
-                  Continue to SaturnOS
-                </button>
+                {didUpdate ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate("/", { replace: true })}
+                    className="w-full border border-gray-200 text-gray-700 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+                  >
+                    Return to sign in
+                  </button>
+                ) : null}
               </form>
             ) : (
               <div className="mt-6 space-y-3">
