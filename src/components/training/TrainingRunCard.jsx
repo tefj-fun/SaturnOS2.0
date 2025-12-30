@@ -10,7 +10,7 @@ import { createPageUrl } from '@/utils';
 import { TrainingRun } from '@/api/entities';
 
 const statusConfig = {
-    running: { icon: <Rocket className="w-4 h-4 text-blue-600" />, color: "bg-blue-100 text-blue-800", label: "Running" },
+    running: { icon: <Rocket className="w-4 h-4 text-amber-600" />, color: "bg-amber-100 text-amber-800", label: "Running" },
     queued: { icon: <Clock className="w-4 h-4 text-amber-600" />, color: "bg-amber-100 text-amber-800", label: "Queued" },
     canceling: { icon: <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />, color: "bg-amber-100 text-amber-800", label: "Canceling" },
     completed: { icon: <CheckCircle className="w-4 h-4 text-green-600" />, color: "bg-green-100 text-green-800", label: "Completed" },
@@ -179,7 +179,7 @@ export default function TrainingRunCard({ run, onStop, onDelete, onDeploy }) {
                 asChild 
                 variant="outline" 
                 size="sm" 
-                className="w-full border-green-300 text-green-700 hover:bg-green-50"
+                className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 <Link to={createPageUrl(`TrainingStatus?runId=${run.id}`)}>
                   <BarChart3 className="w-4 h-4 mr-2" />
@@ -198,7 +198,7 @@ export default function TrainingRunCard({ run, onStop, onDelete, onDeploy }) {
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2 mt-4">
             {['running', 'queued', 'canceling'].includes(run.status) && (
-              <Button asChild variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50">
+              <Button asChild variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50">
                 <Link to={createPageUrl(`TrainingStatus?runId=${run.id}`)}>
                   <BarChart3 className="w-3 h-3 mr-1" />
                   View Progress
@@ -210,7 +210,7 @@ export default function TrainingRunCard({ run, onStop, onDelete, onDeploy }) {
                 onClick={handleDeploy}
                 disabled={isDeploying}
                 size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
               >
                 {isDeploying ? (
                   <>
@@ -228,7 +228,7 @@ export default function TrainingRunCard({ run, onStop, onDelete, onDeploy }) {
 
             {run.is_deployed && (
               <Link to={createPageUrl(`ResultsAndAnalysis?modelId=${run.id}`)}>
-                <Button variant="outline" size="sm" className="border-green-200 text-green-700 hover:bg-green-50">
+                <Button variant="outline" size="sm" className="border-amber-200 text-amber-700 hover:bg-amber-50">
                   <Target className="w-3 h-3 mr-1" />
                   Test
                 </Button>

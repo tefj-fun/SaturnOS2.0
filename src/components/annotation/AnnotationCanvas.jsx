@@ -1900,14 +1900,14 @@ export default forwardRef(function AnnotationCanvas({
       '#8b5cf6', // violet-500
       '#ef4444', // red-500
       '#f59e0b', // amber-500
-      '#10b981', // emerald-500
+      '#0ea5e9', // sky-500
       '#f97316', // orange-500
       '#06b6d4', // cyan-500
       '#84cc16', // lime-500
       '#ec4899', // pink-500
       '#a855f7', // purple-500
       '#6b7280', // gray-500
-      '#60a5fa', // blue-400, replacement for teal-500
+      '#60a5fa', // blue-400
       '#f43f5e', // rose-500
       '#a3e635'  // lime-300
     ];
@@ -1934,7 +1934,7 @@ export default forwardRef(function AnnotationCanvas({
     
     const statusLower = status.toLowerCase();
     if (statusLower.includes('pass') || statusLower.includes('good') || statusLower.includes('ok')) {
-      return '#10b981'; // green-500
+      return '#16a34a'; // green-600
     } else if (statusLower.includes('fail') || statusLower.includes('bad') || statusLower.includes('error') || statusLower.includes('defective')) {
       return '#ef4444'; // red-500
     } else {

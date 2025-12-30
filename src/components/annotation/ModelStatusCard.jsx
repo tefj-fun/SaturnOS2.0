@@ -69,7 +69,7 @@ export default function ModelStatusCard({ projectId, currentStep }) {
         status: 'ready',
         title: 'Model Ready',
         description: `Latest model: ${bestRun.run_name}`,
-        color: 'bg-green-100 text-green-700',
+        color: 'bg-blue-100 text-blue-700',
         icon: CheckCircle,
         metrics: bestRun.results
       };

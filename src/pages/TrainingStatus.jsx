@@ -60,14 +60,14 @@ const TrainingAnimation = ({ isTraining, progress }) => {
     <div className="relative w-32 h-32 mx-auto mb-6">
       {/* Outer rotating ring */}
       <motion.div
-        className="absolute inset-0 border-4 border-blue-200 rounded-full"
+        className="absolute inset-0 border-4 border-amber-200 rounded-full"
         animate={isTraining ? { rotate: 360 } : {}}
         transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
       />
 
       {/* Inner pulsing circle */}
       <motion.div
-        className="absolute inset-4 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center"
+        className="absolute inset-4 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full flex items-center justify-center"
         animate={isTraining ? { scale: [1, 1.1, 1] } : {}}
         transition={{ duration: 2, repeat: Infinity }}
       >
@@ -83,7 +83,7 @@ const TrainingAnimation = ({ isTraining, progress }) => {
           stroke="currentColor"
           strokeWidth="4"
           fill="none"
-          className="text-green-500"
+          className="text-amber-500"
           strokeDasharray={`${2 * Math.PI * 60}`}
           strokeDashoffset={`${2 * Math.PI * 60 * (1 - progress / 100)}`}
           style={{ transition: 'stroke-dashoffset 0.5s ease-in-out' }}
@@ -108,26 +108,31 @@ const TrainingTimeline = ({ currentIndex, status }) => {
         const isActive = index === currentIndex;
         const isComplete = index < currentIndex;
         const isFailed = ['failed', 'canceled', 'stopped'].includes(status) && index === currentIndex;
+        const completedDotClass = status === 'completed' ? 'bg-green-500' : 'bg-amber-500';
+        const activeDotClass = status === 'completed' ? 'bg-green-500' : 'bg-amber-500';
+        const completedTextClass = status === 'completed' ? 'text-green-700' : 'text-amber-700';
+        const activeTextClass = status === 'completed' ? 'text-green-600' : 'text-amber-600';
+        const completedLineClass = status === 'completed' ? 'bg-green-300' : 'bg-amber-300';
         const dotClass = isFailed
           ? 'bg-red-500'
           : isComplete
-            ? 'bg-green-500'
+            ? completedDotClass
             : isActive
-              ? 'bg-blue-500'
+              ? activeDotClass
               : 'bg-gray-300';
         const textClass = isFailed
           ? 'text-red-600'
           : isComplete
-            ? 'text-green-700'
+            ? completedTextClass
             : isActive
-              ? 'text-blue-600'
+              ? activeTextClass
               : 'text-gray-400';
         return (
           <div key={phase.key} className="flex items-center gap-2">
             <div className={`h-2 w-2 rounded-full ${dotClass}`} />
             <span className={`text-xs font-medium ${textClass}`}>{phase.label}</span>
             {index < trainingPhases.length - 1 && (
-              <div className={`h-px w-6 ${isComplete ? 'bg-green-300' : 'bg-gray-300'}`} />
+              <div className={`h-px w-6 ${isComplete ? completedLineClass : 'bg-gray-300'}`} />
             )}
           </div>
         );
@@ -136,7 +141,7 @@ const TrainingTimeline = ({ currentIndex, status }) => {
   );
 };
 
-const MetricCard = ({ icon, label, value, trend, color = "blue" }) => (
+const MetricCard = ({ icon, label, value, trend, color = "amber" }) => (
   <Card className="glass-effect border-0 shadow-lg">
     <CardContent className="p-4">
       <div className="flex items-center justify-between">
@@ -333,8 +338,8 @@ export default function TrainingStatusPage() {
       case 'deploying':
         return {
           label: 'Deploying...',
-          color: 'bg-blue-100 text-blue-800',
-          icon: <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+          color: 'bg-amber-100 text-amber-800',
+          icon: <Loader2 className="w-4 h-4 text-amber-600 animate-spin" />
         };
       case 'deployment_failed':
         return {
@@ -354,7 +359,7 @@ export default function TrainingStatusPage() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 mx-auto mb-4 animate-spin">
-            <Brain className="w-12 h-12 text-blue-600" />
+            <Brain className="w-12 h-12 text-amber-600" />
           </div>
           <p className="text-gray-600">Loading training status...</p>
         </div>
@@ -425,7 +430,7 @@ export default function TrainingStatusPage() {
             ? { icon: <Clock className="w-5 h-5 text-amber-600" />, title: "Canceling Training" }
             : isQueued
               ? { icon: <Clock className="w-5 h-5 text-amber-600" />, title: "Training Queued" }
-              : { icon: <Sparkles className="w-5 h-5 text-purple-600" />, title: "Your AI Model is Learning" };
+              : { icon: <Sparkles className="w-5 h-5 text-amber-600" />, title: "Your AI Model is Learning" };
 
   const trainingProgressContent = (
     <div className="lg:col-span-2 space-y-6">
@@ -451,11 +456,11 @@ export default function TrainingStatusPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
               <div>
-                <p className="text-2xl font-bold text-blue-600">{currentEpochDisplay}</p>
+                <p className="text-2xl font-bold text-amber-600">{currentEpochDisplay}</p>
                 <p className="text-sm text-gray-600">Current Epoch</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-purple-600">{totalEpochs || 'N/A'}</p>
+                <p className="text-2xl font-bold text-amber-600">{totalEpochs || 'N/A'}</p>
                 <p className="text-sm text-gray-600">Total Epochs</p>
               </div>
             </div>
@@ -469,7 +474,7 @@ export default function TrainingStatusPage() {
           icon={<Target />}
           label="mAP"
           value={formatMetric(results.mAP)}
-          color="blue"
+          color="amber"
         />
         <MetricCard
           icon={<TrendingUp />}
@@ -675,7 +680,7 @@ export default function TrainingStatusPage() {
         {isCompleted && (
           <Button
             onClick={() => navigate(createPageUrl(`AnnotationStudio?projectId=${project?.id}`))}
-            className="w-full bg-green-600 hover:bg-green-700"
+            className="w-full bg-amber-600 hover:bg-amber-700"
           >
             <Target className="w-4 h-4 mr-2" />
             Test Your Model
@@ -694,7 +699,7 @@ export default function TrainingStatusPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-orange-50 p-6">
       <div className="max-w-7xl mx-auto"> {/* Increased max-width */}
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
@@ -741,7 +746,7 @@ export default function TrainingStatusPage() {
               </>
             ) : (
               <>
-                <Rocket className="w-8 h-8 text-blue-600" />
+                <Rocket className="w-8 h-8 text-amber-600" />
                 Training in Progress
               </>
             )}
@@ -760,7 +765,7 @@ export default function TrainingStatusPage() {
                   : isCanceling
                     ? 'bg-amber-100 text-amber-800'
                     : isTraining
-                      ? 'bg-blue-100 text-blue-800'
+                      ? 'bg-amber-100 text-amber-800'
                     : isFailed
                       ? 'bg-red-100 text-red-800'
                       : isCanceled
@@ -824,7 +829,7 @@ export default function TrainingStatusPage() {
                   icon={<Target />}
                   label="Mean Average Precision"
                   value={formatMetric(results.mAP)}
-                  color="blue"
+                  color="amber"
                 />
                 <MetricCard
                   icon={<TrendingUp />}
@@ -860,7 +865,7 @@ export default function TrainingStatusPage() {
                         {artifacts.map((artifact) => (
                         <div key={artifact.path || artifact.name} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded border border-gray-200 p-2">
                             <span className="text-sm text-gray-700">{artifact.name}</span>
-                            <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">Download</a>
+                            <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="text-sm text-amber-600 hover:underline">Download</a>
                           </div>
                         ))}
                       </div>
@@ -885,7 +890,7 @@ export default function TrainingStatusPage() {
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                       <span>Trained Model:</span>
                       {trainingRun.trained_model_url ? (
-                        <a href={trainingRun.trained_model_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Download</a>
+                        <a href={trainingRun.trained_model_url} target="_blank" rel="noopener noreferrer" className="text-amber-600 hover:underline">Download</a>
                       ) : (
                         <span className="font-medium text-gray-800">N/A</span>
                       )}
@@ -914,7 +919,7 @@ export default function TrainingStatusPage() {
                       asChild
                       variant="default"
                       size="lg"
-                      className="w-full bg-blue-600 hover:bg-blue-700 shadow-lg"
+                      className="w-full bg-amber-600 hover:bg-amber-700 shadow-lg"
                   >
                       <Link to={createPageUrl(`AnnotationReview?runId=${trainingRun.id}`)}>
                           <Target className="w-5 h-5 mr-2" />
@@ -937,7 +942,7 @@ export default function TrainingStatusPage() {
                 <Card className="glass-effect border-0 shadow-lg">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Rocket className="w-5 h-5 text-blue-600" />
+                      <Rocket className="w-5 h-5 text-amber-600" />
                       Model Deployment & Actions
                     </CardTitle>
                   </CardHeader>
@@ -956,7 +961,7 @@ export default function TrainingStatusPage() {
                         <Button
                           onClick={() => handleDeployModel(trainingRun.id)}
                           disabled={isDeploying}
-                          className="bg-blue-600 hover:bg-blue-700"
+                          className="bg-amber-600 hover:bg-amber-700"
                         >
                           {isDeploying ? (
                             <>
@@ -991,7 +996,7 @@ export default function TrainingStatusPage() {
                       {/* Test Deployed Model Button */}
                       {trainingRun?.is_deployed && trainingRun?.deployment_status === 'deployed' && (
                         <Link to={createPageUrl(`ResultsAndAnalysis?modelId=${trainingRun.id}`)}>
-                          <Button variant="outline" className="border-green-200 text-green-700 hover:bg-green-50">
+                          <Button variant="outline" className="border-amber-200 text-amber-700 hover:bg-amber-50">
                             <Target className="w-4 h-4 mr-2" />
                             Test Model
                           </Button>

@@ -18,7 +18,7 @@ export default function StepNavigation({ steps, currentStepIndex, onStepSelect }
           onClick={() => onStepSelect(index)}
           className={`w-full justify-start h-auto p-3 text-left ${
             index === currentStepIndex 
-              ? "bg-teal-600 hover:bg-teal-700" 
+              ? "bg-blue-600 hover:bg-blue-700" 
               : "hover:bg-gray-50"
           }`}
         >

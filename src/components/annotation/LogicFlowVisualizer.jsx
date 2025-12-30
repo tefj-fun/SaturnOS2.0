@@ -45,7 +45,7 @@ export default function LogicFlowVisualizer({ rules }) {
     <Card className="h-full shadow-lg border-0">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Workflow className="w-5 h-5 text-teal-600" />
+          <Workflow className="w-5 h-5 text-blue-600" />
           <span>Logic Flow Visualizer</span>
         </CardTitle>
       </CardHeader>
@@ -57,8 +57,8 @@ export default function LogicFlowVisualizer({ rules }) {
             animate={{ opacity: 1, scale: 1 }}
             className="flex flex-col items-center"
           >
-            <div className="w-12 h-12 bg-green-100 border-2 border-green-500 rounded-full flex items-center justify-center shadow-md">
-              <Workflow className="w-6 h-6 text-green-600" />
+            <div className="w-12 h-12 bg-blue-100 border-2 border-blue-500 rounded-full flex items-center justify-center shadow-md">
+              <Workflow className="w-6 h-6 text-blue-600" />
             </div>
             <span className="text-xs font-medium text-gray-600 mt-1">START</span>
           </motion.div>
@@ -104,9 +104,9 @@ export default function LogicFlowVisualizer({ rules }) {
                   transition={{ delay: activeRules.length * 0.1 + 0.2 }}
                   className="flex flex-col items-center"
                 >
-                  <div className="flex items-center gap-2 p-3 rounded-lg bg-green-100 border border-green-300 shadow-md">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    <span className="font-medium text-green-800">Success</span>
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-100 border border-blue-300 shadow-md">
+                    <CheckCircle className="w-5 h-5 text-blue-600" />
+                    <span className="font-medium text-blue-800">Success</span>
                   </div>
                   <span className="text-xs text-gray-500 mt-1">All rules pass</span>
                 </motion.div>
@@ -135,9 +135,9 @@ export default function LogicFlowVisualizer({ rules }) {
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex flex-col items-center"
               >
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-green-100 border border-green-300 shadow-md">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="font-medium text-green-800">Auto-Pass</span>
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-100 border border-blue-300 shadow-md">
+                  <CheckCircle className="w-5 h-5 text-blue-600" />
+                  <span className="font-medium text-blue-800">Auto-Pass</span>
                 </div>
                 <span className="text-xs text-gray-500 mt-1">No rules defined</span>
               </motion.div>
@@ -149,7 +149,7 @@ export default function LogicFlowVisualizer({ rules }) {
             <div className="mt-8 p-4 bg-gray-50 rounded-lg border border-gray-200 w-full max-w-sm">
               <h4 className="font-semibold text-gray-800 text-sm mb-2">Logic Flow:</h4>
               <p className="text-xs text-gray-600 leading-relaxed">
-                Each rule must evaluate to <span className="font-semibold text-green-600">true</span> for 
+                Each rule must evaluate to <span className="font-semibold text-blue-600">true</span> for 
                 the annotation to be considered successful. If any rule fails, the entire step fails.
               </p>
             </div>

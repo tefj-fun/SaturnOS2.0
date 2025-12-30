@@ -59,15 +59,15 @@ export default function FileUploadZone({ onFileUpload, isUploading, progress }) 
         onDrop={handleDrop}
         className={`relative border-2 border-dashed rounded-2xl p-12 transition-all duration-300 ${
           dragActive 
-            ? "border-teal-400 bg-teal-50" 
+            ? "border-blue-400 bg-blue-50" 
             : "border-gray-300 hover:border-gray-400"
         } ${isUploading ? "pointer-events-none opacity-60" : ""}`}
       >
         <div className="text-center">
           {!isUploading ? (
             <>
-              <div className="w-20 h-20 mx-auto mb-6 bg-teal-50 rounded-full flex items-center justify-center">
-                <FileText className="w-10 h-10 text-teal-600" />
+              <div className="w-20 h-20 mx-auto mb-6 bg-blue-50 rounded-full flex items-center justify-center">
+                <FileText className="w-10 h-10 text-blue-600" />
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">
                 Upload Your SOP Document
@@ -77,7 +77,7 @@ export default function FileUploadZone({ onFileUpload, isUploading, progress }) 
               </p>
               <Button
                 onClick={openFileDialog}
-                className="bg-teal-600 hover:bg-teal-700 shadow-lg"
+                className="bg-blue-600 hover:bg-blue-700 shadow-lg"
                 size="lg"
               >
                 <Upload className="w-5 h-5 mr-2" />
@@ -90,7 +90,7 @@ export default function FileUploadZone({ onFileUpload, isUploading, progress }) 
           ) : (
             <>
               <div className="w-20 h-20 mx-auto mb-6">
-                <Loader2 className="w-20 h-20 animate-spin text-teal-600" />
+                <Loader2 className="w-20 h-20 animate-spin text-blue-600" />
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">
                 Uploading Document...

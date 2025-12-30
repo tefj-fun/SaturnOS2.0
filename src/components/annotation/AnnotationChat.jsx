@@ -95,7 +95,7 @@ export default function AnnotationChat({
       {/* Header */}
       <div className="p-4 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-teal-600 rounded-lg flex items-center justify-center">
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center">
             <Bot className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -113,7 +113,7 @@ export default function AnnotationChat({
           {/* Annotation Tools */}
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-2">
-              <Target className="w-4 h-4 text-teal-700" />
+              <Target className="w-4 h-4 text-indigo-700" />
               <span className="font-semibold text-sm text-gray-900">1. Choose Tool</span>
             </div>
             <div className="grid grid-cols-2 gap-1">
@@ -125,7 +125,7 @@ export default function AnnotationChat({
                   onClick={() => onAnnotationModeChange(mode.id)}
                   className={`h-auto p-2 ${
                     annotationMode === mode.id 
-                      ? "bg-teal-600 hover:bg-teal-700 text-white" 
+                      ? "bg-indigo-600 hover:bg-indigo-700 text-white" 
                       : "hover:bg-gray-100 bg-white"
                   }`}
                 >
@@ -149,7 +149,7 @@ export default function AnnotationChat({
                 className="overflow-hidden"
               >
                 <div className="mt-3">
-                  <label className="font-semibold text-sm text-gray-900 mb-2 block">Brush Size: <span className="text-teal-700">{brushSize}px</span></label>
+                  <label className="font-semibold text-sm text-gray-900 mb-2 block">Brush Size: <span className="text-indigo-700">{brushSize}px</span></label>
                   <Slider
                     value={[brushSize]}
                     onValueChange={(value) => onBrushSizeChange(value[0])}
@@ -165,7 +165,7 @@ export default function AnnotationChat({
           {/* Quick Responses */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 mb-2">
-                <Lightbulb className="w-4 h-4 text-teal-700" />
+                <Lightbulb className="w-4 h-4 text-indigo-700" />
                 <span className="font-semibold text-sm text-gray-900">2. Ask for Help</span>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -203,7 +203,7 @@ export default function AnnotationChat({
                 >
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                     message.type === 'ai' 
-                      ? 'bg-teal-100 text-teal-600' 
+                      ? 'bg-indigo-100 text-indigo-600' 
                       : 'bg-blue-100 text-blue-600'
                   }`}>
                     {message.type === 'ai' ? (
@@ -238,16 +238,16 @@ export default function AnnotationChat({
                 animate={{ opacity: 1, y: 0 }}
                 className="flex items-start gap-3"
               >
-                <div className="w-8 h-8 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center">
+                <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center">
                   <Bot className="w-4 h-4" />
                 </div>
                 <div className="flex-1">
                   <div className="inline-block p-3 bg-white border border-gray-200 rounded-lg">
                     <div className="flex items-center gap-2">
                       <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" />
-                        <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                        <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                        <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" />
+                        <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                        <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                       </div>
                       <span className="text-xs text-gray-500">AI is thinking...</span>
                     </div>
@@ -276,7 +276,7 @@ export default function AnnotationChat({
             type="submit"
             size="sm"
             disabled={!inputMessage.trim() || isAIThinking}
-            className="bg-teal-600 hover:bg-teal-700"
+            className="bg-indigo-600 hover:bg-indigo-700"
           >
             <Send className="w-4 h-4" />
           </Button>

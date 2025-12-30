@@ -281,7 +281,7 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
             <div>
               <h2 className="text-xl font-bold text-gray-900">Logic Builder</h2>
               <p className="text-sm text-gray-600">
-                Step: <span className="font-semibold text-teal-700">{currentStep.title}</span>
+                Step: <span className="font-semibold text-blue-700">{currentStep.title}</span>
               </p>
             </div>
             
@@ -312,7 +312,7 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
             </Button>
             <Button
               onClick={() => setShowAddRule(true)}
-              className="bg-teal-600 hover:bg-teal-700"
+              className="bg-blue-600 hover:bg-blue-700"
               disabled={isGenerating}
               size="sm"
             >
@@ -343,8 +343,8 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
                       onDragStart={(e) => handleDragStart(e, cls)}
                       onDragEnd={handleDragEnd}
                       className={`cursor-grab active:cursor-grabbing transition-all duration-200 bg-white text-xs h-7 px-2 ${
-                        draggedClass === cls ? 'opacity-50 border-teal-400' : ''
-                      } hover:bg-teal-50 hover:border-teal-300`}
+                        draggedClass === cls ? 'opacity-50 border-blue-400' : ''
+                      } hover:bg-blue-50 hover:border-blue-300`}
                     >
                       <GripVertical className="w-3 h-3 mr-1 text-gray-400" />
                       {cls}
@@ -377,7 +377,7 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
           <div className="flex-1 overflow-y-auto p-4">
             {isGenerating ? (
               <div className="text-center py-12">
-                <Sparkles className="w-16 h-16 mx-auto mb-4 text-teal-400 animate-pulse" />
+                <Sparkles className="w-16 h-16 mx-auto mb-4 text-blue-400 animate-pulse" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Generating Logic...</h3>
                 <p className="text-gray-600 mb-6">
                   AI is creating default rules based on your step&apos;s context.
@@ -393,7 +393,7 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
                 </p>
                 <Button
                   onClick={() => setShowAddRule(true)}
-                  className="bg-teal-600 hover:bg-teal-700"
+                  className="bg-blue-600 hover:bg-blue-700"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   Create First Rule
@@ -560,7 +560,7 @@ function RuleCard({
                 </>
               ) : (
                 <>
-                  <Button size="sm" onClick={handleSave} className="bg-teal-600 hover:bg-teal-700">
+                  <Button size="sm" onClick={handleSave} className="bg-blue-600 hover:bg-blue-700">
                     <Save className="w-3 h-3" />
                   </Button>
                   <Button variant="outline" size="sm" onClick={onCancel}>
@@ -608,12 +608,12 @@ function AddRuleCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
     >
-      <Card className="border-2 border-dashed border-teal-200 bg-teal-50/50">
+      <Card className="border-2 border-dashed border-blue-200 bg-blue-50/50">
         <CardHeader className={compact ? "pb-2" : "pb-3"}>
           <div className="flex items-center justify-between">
-            <CardTitle className={`text-teal-800 ${compact ? 'text-sm' : 'text-base'}`}>Add New Logic Rule</CardTitle>
+            <CardTitle className={`text-blue-800 ${compact ? 'text-sm' : 'text-base'}`}>Add New Logic Rule</CardTitle>
             <div className="flex gap-2">
-              <Button size="sm" onClick={onSave} className="bg-teal-600 hover:bg-teal-700">
+              <Button size="sm" onClick={onSave} className="bg-blue-600 hover:bg-blue-700">
                 <Save className="w-3 h-3 mr-1" /> Save
               </Button>
               <Button variant="outline" size="sm" onClick={onCancel}>
@@ -650,7 +650,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
     return (
       <div
         className={`relative rounded overflow-hidden ${
-          isDropTarget && draggedClass ? 'ring-2 ring-teal-400 bg-teal-50' : ''
+          isDropTarget && draggedClass ? 'ring-2 ring-blue-400 bg-blue-50' : ''
         }`}
         onDrop={handleLocalDrop}
         onDragOver={(e) => { onDragOver(e); setIsDropTarget(true); }}
@@ -661,12 +661,12 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
           onChange={onChange}
           placeholder={placeholder}
           className={`mt-1 transition-all duration-200 ${
-            isDropTarget && draggedClass ? 'border-teal-400 bg-teal-50' : ''
+            isDropTarget && draggedClass ? 'border-blue-400 bg-blue-50' : ''
           }`}
         />
         {isDropTarget && draggedClass && (
           <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10">
-            <Target className="w-6 h-6 text-teal-500" />
+            <Target className="w-6 h-6 text-blue-500" />
           </div>
         )}
       </div>
@@ -714,7 +714,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
                 <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
                   Class Name
                   {draggedClass && (
-                    <span className="text-xs text-teal-600">
+                    <span className="text-xs text-blue-600">
                       Drop &quot;{draggedClass}&quot; here
                     </span>
                   )}
@@ -755,7 +755,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
                   <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
                     Subject Class (A)
                     {draggedClass && (
-                      <span className="text-xs text-teal-600">
+                      <span className="text-xs text-blue-600">
                         Drop &quot;{draggedClass}&quot; here
                       </span>
                     )}
@@ -785,7 +785,7 @@ function EditRuleForm({ editData, setEditData, onConditionDrop, onDragOver, drag
                   <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
                     Target Class (B)
                     {draggedClass && (
-                      <span className="text-xs text-teal-600">
+                      <span className="text-xs text-blue-600">
                         Drop &quot;{draggedClass}&quot; here
                       </span>
                     )}

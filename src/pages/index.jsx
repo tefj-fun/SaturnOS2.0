@@ -1,32 +1,30 @@
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { BrowserRouter as Router, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./Layout.jsx";
+import { defaultFeatureVisibility, navigationItems } from "@/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 
-import Projects from "./Projects";
+const lazyWithPreload = (loader) => {
+    const Component = lazy(loader);
+    Component.preload = loader;
+    return Component;
+};
 
-import ProjectSetup from "./ProjectSetup";
-
-import AnnotationStudio from "./AnnotationStudio";
-
-import AnnotationReview from "./AnnotationReview";
-
-import StepManagement from "./StepManagement";
-
-import TrainingConfiguration from "./TrainingConfiguration";
-
-import TrainingStatus from "./TrainingStatus";
-
-import LabelLibrary from "./LabelLibrary";
-
-import Results from "./Results";
-
-import ResultsAndAnalysis from "./ResultsAndAnalysis";
-
-import Settings from "./Settings";
-
-import Dashboard from "./Dashboard";
-
-import Welcome from "./Welcome";
-
-import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+const Projects = lazyWithPreload(() => import("./Projects"));
+const ProjectSetup = lazyWithPreload(() => import("./ProjectSetup"));
+const AnnotationStudio = lazyWithPreload(() => import("./AnnotationStudio"));
+const AnnotationReview = lazyWithPreload(() => import("./AnnotationReview"));
+const StepManagement = lazyWithPreload(() => import("./StepManagement"));
+const TrainingConfiguration = lazyWithPreload(() => import("./TrainingConfiguration"));
+const TrainingStatus = lazyWithPreload(() => import("./TrainingStatus"));
+const LabelLibrary = lazyWithPreload(() => import("./LabelLibrary"));
+const Results = lazyWithPreload(() => import("./Results"));
+const ResultsAndAnalysis = lazyWithPreload(() => import("./ResultsAndAnalysis"));
+const Settings = lazyWithPreload(() => import("./Settings"));
+const Dashboard = lazyWithPreload(() => import("./Dashboard"));
+const Welcome = lazyWithPreload(() => import("./Welcome"));
+const Pricing = lazyWithPreload(() => import("./Pricing"));
+const Billing = lazyWithPreload(() => import("./Billing"));
 
 function BuildVariantsComingSoon() {
     return (
@@ -41,6 +39,26 @@ function BuildVariantsComingSoon() {
         </div>
     );
 }
+
+function PageLoading() {
+    return (
+        <div className="min-h-[60vh] flex items-center justify-center px-6 py-16">
+            <p className="text-sm text-gray-500">Loading...</p>
+        </div>
+    );
+}
+
+const SECONDARY_PRELOAD_ORDER = [
+    "ProjectSetup",
+    "AnnotationStudio",
+    "AnnotationReview",
+    "StepManagement",
+    "TrainingStatus",
+    "Results",
+    "Welcome",
+    "Pricing",
+    "Billing",
+];
 
 const PAGES = {
     
@@ -67,6 +85,10 @@ const PAGES = {
     Settings: Settings,
     
     Dashboard: Dashboard,
+
+    Pricing: Pricing,
+
+    Billing: Billing,
     
     BuildVariants: BuildVariantsComingSoon,
     
@@ -88,48 +110,144 @@ function _getCurrentPage(url) {
 // Create a wrapper component that uses useLocation inside the Router context
 function PagesContent() {
     const location = useLocation();
+    const { user, profile } = useAuth();
+    const prefetchKeyRef = useRef(null);
+    const [cachedRole, setCachedRole] = useState(() => {
+        if (typeof window === "undefined") {
+            return null;
+        }
+        return localStorage.getItem("saturnos_role") || null;
+    });
     const normalizedPath = location.pathname.replace(/\/+$/, "") || "/";
+    const currentPage = _getCurrentPage(location.pathname);
+
+    useEffect(() => {
+        if (!user?.id) {
+            return;
+        }
+        const key = `saturnos_role_${user.id}`;
+        const storedRole = localStorage.getItem(key) || localStorage.getItem("saturnos_role");
+        if (storedRole) {
+            setCachedRole(storedRole);
+        }
+    }, [user?.id]);
+
+    const effectiveRole = profile?.role || cachedRole;
+    const isAdmin = effectiveRole === "admin";
+    const featureFlags = useMemo(
+        () => ({
+            ...defaultFeatureVisibility,
+            ...(profile?.preferences?.features || {}),
+        }),
+        [profile?.preferences?.features]
+    );
+    const navigationOrder = useMemo(() => {
+        const items = isAdmin
+            ? navigationItems
+            : navigationItems.filter((item) => featureFlags[item.featureKey]);
+        return items.map((item) => item.page);
+    }, [isAdmin, featureFlags]);
+
+    useEffect(() => {
+        if (normalizedPath === "/welcome" || (normalizedPath.toLowerCase() === "/pricing" && !user)) {
+            return;
+        }
+        const navSignature = navigationOrder.join("|");
+        if (prefetchKeyRef.current === navSignature) {
+            return;
+        }
+        prefetchKeyRef.current = navSignature;
+        let cancelled = false;
+
+        const orderedNames = [];
+        for (const name of navigationOrder) {
+            if (!orderedNames.includes(name)) orderedNames.push(name);
+        }
+        for (const name of SECONDARY_PRELOAD_ORDER) {
+            if (!orderedNames.includes(name)) orderedNames.push(name);
+        }
+
+        const preload = async () => {
+            for (const name of orderedNames) {
+                if (cancelled) {
+                    return;
+                }
+                const Page = PAGES[name];
+                if (Page?.preload) {
+                    try {
+                        await Page.preload();
+                    } catch {
+                        return;
+                    }
+                }
+            }
+        };
+
+        preload();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentPage, navigationOrder]);
+    
     if (normalizedPath === "/welcome") {
-        return <Welcome />;
+        return (
+            <Suspense fallback={<PageLoading />}>
+                <Welcome />
+            </Suspense>
+        );
+    }
+    if (normalizedPath.toLowerCase() === "/pricing" && !user) {
+        return (
+            <Suspense fallback={<PageLoading />}>
+                <Pricing />
+            </Suspense>
+        );
     }
 
-    const currentPage = _getCurrentPage(location.pathname);
-    
     return (
         <Layout currentPageName={currentPage}>
-            <Routes>            
-                
-                    <Route path="/" element={<Projects />} />
-                
-                
-                <Route path="/Projects" element={<Projects />} />
-                
-                <Route path="/ProjectSetup" element={<ProjectSetup />} />
-                
-                <Route path="/AnnotationStudio" element={<AnnotationStudio />} />
-                
-                <Route path="/AnnotationReview" element={<AnnotationReview />} />
-                
-                <Route path="/StepManagement" element={<StepManagement />} />
-                
-                <Route path="/TrainingConfiguration" element={<TrainingConfiguration />} />
-                
-                <Route path="/TrainingStatus" element={<TrainingStatus />} />
-                
-                <Route path="/LabelLibrary" element={<LabelLibrary />} />
-                
-                <Route path="/Results" element={<Results />} />
-                
-                <Route path="/ResultsAndAnalysis" element={<ResultsAndAnalysis />} />
-                
-                <Route path="/Settings" element={<Settings />} />
-                
-                <Route path="/Dashboard" element={<Dashboard />} />
-                
-                
-                <Route path="/BuildVariants" element={<BuildVariantsComingSoon />} />
-                
-            </Routes>
+            <Suspense fallback={<PageLoading />}>
+                <Routes>            
+                    
+                        <Route path="/" element={<Projects />} />
+                    
+                    
+                    <Route path="/Projects" element={<Projects />} />
+                    
+                    <Route path="/ProjectSetup" element={<ProjectSetup />} />
+                    
+                    <Route path="/AnnotationStudio" element={<AnnotationStudio />} />
+                    
+                    <Route path="/AnnotationReview" element={<AnnotationReview />} />
+                    
+                    <Route path="/StepManagement" element={<StepManagement />} />
+                    
+                    <Route path="/TrainingConfiguration" element={<TrainingConfiguration />} />
+                    
+                    <Route path="/TrainingStatus" element={<TrainingStatus />} />
+                    
+                    <Route path="/LabelLibrary" element={<LabelLibrary />} />
+                    
+                    <Route path="/Results" element={<Results />} />
+                    
+                    <Route path="/ResultsAndAnalysis" element={<ResultsAndAnalysis />} />
+                    
+                    <Route path="/Settings" element={<Settings />} />
+                    
+                    <Route path="/Dashboard" element={<Dashboard />} />
+
+                    <Route path="/Pricing" element={<Pricing />} />
+                    <Route path="/pricing" element={<Pricing />} />
+
+                    <Route path="/Billing" element={<Billing />} />
+                    <Route path="/billing" element={<Billing />} />
+                    
+                    
+                    <Route path="/BuildVariants" element={<BuildVariantsComingSoon />} />
+                    
+                </Routes>
+            </Suspense>
         </Layout>
     );
 }

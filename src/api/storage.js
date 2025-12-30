@@ -1,9 +1,13 @@
 import { supabase } from "./supabaseClient";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const DEFAULT_BUCKET = "sops";
+const SIGN_STORAGE_FUNCTION_URL =
+  import.meta.env.VITE_SIGN_STORAGE_URL || "/.netlify/functions/sign-storage";
 const SIGNED_URL_CONCURRENCY = 6;
 const SIGNED_URL_CACHE_BUFFER_MS = 30 * 1000;
 const SIGNED_URL_CACHE_MAX_ENTRIES = 2000;
+const STORAGE_TRANSFORMS_ENABLED = false;
 const CONTENT_TYPE_BY_EXT = {
   ".yaml": "text/plain",
   ".yml": "text/plain",
@@ -23,6 +27,59 @@ const CONTENT_TYPE_BY_EXT = {
 const YAML_TYPES = new Set(["text/yaml", "application/x-yaml", "application/yaml"]);
 const signedUrlCache = new Map();
 const signedUrlInFlight = new Map();
+
+const getAccessToken = async () => {
+  if (!supabase?.auth?.getSession) return null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || null;
+  } catch {
+    return null;
+  }
+};
+
+const requestSignedUrlFromServer = async (bucket, path, options = {}) => {
+  if (!SIGN_STORAGE_FUNCTION_URL) return null;
+  const token = await getAccessToken();
+  if (!token) return null;
+  try {
+    const response = await fetch(SIGN_STORAGE_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        bucket,
+        path,
+        expiresIn: options.expiresIn,
+        transform: options.transform,
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data?.signedUrl || null;
+  } catch {
+    return null;
+  }
+};
+
+const buildStorageUrl = (url) => {
+  if (!url || typeof url !== "string") return null;
+  try {
+    return new URL(url);
+  } catch {
+    const base =
+      SUPABASE_URL ||
+      (typeof window !== "undefined" ? window.location.origin : null);
+    if (!base) return null;
+    try {
+      return new URL(url, base);
+    } catch {
+      return null;
+    }
+  }
+};
 
 const createLimiter = (limit) => {
   let activeCount = 0;
@@ -104,32 +161,29 @@ const withContentType = (file, contentType, fallbackName) => {
 
 export function getStoragePathFromUrl(url, bucket) {
   if (!url || !bucket) return null;
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname;
-    const publicPrefix = `/storage/v1/object/public/${bucket}/`;
-    const signedPrefix = `/storage/v1/object/sign/${bucket}/`;
-    const objectPrefix = `/storage/v1/object/${bucket}/`;
-    const renderPublicPrefix = `/storage/v1/render/image/public/${bucket}/`;
-    const renderSignedPrefix = `/storage/v1/render/image/sign/${bucket}/`;
+  const parsed = buildStorageUrl(url);
+  if (!parsed) return null;
+  const path = parsed.pathname;
+  const publicPrefix = `/storage/v1/object/public/${bucket}/`;
+  const signedPrefix = `/storage/v1/object/sign/${bucket}/`;
+  const objectPrefix = `/storage/v1/object/${bucket}/`;
+  const renderPublicPrefix = `/storage/v1/render/image/public/${bucket}/`;
+  const renderSignedPrefix = `/storage/v1/render/image/sign/${bucket}/`;
 
-    if (path.includes(publicPrefix)) {
-      return decodeURIComponent(path.split(publicPrefix)[1]);
-    }
-    if (path.includes(signedPrefix)) {
-      return decodeURIComponent(path.split(signedPrefix)[1]);
-    }
-    if (path.includes(objectPrefix)) {
-      return decodeURIComponent(path.split(objectPrefix)[1]);
-    }
-    if (path.includes(renderPublicPrefix)) {
-      return decodeURIComponent(path.split(renderPublicPrefix)[1]);
-    }
-    if (path.includes(renderSignedPrefix)) {
-      return decodeURIComponent(path.split(renderSignedPrefix)[1]);
-    }
-  } catch {
-    return null;
+  if (path.includes(publicPrefix)) {
+    return decodeURIComponent(path.split(publicPrefix)[1]);
+  }
+  if (path.includes(signedPrefix)) {
+    return decodeURIComponent(path.split(signedPrefix)[1]);
+  }
+  if (path.includes(objectPrefix)) {
+    return decodeURIComponent(path.split(objectPrefix)[1]);
+  }
+  if (path.includes(renderPublicPrefix)) {
+    return decodeURIComponent(path.split(renderPublicPrefix)[1]);
+  }
+  if (path.includes(renderSignedPrefix)) {
+    return decodeURIComponent(path.split(renderSignedPrefix)[1]);
   }
   return null;
 }
@@ -143,14 +197,20 @@ export async function createSignedImageUrl(bucket, path, { expiresIn = 3600, tra
   const storage = supabase.storage.from(bucket);
 
   const requestPromise = signedUrlLimiter(async () => {
-    if (transform) {
-      const { data, error } = await storage.createSignedUrl(path, expiresIn, { transform });
-      if (!error && data?.signedUrl) return data.signedUrl;
-    }
+    try {
+      if (transform && STORAGE_TRANSFORMS_ENABLED) {
+        const { data, error } = await storage.createSignedUrl(path, expiresIn, { transform });
+        if (!error && data?.signedUrl) return data.signedUrl;
+      }
 
-    const { data, error } = await storage.createSignedUrl(path, expiresIn);
-    if (error) throw error;
-    return data?.signedUrl || null;
+      const { data, error } = await storage.createSignedUrl(path, expiresIn);
+      if (error) throw error;
+      return data?.signedUrl || null;
+    } catch (error) {
+      const fallback = await requestSignedUrlFromServer(bucket, path, { expiresIn, transform });
+      if (fallback) return fallback;
+      throw error;
+    }
   });
 
   signedUrlInFlight.set(cacheKey, requestPromise);

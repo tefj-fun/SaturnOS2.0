@@ -136,8 +136,10 @@ export default function AnnotationStudioPage() {
   const [brushSize, setBrushSize] = useState(10);
   const canvasRef = useRef(null);
   const stepImagesRequestIdRef = useRef(0);
+  const currentImageIndexRef = useRef(0);
   const initialStepAppliedRef = useRef(false);
   const initialImageAppliedRef = useRef(false);
+  const inFlightSignaturesRef = useRef(new Set());
   const classPromptedStepsRef = useRef(new Set());
   const [showClassImportPrompt, setShowClassImportPrompt] = useState(false);
   const [pendingClassNames, setPendingClassNames] = useState([]);
@@ -216,6 +218,124 @@ export default function AnnotationStudioPage() {
       groupSummary,
     };
   }, [stepImages, isImageAnnotated]);
+
+  const updateStepImageById = useCallback((imageId, updates, requestId = null) => {
+    if (!updates) return;
+    setStepImages((prev) => {
+      if (typeof requestId === "number" && stepImagesRequestIdRef.current !== requestId) {
+        return prev;
+      }
+      return prev.map((item) => (item.id === imageId ? { ...item, ...updates } : item));
+    });
+  }, []);
+
+  const signImageUrls = useCallback(async ({ image, bucket, path }, targets = {}) => {
+    if (!path) return null;
+    const { thumbnail, display, full } = {
+      thumbnail: Boolean(targets.thumbnail),
+      display: Boolean(targets.display),
+      full: Boolean(targets.full),
+    };
+    if (!thumbnail && !display && !full) return null;
+
+    const existingThumbnail = [image.thumbnail_url, image.source_thumbnail_url, image.source_display_url]
+      .find((candidate) => isSignedUrlFresh(candidate));
+    const existingDisplay = [image.display_url, image.source_display_url, image.image_url]
+      .find((candidate) => isSignedUrlFresh(candidate));
+    const existingFull = [image.image_url, image.source_image_url, image.display_url]
+      .find((candidate) => isSignedUrlFresh(candidate));
+
+    const pickFallbackUrl = (imageEntry, candidates, storagePath) => {
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+        if (storagePath && isSupabasePublicUrl(candidate) && !isSupabaseSignedUrl(candidate)) {
+          continue;
+        }
+        return candidate;
+      }
+      return null;
+    };
+
+    const thumbnailPath = getStoragePathFromUrl(
+      image.thumbnail_url || image.source_thumbnail_url || image.source_display_url || "",
+      bucket
+    );
+    const thumbnailTargetPath = thumbnailPath || path;
+
+    const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
+      thumbnail && !existingThumbnail && thumbnailTargetPath
+        ? createSignedImageUrl(bucket, thumbnailTargetPath, { expiresIn: 3600 })
+        : null,
+      display && !existingDisplay ? createSignedImageUrl(bucket, path, { expiresIn: 3600 }) : null,
+      full && !existingFull ? createSignedImageUrl(bucket, path, { expiresIn: 3600 }) : null,
+    ]);
+
+    const updates = {
+      storage_path: path,
+      storage_bucket: bucket,
+    };
+    if (thumbnail) {
+      updates.thumbnail_url =
+        thumbnailUrl ||
+        existingThumbnail ||
+        pickFallbackUrl(
+          image,
+          [image.thumbnail_url, image.source_thumbnail_url, image.source_display_url, image.source_image_url],
+          path
+        );
+    }
+    if (display) {
+      updates.display_url =
+        displayUrl ||
+        existingDisplay ||
+        pickFallbackUrl(
+          image,
+          [image.display_url, image.source_display_url, image.image_url, image.source_image_url],
+          path
+        );
+    }
+    if (full) {
+      updates.image_url =
+        fullUrl ||
+        existingFull ||
+        pickFallbackUrl(
+          image,
+          [image.image_url, image.source_image_url, image.display_url, image.source_display_url],
+          path
+        );
+    }
+
+    return updates;
+  }, []);
+
+  const requestImageSign = useCallback(async (image, targets = {}) => {
+    if (!image?.storage_path || !image?.id) return;
+    const typesToSign = [];
+    const inFlight = inFlightSignaturesRef.current;
+    if (targets.thumbnail && !inFlight.has(`${image.id}:thumbnail`)) typesToSign.push("thumbnail");
+    if (targets.display && !inFlight.has(`${image.id}:display`)) typesToSign.push("display");
+    if (targets.full && !inFlight.has(`${image.id}:full`)) typesToSign.push("full");
+    if (!typesToSign.length) return;
+
+    typesToSign.forEach((type) => inFlight.add(`${image.id}:${type}`));
+    try {
+      const updates = await signImageUrls(
+        { image, bucket: image.storage_bucket || STEP_IMAGES_BUCKET, path: image.storage_path },
+        {
+          thumbnail: typesToSign.includes("thumbnail"),
+          display: typesToSign.includes("display"),
+          full: typesToSign.includes("full"),
+        }
+      );
+      if (updates) {
+        updateStepImageById(image.id, updates);
+      }
+    } catch (error) {
+      console.error("Error signing step image:", error);
+    } finally {
+      typesToSign.forEach((type) => inFlight.delete(`${image.id}:${type}`));
+    }
+  }, [signImageUrls, STEP_IMAGES_BUCKET, updateStepImageById]);
 
   // This effect will run when the component mounts and unmounts
   useEffect(() => {
@@ -373,7 +493,7 @@ export default function AnnotationStudioPage() {
 
       setStepImages(seedImages);
       const initialIndex = preserveIndex
-        ? Math.min(currentImageIndex, Math.max(seedImages.length - 1, 0))
+        ? Math.min(currentImageIndexRef.current, Math.max(seedImages.length - 1, 0))
         : 0;
       setCurrentImageIndex(initialIndex);
       setHasLoadedImages(true);
@@ -383,86 +503,62 @@ export default function AnnotationStudioPage() {
         return;
       }
 
-      const updateImageById = (imageId, updates) => {
-        if (stepImagesRequestIdRef.current !== requestId) return;
-        setStepImages((prev) => {
-          if (stepImagesRequestIdRef.current !== requestId) return prev;
-          return prev.map((item) => (item.id === imageId ? { ...item, ...updates } : item));
-        });
-      };
-
-      const pickFallbackUrl = (image, candidates, path) => {
-        for (const candidate of candidates) {
-          if (!candidate) continue;
-          if (path && isSupabasePublicUrl(candidate) && !isSupabaseSignedUrl(candidate)) {
-            continue;
-          }
-          return candidate;
+      const getImageNameForSort = (image) => {
+        if (!image) return "Untitled";
+        const rawName = image.image_name || image.name || image.filename;
+        if (rawName) return String(rawName);
+        const url =
+          image.image_url ||
+          image.display_url ||
+          image.thumbnail_url ||
+          image.source_image_url ||
+          image.source_display_url ||
+          image.source_thumbnail_url;
+        if (!url && image.storage_path) {
+          const parts = String(image.storage_path).split("/");
+          return parts[parts.length - 1] || "Untitled";
         }
-        return null;
+        if (!url) return "Untitled";
+        try {
+          const parsed = new URL(url);
+          const parts = parsed.pathname.split("/");
+          const last = parts[parts.length - 1];
+          return last ? decodeURIComponent(last) : "Untitled";
+        } catch {
+          const parts = String(url).split("/");
+          return parts[parts.length - 1] || "Untitled";
+        }
       };
 
-      const signImage = async ({ image, bucket, path }) => {
-        if (!path) return null;
-        const existingThumbnail = [image.thumbnail_url, image.source_thumbnail_url, image.source_display_url]
-          .find((candidate) => isSignedUrlFresh(candidate));
-        const existingDisplay = [image.display_url, image.source_display_url, image.image_url]
-          .find((candidate) => isSignedUrlFresh(candidate));
-        const existingFull = [image.image_url, image.source_image_url, image.display_url]
-          .find((candidate) => isSignedUrlFresh(candidate));
-
-        const [thumbnailUrl, displayUrl, fullUrl] = await Promise.all([
-          existingThumbnail
-            ? null
-            : createSignedImageUrl(bucket, path, {
-                expiresIn: 3600,
-                transform: { width: 300, height: 300, resize: "cover" },
-              }),
-          existingDisplay
-            ? null
-            : createSignedImageUrl(bucket, path, {
-                expiresIn: 3600,
-                transform: { width: 1200, resize: "contain" },
-              }),
-          existingFull ? null : createSignedImageUrl(bucket, path, { expiresIn: 3600 }),
-        ]);
-
-        return {
-          storage_path: path,
-          storage_bucket: bucket,
-          thumbnail_url:
-            thumbnailUrl ||
-            existingThumbnail ||
-            pickFallbackUrl(
-              image,
-              [image.thumbnail_url, image.source_thumbnail_url, image.source_display_url, image.source_image_url],
-              path
-            ),
-          display_url:
-            displayUrl ||
-            existingDisplay ||
-            pickFallbackUrl(
-              image,
-              [image.display_url, image.source_display_url, image.image_url, image.source_image_url],
-              path
-            ),
-          image_url:
-            fullUrl ||
-            existingFull ||
-            pickFallbackUrl(
-              image,
-              [image.image_url, image.source_image_url, image.display_url, image.source_display_url],
-              path
-            ),
-        };
-      };
+      const entriesWithIndex = resolvedImages.map((entry, index) => ({ entry, index }));
+      const groupOrder = Array.from(
+        new Set(entriesWithIndex.map(({ entry }) => entry.image.image_group || "Untagged"))
+      ).sort((a, b) => a.localeCompare(b));
+      const groupIndex = new Map(groupOrder.map((group, index) => [group, index]));
+      const orderedEntries = entriesWithIndex
+        .sort((a, b) => {
+          const groupA = a.entry.image.image_group || "Untagged";
+          const groupB = b.entry.image.image_group || "Untagged";
+          const groupComparison = (groupIndex.get(groupA) ?? 0) - (groupIndex.get(groupB) ?? 0);
+          if (groupComparison !== 0) return groupComparison;
+          const nameComparison = getImageNameForSort(a.entry.image).localeCompare(
+            getImageNameForSort(b.entry.image)
+          );
+          if (nameComparison !== 0) return nameComparison;
+          return a.index - b.index;
+        })
+        .map(({ entry }) => entry);
 
       const primaryEntry = resolvedImages[initialIndex];
       if (primaryEntry?.path) {
         try {
-          const signed = await signImage(primaryEntry);
+          const signed = await signImageUrls(primaryEntry, {
+            thumbnail: true,
+            display: true,
+            full: true,
+          });
           if (signed) {
-            updateImageById(primaryEntry.image.id, signed);
+            updateStepImageById(primaryEntry.image.id, signed, requestId);
           }
         } catch (error) {
           console.error("Error loading primary step image:", error);
@@ -472,24 +568,26 @@ export default function AnnotationStudioPage() {
         setIsInitialImageReady(true);
       }
 
-      resolvedImages.forEach((entry, index) => {
-        if (!entry.path || index === initialIndex) return;
-        signImage(entry)
-          .then((signed) => {
-            if (!signed) return;
-            updateImageById(entry.image.id, signed);
-          })
-          .catch((error) => {
-            console.error("Error loading step image:", error);
-          });
-      });
     } catch (error) {
       console.error("Error loading step images:", error);
       setStepImages([]);
       setHasLoadedImages(true);
       setIsInitialImageReady(true);
     }
-  }, [currentStep, currentImageIndex, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
+  }, [currentStep, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
+
+  useEffect(() => {
+    currentImageIndexRef.current = currentImageIndex;
+  }, [currentImageIndex]);
+
+  useEffect(() => {
+    const currentImage = stepImages[currentImageIndex];
+    if (!currentImage?.storage_path) return;
+    const hasDisplay =
+      isSignedUrlFresh(currentImage.display_url) || isSignedUrlFresh(currentImage.image_url);
+    if (hasDisplay) return;
+    requestImageSign(currentImage, { display: true });
+  }, [stepImages, currentImageIndex, requestImageSign]);
 
   useEffect(() => {
     const currentImage = stepImages[currentImageIndex];
@@ -946,7 +1044,7 @@ export default function AnnotationStudioPage() {
                 
                 {/* Show active configuration info */}
                 {currentStepConfig && (
-                  <Badge className="bg-green-100 text-green-800 text-xs">
+                  <Badge className="bg-blue-100 text-blue-800 text-xs">
                     <Package className="w-3 h-3 mr-1" />
                     Variant Config Active
                   </Badge>
@@ -1013,7 +1111,7 @@ export default function AnnotationStudioPage() {
                   variant="default"
                   size="sm"
                   onClick={() => navigate(createPageUrl(`TrainingConfiguration?projectId=${projectId}`))}
-                  className="text-xs bg-green-600 hover:bg-green-700"
+                  className="text-xs bg-blue-600 hover:bg-blue-700"
               >
                   <Spline className="w-3 h-3 mr-1.5" />
                   Train Model
@@ -1076,6 +1174,7 @@ export default function AnnotationStudioPage() {
                         currentImageIndex={currentImageIndex}
                         onImageIndexChange={handleImageIndexChange}
                         onImagesUpdate={handleImagesUpdate}
+                        onRequestImageSign={requestImageSign}
                     />
                 </TabsContent>
                 <TabsContent value="insights" className="h-full m-0">

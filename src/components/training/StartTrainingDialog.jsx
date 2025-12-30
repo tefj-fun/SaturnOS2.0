@@ -912,7 +912,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
         ? (datasetSummary.ready ? "Ready" : "Needs attention")
         : "Not checked";
     const datasetStatusClass = datasetSummary
-        ? (datasetSummary.ready ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800")
+        ? (datasetSummary.ready ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800")
         : "bg-gray-100 text-gray-700";
     const labelTypes = datasetSummary?.labelTypes || { boxes: 0, segments: 0 };
     const hasMixedLabels = labelTypes.boxes > 0 && labelTypes.segments > 0;
@@ -932,9 +932,9 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-3xl glass-effect border-0 p-0 overflow-hidden">
-                <div className="relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-teal-50 px-8 pt-6 pb-5">
+                <div className="relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-amber-50 px-8 pt-6 pb-5">
                     <div className="absolute -top-20 -left-16 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl" />
-                    <div className="absolute -bottom-24 right-0 h-64 w-64 rounded-full bg-teal-200/40 blur-3xl" />
+                    <div className="absolute -bottom-24 right-0 h-64 w-64 rounded-full bg-amber-200/40 blur-3xl" />
                     <DialogHeader className="relative space-y-3">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div>
@@ -953,7 +953,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                 <Badge variant="outline" className="border-amber-200 bg-white/70 text-amber-700">
                                     {trainerOffline ? "Queue Mode" : "Live Trainer"}
                                 </Badge>
-                                <Badge variant="outline" className="border-teal-200 bg-white/70 text-teal-700">
+                                <Badge variant="outline" className="border-amber-200 bg-white/70 text-amber-700">
                                     Dataset {datasetStatusLabel}
                                 </Badge>
                             </div>
@@ -1034,20 +1034,20 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         </div>
 
                         {datasetStatus.state === "preparing" && (
-                            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                                <div className="flex items-center justify-between text-sm text-blue-900">
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                                <div className="flex items-center justify-between text-sm text-amber-900">
                                     <span>Preparing dataset...</span>
                                     <span>{datasetStatus.processed}/{datasetStatus.total}</span>
                                 </div>
                                 <Progress value={datasetStatus.total ? (datasetStatus.processed / datasetStatus.total) * 100 : 0} className="mt-2" />
                                 {datasetStatus.message && (
-                                    <p className="text-xs text-blue-800 mt-2">{datasetStatus.message}</p>
+                                    <p className="text-xs text-amber-800 mt-2">{datasetStatus.message}</p>
                                 )}
                             </div>
                         )}
 
                         {datasetStatus.state === "ready" && datasetStatus.message && (
-                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                                 {datasetStatus.message}
                             </div>
                         )}
@@ -1114,10 +1114,10 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                         </div>
 
                         {activePreset && (
-                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                                 <p className="font-medium">{activePreset.label} preset</p>
-                                <p className="text-xs text-blue-800 mt-1">{activePreset.summary}</p>
-                                <p className="text-xs text-blue-700 mt-2">Advanced edits override preset values.</p>
+                                <p className="text-xs text-amber-800 mt-1">{activePreset.summary}</p>
+                                <p className="text-xs text-amber-700 mt-2">Advanced edits override preset values.</p>
                             </div>
                         )}
                         
@@ -1191,17 +1191,17 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-4">
                             <h3 className="font-semibold text-gray-900">Training settings</h3>
-                            <Badge variant="secondary" className="bg-green-100 text-green-800">Defaults</Badge>
+                            <Badge variant="secondary" className="bg-amber-100 text-amber-800">Defaults</Badge>
                         </div>
                         
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                             <div className="flex items-start gap-3">
-                                <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <div className="w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                                     <CheckCircle className="w-3 h-3 text-white" />
                                 </div>
                                 <div>
-                                    <h4 className="font-medium text-green-900 mb-1">Beginner Tip</h4>
-                                    <p className="text-sm text-green-800">These settings work well for most annotation projects. Train your first model with these defaults, then use the Advanced tab to fine-tune if needed.</p>
+                                    <h4 className="font-medium text-amber-900 mb-1">Beginner Tip</h4>
+                                    <p className="text-sm text-amber-800">These settings work well for most annotation projects. Train your first model with these defaults, then use the Advanced tab to fine-tune if needed.</p>
                                 </div>
                             </div>
                         </div>
@@ -1213,7 +1213,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     type="number" 
                                     value={config.epochs} 
                                     onChange={e => handleConfigChange('epochs', parseInt(e.target.value))} 
-                                    className={`${fieldBaseClass} ${config.epochs === 100 ? "border-green-500" : ""}`} 
+                                    className={`${fieldBaseClass} ${config.epochs === 100 ? "border-amber-500" : ""}`} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.epochs.enabled}
                                 />
                             </div>
@@ -1224,7 +1224,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     onValueChange={value => handleConfigChange('batchSize', parseInt(value))} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.batchSize.enabled}
                                 >
-                                    <SelectTrigger className={`${fieldBaseClass} ${config.batchSize === 16 ? "border-green-500" : ""}`}>
+                                    <SelectTrigger className={`${fieldBaseClass} ${config.batchSize === 16 ? "border-amber-500" : ""}`}>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
@@ -1245,7 +1245,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     onValueChange={value => handleConfigChange('imgSize', parseInt(value))} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.imgSize.enabled}
                                 >
-                                    <SelectTrigger className={`${fieldBaseClass} ${config.imgSize === 640 ? "border-green-500" : ""}`}>
+                                    <SelectTrigger className={`${fieldBaseClass} ${config.imgSize === 640 ? "border-amber-500" : ""}`}>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
@@ -1262,7 +1262,7 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     step="0.0001" 
                                     value={config.learningRate} 
                                     onChange={e => handleConfigChange('learningRate', parseFloat(e.target.value))} 
-                                    className={`${fieldBaseClass} ${config.learningRate === 0.001 ? "border-green-500" : ""}`} 
+                                    className={`${fieldBaseClass} ${config.learningRate === 0.001 ? "border-amber-500" : ""}`} 
                                     disabled={showAdvancedSettings && config.optimizationStrategy === 'bayesian' && config.bayesianConfig.searchSpace.learningRate.enabled}
                                 />
                             </div>
@@ -1463,10 +1463,10 @@ export default function StartTrainingDialog({ open, onOpenChange, onSubmit, step
                                     </div>
                                     
                                     {config.optimizationStrategy === 'manual' && (
-                                        <Alert className="border-blue-300 bg-blue-50">
-                                            <Info className="h-4 w-4 text-blue-600" />
-                                            <AlertTitle className="text-blue-800">Manual tuning active</AlertTitle>
-                                            <AlertDescription className="text-blue-700">
+                                        <Alert className="border-amber-300 bg-amber-50">
+                                            <Info className="h-4 w-4 text-amber-600" />
+                                            <AlertTitle className="text-amber-800">Manual tuning active</AlertTitle>
+                                            <AlertDescription className="text-amber-700">
                                                 Use the settings in the Fast Start tab for this run.
                                             </AlertDescription>
                                         </Alert>

@@ -151,7 +151,7 @@ const DEFAULT_LABEL_CATEGORY = 'Other';
 
 const CATEGORY_COLORS = {
   'UI Element': 'bg-blue-100 text-blue-800 border-blue-200',
-  'Form Control': 'bg-green-100 text-green-800 border-green-200',
+  'Form Control': 'bg-blue-100 text-blue-800 border-blue-200',
   'Navigation': 'bg-purple-100 text-purple-800 border-purple-200',
   'Content': 'bg-amber-100 text-amber-800 border-amber-200',
   'Layout': 'bg-pink-100 text-pink-800 border-pink-200',
@@ -229,7 +229,7 @@ const StatCard = ({ icon, title, value, subtitle, color = 'blue' }) => (
 
 const LabelCard = ({ label, onSelect, isSelected, viewMode }) => {
   const getConfidenceColor = (confidence) => {
-    if (confidence >= 0.9) return 'text-green-600 bg-green-50';
+    if (confidence >= 0.9) return 'text-blue-600 bg-blue-50';
     if (confidence >= 0.8) return 'text-yellow-600 bg-yellow-50';
     return 'text-red-600 bg-red-50';
   };
@@ -580,18 +580,18 @@ export default function LabelLibraryPage() {
                   </h4>
                   <div className="space-y-2 max-h-32 overflow-y-auto pr-2">
                     {labelUsage.variantConfigs.map(({ step, variant, project }, index) => (
-                      <div key={`variant-${step.id}-${variant.id}-${index}`} className="p-2 bg-green-50 rounded border">
+                      <div key={`variant-${step.id}-${variant.id}-${index}`} className="p-2 bg-blue-50 rounded border">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-medium text-sm text-green-900">
+                            <p className="font-medium text-sm text-blue-900">
                               Step {step.step_number}: {step.title}
                             </p>
-                            <p className="text-xs text-green-600">{project}</p>
-                            <p className="text-xs text-green-700 font-medium mt-1">
+                            <p className="text-xs text-blue-600">{project}</p>
+                            <p className="text-xs text-blue-700 font-medium mt-1">
                               Variant: {variant.name}
                             </p>
                           </div>
-                          <Badge className="bg-green-100 text-green-800 text-xs">Build Variant</Badge>
+                          <Badge className="bg-blue-100 text-blue-800 text-xs">Build Variant</Badge>
                         </div>
                       </div>
                     ))}

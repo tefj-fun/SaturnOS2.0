@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listProjects, createProject, updateProject, deleteProject, deleteProjects, listStepsByProject } from "@/api/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +30,9 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import { supabase } from "@/api/supabaseClient";
+import { getPermissionsForProjectRole } from "@/api/rbac";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,7 +46,6 @@ import DeleteProjectDialog from "../components/projects/DeleteProjectDialog";
 import ReviewOnPhoneDialog from "../components/projects/ReviewOnPhoneDialog";
 import LoadingOverlay from "../components/projects/LoadingOverlay";
 import ProjectMembersDialog from "../components/projects/ProjectMembersDialog";
-import { useProjectPermissions } from "../components/rbac/PermissionGate";
 
 // Normalize project created date across legacy and Supabase fields
 const getCreatedDate = (project) =>
@@ -71,12 +73,38 @@ export default function ProjectsPage() {
 
   const [showMembersDialog, setShowMembersDialog] = useState(false);
   const [selectedProjectForMembers, setSelectedProjectForMembers] = useState(null);
+  const [projectProgress, setProjectProgress] = useState({});
+  const progressRef = useRef({});
+  const progressLoadIdRef = useRef(0);
+  const [projectPermissions, setProjectPermissions] = useState({});
+  const permissionsRef = useRef({});
+  const permissionsLoadIdRef = useRef(0);
+  const lastUserIdRef = useRef(null);
 
+  const { user, profile, authChecked, profileLoading } = useAuth();
   const navigate = useNavigate();
+  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_SUPABASE_REQUIRE_AUTH !== 'true';
+  const isAdmin = profile?.role === "admin";
 
   useEffect(() => {
     loadProjects();
   }, []);
+
+  useEffect(() => {
+    progressRef.current = projectProgress;
+  }, [projectProgress]);
+
+  useEffect(() => {
+    permissionsRef.current = projectPermissions;
+  }, [projectPermissions]);
+
+  useEffect(() => {
+    const userId = user?.id || null;
+    if (lastUserIdRef.current !== userId) {
+      lastUserIdRef.current = userId;
+      setProjectPermissions({});
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     let processedProjects = projects;
@@ -130,7 +158,7 @@ export default function ProjectsPage() {
     setIsLoading(false);
   };
 
-  const getProjectProgress = async (projectId) => {
+  const getProjectProgress = useCallback(async (projectId) => {
     try {
       const steps = await listStepsByProject(projectId);
       if (steps.length === 0) return 0;
@@ -139,7 +167,115 @@ export default function ProjectsPage() {
     } catch {
       return 0;
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!filteredProjects.length) {
+      return;
+    }
+    progressLoadIdRef.current += 1;
+    const loadId = progressLoadIdRef.current;
+    const loadInOrder = async () => {
+      for (const project of filteredProjects) {
+        if (progressLoadIdRef.current !== loadId) {
+          return;
+        }
+        if (project.status !== "annotation_in_progress" && project.status !== "completed") {
+          continue;
+        }
+        if (progressRef.current[project.id] !== undefined) {
+          continue;
+        }
+        const progressValue = await getProjectProgress(project.id);
+        if (progressLoadIdRef.current !== loadId) {
+          return;
+        }
+        setProjectProgress((prev) => ({ ...prev, [project.id]: progressValue }));
+      }
+    };
+    loadInOrder();
+  }, [filteredProjects, getProjectProgress]);
+
+  useEffect(() => {
+    if (!filteredProjects.length) {
+      return;
+    }
+
+    const shouldGrantAll = bypassPermissions || isAdmin;
+    if (shouldGrantAll) {
+      const nextPermissions = {};
+      for (const project of filteredProjects) {
+        if (!permissionsRef.current[project.id]) {
+          nextPermissions[project.id] = { permissions: ["*"], role: profile?.role || null };
+        }
+      }
+      if (Object.keys(nextPermissions).length) {
+        setProjectPermissions((prev) => ({ ...prev, ...nextPermissions }));
+      }
+      return;
+    }
+
+    if (!authChecked || profileLoading) {
+      return;
+    }
+
+    if (!user) {
+      const nextPermissions = {};
+      for (const project of filteredProjects) {
+        if (!permissionsRef.current[project.id]) {
+          nextPermissions[project.id] = { permissions: [], role: null };
+        }
+      }
+      if (Object.keys(nextPermissions).length) {
+        setProjectPermissions((prev) => ({ ...prev, ...nextPermissions }));
+      }
+      return;
+    }
+
+    permissionsLoadIdRef.current += 1;
+    const loadId = permissionsLoadIdRef.current;
+    const loadPermissionsInOrder = async () => {
+      for (const project of filteredProjects) {
+        if (permissionsLoadIdRef.current !== loadId) {
+          return;
+        }
+        if (permissionsRef.current[project.id]) {
+          continue;
+        }
+        try {
+          const { data: member } = await supabase
+            .from("project_members")
+            .select("role, permissions")
+            .eq("project_id", project.id)
+            .eq("user_id", user.id)
+            .single();
+
+          const derivedPermissions = member?.permissions?.length
+            ? member.permissions
+            : getPermissionsForProjectRole(member?.role);
+
+          if (permissionsLoadIdRef.current !== loadId) {
+            return;
+          }
+          setProjectPermissions((prev) => ({
+            ...prev,
+            [project.id]: { permissions: derivedPermissions || [], role: member?.role || null }
+          }));
+        } catch (error) {
+          if (permissionsLoadIdRef.current !== loadId) {
+            return;
+          }
+          console.error("Failed to load permissions:", error);
+          setProjectPermissions((prev) => ({
+            ...prev,
+            [project.id]: { permissions: [], role: null }
+          }));
+        }
+      }
+    };
+
+    loadPermissionsInOrder();
+  }, [authChecked, bypassPermissions, filteredProjects, isAdmin, profile?.role, profileLoading, user]);
 
   const getStatusConfig = (status) => {
     const configs = {
@@ -160,12 +296,12 @@ export default function ProjectsPage() {
       },
       annotation_in_progress: {
         label: "In Progress",
-        color: "bg-teal-100 text-teal-700",
+        color: "bg-blue-100 text-blue-700",
         icon: PenTool
       },
       completed: {
         label: "Completed",
-        color: "bg-green-100 text-green-700",
+        color: "bg-blue-100 text-blue-700",
         icon: CheckCircle
       }
     };
@@ -296,7 +432,7 @@ export default function ProjectsPage() {
         },
         variant: "default",
         icon: <Spline className="w-4 h-4" />,
-        customColor: "bg-green-600 hover:bg-green-700",
+        customColor: "bg-blue-600 hover:bg-blue-700",
         permission: "train_models"
       });
       actions.push({
@@ -559,7 +695,10 @@ export default function ProjectsPage() {
                   isSelected={selectedProjects.has(project.id)}
                   onSelect={handleSelectProject}
                   getStatusConfig={getStatusConfig}
-                  getProjectProgress={getProjectProgress}
+                  progress={projectProgress[project.id]}
+                  permissionInfo={projectPermissions[project.id]}
+                  bypassPermissions={bypassPermissions}
+                  isAdmin={isAdmin}
                   projectActions={getProjectActions(project)}
                   onEdit={setEditingProject}
                   onDelete={setDeletingProject}
@@ -618,32 +757,37 @@ function ProjectCard({
   isSelected,
   onSelect,
   getStatusConfig,
-  getProjectProgress,
+  progress,
+  permissionInfo,
+  bypassPermissions,
+  isAdmin,
   projectActions,
   onEdit,
   onDelete,
   onMembers,
   isDeleting
 }) {
-  const [progress, setProgress] = useState(0);
   const statusConfig = getStatusConfig(project.status);
   const StatusIcon = statusConfig.icon;
-  const { hasPermission, isLoading } = useProjectPermissions(project.id);
-  const bypassPermissions = import.meta.env.VITE_BYPASS_PERMISSIONS === 'true' || import.meta.env.VITE_SUPABASE_REQUIRE_AUTH !== 'true';
-  const permissionsLoading = !bypassPermissions && isLoading;
+  const permissionList = permissionInfo?.permissions || [];
+  const permissionsLoading = !bypassPermissions && !isAdmin && !permissionInfo;
   const actionReady = !permissionsLoading;
-  const canAccess = (permission) => bypassPermissions || hasPermission(permission);
+  const canAccess = (permission) => {
+    if (bypassPermissions || isAdmin || permissionList.includes("*")) {
+      return true;
+    }
+    if (Array.isArray(permission)) {
+      return permission.some((perm) => permissionList.includes(perm));
+    }
+    return permissionList.includes(permission);
+  };
   const visibleActions = actionReady
     ? projectActions.filter((action) => !action.permission || canAccess(action.permission))
     : [];
   const canEdit = canAccess("edit_project");
   const canDelete = canAccess("delete_project");
 
-  useEffect(() => {
-    if (project.status === 'annotation_in_progress' || project.status === 'completed') {
-      getProjectProgress(project.id).then(setProgress);
-    }
-  }, [project.id, project.status, getProjectProgress]);
+  const progressText = progress === undefined ? "Loading..." : `${progress}%`;
 
   return (
     <motion.div
@@ -689,9 +833,9 @@ function ProjectCard({
             <div className="mb-4">
               <div className="flex justify-between text-sm text-gray-600 mb-2">
                 <span>Progress</span>
-                <span>{progress}%</span>
+                <span>{progressText}</span>
               </div>
-              <Progress value={progress} className="h-2" />
+              <Progress value={progress ?? 0} className="h-2" />
             </div>
           )}
 

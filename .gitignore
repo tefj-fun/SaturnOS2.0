@@ -26,3 +26,6 @@ dist-ssr
 .env
 .trainer-tmp/
 saturnos-inference/
+
+# Local Netlify folder
+.netlify

@@ -1,7 +1,7 @@
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import JSZip from "jszip";
-import { uploadToSupabaseStorage } from "@/api/storage";
+import { createSignedImageUrl, uploadToSupabaseStorage } from "@/api/storage";
 import { createStepImages, updateStep } from "@/api/db";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,11 @@ const UPLOAD_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_UPLOAD_CONCUR
 const INSERT_BATCH_SIZE = Math.max(1, Number(import.meta.env.VITE_UPLOAD_INSERT_BATCH) || 25);
 const MAX_IMAGE_PREVIEWS = 24;
 const MAX_LABEL_PREVIEWS = 20;
+const UPLOAD_UI_THROTTLE_MS = 200;
+const THUMBNAIL_SIZE = 320;
+const THUMBNAIL_QUALITY = 70;
+const THUMBNAIL_MIME_WEBP = "image/webp";
+const THUMBNAIL_MIME_JPEG = "image/jpeg";
 
 const stripInlineComment = (value) => value.split(/\s+#/)[0].trim();
 const stripQuotes = (value) => value.replace(/^['"]|['"]$/g, "");
@@ -60,13 +65,146 @@ const resolveSplitName = (groupName) => {
   return "train";
 };
 
+const createCanvas = () => {
+  if (typeof OffscreenCanvas !== "undefined") {
+    return new OffscreenCanvas(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = THUMBNAIL_SIZE;
+  canvas.height = THUMBNAIL_SIZE;
+  return canvas;
+};
+
+const canvasToBlob = async (canvas, type) => {
+  const quality = clamp01(THUMBNAIL_QUALITY / 100);
+  if (typeof canvas.convertToBlob === "function") {
+    return canvas.convertToBlob({ type, quality });
+  }
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+};
+
+const loadImageFromBlob = async (blob) => {
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    return {
+      image: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      cleanup: () => bitmap.close?.(),
+    };
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      resolve({
+        image: img,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+        cleanup: () => URL.revokeObjectURL(url),
+      });
+    };
+    img.onerror = (error) => {
+      URL.revokeObjectURL(url);
+      reject(error);
+    };
+    img.src = url;
+  });
+};
+
+const renderThumbnailFromBlob = async (blob) => {
+  const source = await loadImageFromBlob(blob);
+  const canvas = createCanvas();
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    source.cleanup();
+    return null;
+  }
+  const target = THUMBNAIL_SIZE;
+  const scale = Math.max(target / source.width, target / source.height);
+  const drawWidth = source.width * scale;
+  const drawHeight = source.height * scale;
+  const dx = (target - drawWidth) / 2;
+  const dy = (target - drawHeight) / 2;
+
+  ctx.clearRect(0, 0, target, target);
+  ctx.imageSmoothingEnabled = true;
+  if (ctx.imageSmoothingQuality) {
+    ctx.imageSmoothingQuality = "high";
+  }
+  ctx.drawImage(source.image, dx, dy, drawWidth, drawHeight);
+  source.cleanup();
+
+  let output = await canvasToBlob(canvas, THUMBNAIL_MIME_WEBP);
+  if (!output) {
+    output = await canvasToBlob(canvas, THUMBNAIL_MIME_JPEG);
+  }
+  if (!output) return null;
+  const contentType = output.type || THUMBNAIL_MIME_JPEG;
+  const extension = contentType === THUMBNAIL_MIME_WEBP ? "webp" : "jpg";
+  return { blob: output, contentType, extension };
+};
+
+const createThumbnailBlob = async ({ bucket, path, publicUrl }) => {
+  let signedSourceUrl = null;
+  try {
+    signedSourceUrl = await createSignedImageUrl(bucket, path, { expiresIn: 3600 });
+  } catch (error) {
+    console.warn(`Signed source URL failed for ${path}:`, error);
+  }
+  const urlsToTry = [signedSourceUrl, publicUrl].filter(Boolean);
+  if (!urlsToTry.length) return null;
+  for (const url of urlsToTry) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn(`Thumbnail source fetch failed (${response.status}) for ${path}`);
+        continue;
+      }
+      const sourceBlob = await response.blob();
+      const thumbnail = await renderThumbnailFromBlob(sourceBlob);
+      if (thumbnail) return thumbnail;
+    } catch (error) {
+      console.warn(`Thumbnail source request failed for ${path}:`, error);
+    }
+  }
+  return null;
+};
+
+const uploadThumbnailFromImage = async ({
+  bucket,
+  path,
+  publicUrl,
+  projectId,
+  stepId,
+  splitName,
+  safeName,
+}) => {
+  const thumbnailResult = await createThumbnailBlob({ bucket, path, publicUrl });
+  if (!thumbnailResult) return null;
+  const thumbnailName = `${getFileStem(safeName)}.${thumbnailResult.extension}`;
+  const thumbnailPath = `${projectId}/${stepId}/thumbnails/${splitName}/${thumbnailName}`;
+  try {
+    const { publicUrl: thumbnailUrl } = await uploadToSupabaseStorage(thumbnailResult.blob, thumbnailPath, {
+      bucket,
+      contentType: thumbnailResult.contentType,
+    });
+    return thumbnailUrl || null;
+  } catch (error) {
+    console.warn(`Failed to upload thumbnail for ${path}:`, error);
+    return null;
+  }
+};
+
 const runWithConcurrency = async (items, limit, worker, shouldContinue) => {
   if (!items.length) return;
-  const queue = [...items];
-  const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
-    while (queue.length) {
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
       if (shouldContinue && !shouldContinue()) return;
-      const next = queue.shift();
+      const nextIndex = index;
+      index += 1;
+      const next = items[nextIndex];
       if (!next) return;
       await worker(next);
     }
@@ -267,7 +405,6 @@ const buildImageWrapper = (file, sourceId, storageName) => ({
   file,
   id: sourceId ? `${sourceId}-${file.size}` : `${file.name}-${file.size}-${file.lastModified}`,
   storageName: storageName || file.name,
-  preview: URL.createObjectURL(file),
 });
 
 export default function ImageUploadDialog({
@@ -284,11 +421,68 @@ export default function ImageUploadDialog({
   const [labelFiles, setLabelFiles] = useState([]);
   const [classFile, setClassFile] = useState(null);
   const [yamlUploadStatus, setYamlUploadStatus] = useState({ state: "idle", message: "" });
+  const previewUrlsRef = useRef(new Map());
+  const uploadUiRef = useRef({ lastProgressUpdate: 0, lastProgress: 0, lastMessage: "" });
 
   const stepClasses = useMemo(
     () => (currentStep?.classes || []).filter(Boolean),
     [currentStep]
   );
+
+  const getPreviewUrl = useCallback((fileWrapper) => {
+    if (!fileWrapper?.id) return "";
+    const cached = previewUrlsRef.current.get(fileWrapper.id);
+    if (cached) return cached;
+    const url = URL.createObjectURL(fileWrapper.file);
+    previewUrlsRef.current.set(fileWrapper.id, url);
+    return url;
+  }, []);
+
+  const revokePreviewUrl = useCallback((fileId) => {
+    const url = previewUrlsRef.current.get(fileId);
+    if (url) {
+      URL.revokeObjectURL(url);
+      previewUrlsRef.current.delete(fileId);
+    }
+  }, []);
+
+  const revokeAllPreviews = useCallback(() => {
+    previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrlsRef.current.clear();
+  }, []);
+
+  const updateUploadUi = useCallback((next) => {
+    const now = (typeof performance !== "undefined" && performance.now)
+      ? performance.now()
+      : Date.now();
+    const last = uploadUiRef.current;
+    const nextProgress = typeof next?.progress === "number" ? next.progress : last.lastProgress;
+    const nextMessage = typeof next?.message === "string" ? next.message : last.lastMessage;
+    if (nextMessage !== last.lastMessage) {
+      setUploadMessage(nextMessage);
+    }
+    const shouldUpdateProgress = nextProgress !== last.lastProgress
+      && (now - last.lastProgressUpdate >= UPLOAD_UI_THROTTLE_MS || nextProgress === 100);
+    if (shouldUpdateProgress) {
+      setUploadProgress(nextProgress);
+      uploadUiRef.current = {
+        ...last,
+        lastProgressUpdate: now,
+        lastProgress: nextProgress,
+        lastMessage: nextMessage,
+      };
+      return;
+    }
+    uploadUiRef.current = {
+      ...last,
+      lastProgress: nextProgress,
+      lastMessage: nextMessage,
+    };
+  }, []);
+
+  useEffect(() => () => {
+    revokeAllPreviews();
+  }, [revokeAllPreviews]);
 
   const classMapping = useMemo(() => {
     if (!classFile?.content) return stepClasses;
@@ -504,6 +698,7 @@ export default function ImageUploadDialog({
   };
 
   const removeFile = (fileId) => {
+    revokePreviewUrl(fileId);
     setFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
@@ -549,6 +744,8 @@ export default function ImageUploadDialog({
 
   const handleClose = () => {
     // Reset state when closing dialog
+    revokeAllPreviews();
+    uploadUiRef.current = { lastProgressUpdate: 0, lastProgress: 0, lastMessage: "" };
     setFiles([]);
     setLabelFiles([]);
     setClassFile(null);
@@ -573,6 +770,7 @@ export default function ImageUploadDialog({
     if (files.length === 0 || !currentStepId) return;
 
     cancelRef.current = false;
+    uploadUiRef.current = { lastProgressUpdate: 0, lastProgress: 0, lastMessage: "" };
     setUploadMode(mode);
     setUploadMessage(mode === 'training-only' ? 'Preparing training upload...' : 'Preparing upload...');
     setStep('uploading');
@@ -667,7 +865,7 @@ export default function ImageUploadDialog({
       const totalUploads = uploadTargets.length;
       const uploadSingle = async ({ groupName, fileWrapper }) => {
         if (cancelRef.current) return;
-        setUploadMessage(`Uploading to "${groupName}": ${fileWrapper.file.name}`);
+        updateUploadUi({ message: `Uploading to "${groupName}": ${fileWrapper.file.name}` });
         const lookupStem = getFileStem(fileWrapper.file.name).toLowerCase();
         const labelContent = labelContentByStem.get(lookupStem);
         const splitName = resolveSplitName(groupName);
@@ -694,7 +892,18 @@ export default function ImageUploadDialog({
             storageName: fileWrapper.storageName,
           })
           : Promise.resolve();
-        const [{ publicUrl }, imageSize] = await Promise.all([uploadPromise, imageSizePromise]);
+        const [{ publicUrl, path: storagePath }, imageSize] = await Promise.all([uploadPromise, imageSizePromise]);
+        if (cancelRef.current) return;
+
+        const thumbnailUrl = await uploadThumbnailFromImage({
+          bucket: DATASET_BUCKET,
+          path: storagePath,
+          publicUrl,
+          projectId,
+          stepId: currentStepId,
+          splitName,
+          safeName,
+        });
         if (cancelRef.current) return;
 
         let annotationPayload = null;
@@ -724,7 +933,7 @@ export default function ImageUploadDialog({
         const payload = {
           step_id: currentStepId,
           image_url: publicUrl,
-          thumbnail_url: publicUrl,
+          thumbnail_url: thumbnailUrl || publicUrl,
           display_url: publicUrl,
           image_name: fileWrapper.file.name,
           file_size: fileWrapper.file.size,
@@ -743,7 +952,7 @@ export default function ImageUploadDialog({
 
         filesUploaded += 1;
         if (!cancelRef.current) {
-          setUploadProgress(Math.round((filesUploaded / totalUploads) * 100));
+          updateUploadUi({ progress: Math.round((filesUploaded / totalUploads) * 100) });
         }
       };
 
@@ -797,9 +1006,9 @@ export default function ImageUploadDialog({
 
   const renderSelectStep = () => (
     <motion.div key="select" initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }}>
-      <div className="relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-teal-50">
+      <div className="relative overflow-hidden bg-gradient-to-br from-amber-50 via-white to-blue-50">
         <div className="absolute -top-20 -left-16 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl" />
-        <div className="absolute -bottom-24 right-0 h-64 w-64 rounded-full bg-teal-200/40 blur-3xl" />
+        <div className="absolute -bottom-24 right-0 h-64 w-64 rounded-full bg-blue-200/40 blur-3xl" />
 
         <div className="relative p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -864,7 +1073,13 @@ export default function ImageUploadDialog({
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {visibleImageFiles.map(fileWrapper => (
                         <div key={fileWrapper.id} className="group relative rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-                          <img src={fileWrapper.preview} alt="preview" className="h-20 w-full rounded-lg object-cover" />
+                          <img
+                            src={getPreviewUrl(fileWrapper)}
+                            alt="preview"
+                            loading="lazy"
+                            decoding="async"
+                            className="h-20 w-full rounded-lg object-cover"
+                          />
                           <p className="mt-2 truncate text-xs font-medium text-slate-700">{fileWrapper.file.name}</p>
                           <Button
                             variant="ghost"
@@ -887,26 +1102,26 @@ export default function ImageUploadDialog({
               )}
             </div>
 
-            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-teal-100/60 backdrop-blur">
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-blue-100/60 backdrop-blur">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-slate-900">Labels and Classes</h3>
                   <p className="text-xs text-slate-500">Optional but recommended for pre-labeled sets.</p>
                 </div>
-                <Badge className="border border-teal-200 bg-teal-50 text-teal-700">Optional</Badge>
+                <Badge className="border border-blue-200 bg-blue-50 text-blue-700">Optional</Badge>
               </div>
               <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800">
                 Validation images must be annotated before training, or metrics will be meaningless.
               </div>
 
               <div
-                className="mt-4 rounded-xl border border-dashed border-teal-200 bg-gradient-to-br from-white via-teal-50 to-teal-100/60 p-4 text-center transition hover:border-teal-400 hover:shadow-sm"
+                className="mt-4 rounded-xl border border-dashed border-blue-200 bg-gradient-to-br from-white via-blue-50 to-blue-100/60 p-4 text-center transition hover:border-blue-400 hover:shadow-sm"
                 onDrop={handleLabelDrop}
                 onDragOver={(e) => e.preventDefault()}
                 onDragEnter={(e) => e.preventDefault()}
                 onClick={() => document.getElementById('label-upload-input')?.click()}
               >
-                <UploadCloud className="w-9 h-9 mx-auto text-teal-500" />
+                <UploadCloud className="w-9 h-9 mx-auto text-blue-500" />
                 <p className="mt-2 text-sm font-semibold text-slate-800">Add YOLO label files</p>
                 <p className="text-xs text-slate-600">Match image names, .txt format.</p>
                 <Input
@@ -1009,7 +1224,7 @@ export default function ImageUploadDialog({
                     <p
                       className={`mt-2 text-[11px] ${
                         yamlUploadStatus.state === "saved"
-                          ? "text-emerald-700"
+                          ? "text-blue-700"
                           : yamlUploadStatus.state === "uploading"
                             ? "text-blue-600"
                             : yamlUploadStatus.state === "error"
@@ -1032,7 +1247,7 @@ export default function ImageUploadDialog({
                 variant="outline"
                 onClick={() => startUploadProcess({ mode: 'training-only' })}
                 disabled={files.length === 0}
-                className="border-emerald-200 bg-white/80 text-emerald-800 hover:bg-emerald-50"
+                className="border-blue-200 bg-white/80 text-blue-800 hover:bg-blue-50"
               >
                 <Sprout className="w-4 h-4 mr-2" />
                 Upload to Training
@@ -1056,12 +1271,12 @@ export default function ImageUploadDialog({
 
   const renderSplitStep = () => (
     <motion.div key="split" initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}>
-      <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-emerald-50">
-        <div className="absolute -top-16 right-10 h-48 w-48 rounded-full bg-emerald-200/40 blur-3xl" />
+      <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-blue-50">
+        <div className="absolute -top-16 right-10 h-48 w-48 rounded-full bg-blue-200/40 blur-3xl" />
         <div className="relative p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold tracking-[0.2em] text-emerald-700 uppercase">Split Configuration</p>
+              <p className="text-xs font-semibold tracking-[0.2em] text-blue-700 uppercase">Split Configuration</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-900">Group your images</h2>
               <p className="mt-2 text-sm text-slate-600">Balance training and validation sets. Validation must be labeled to produce meaningful metrics.</p>
             </div>
@@ -1069,19 +1284,19 @@ export default function ImageUploadDialog({
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-emerald-100/60 backdrop-blur">
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-blue-100/60 backdrop-blur">
               <h3 className="text-lg font-semibold text-slate-900">Split summary</h3>
               <p className="mt-1 text-xs text-slate-500">{files.length} images ready to assign.</p>
 
               <div className="mt-4 space-y-3">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+                <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
                       <Sprout className="h-4 w-4" /> Training
                     </div>
-                    <Badge className="border-emerald-200 bg-white text-emerald-700">{trainingRatio}%</Badge>
+                    <Badge className="border-blue-200 bg-white text-blue-700">{trainingRatio}%</Badge>
                   </div>
-                  <p className="mt-2 text-xs text-emerald-700/80">Primary dataset for model learning.</p>
+                  <p className="mt-2 text-xs text-blue-700/80">Primary dataset for model learning.</p>
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
@@ -1108,7 +1323,7 @@ export default function ImageUploadDialog({
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-emerald-100/60 backdrop-blur">
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-lg shadow-blue-100/60 backdrop-blur">
               <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
                   <AlertTriangle className="h-4 w-4" />
@@ -1138,11 +1353,11 @@ export default function ImageUploadDialog({
                     exit={{ opacity: 0, height: 0 }}
                     className="mt-4 space-y-5 overflow-hidden"
                   >
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
                       <div className="mb-2 flex items-center gap-3">
-                        <Sprout className="w-5 h-5 text-emerald-600" />
-                        <h4 className="font-medium text-emerald-900">Training Group</h4>
-                        <Badge variant="outline" className="ml-auto border-emerald-200 text-emerald-700">{trainingRatio}%</Badge>
+                        <Sprout className="w-5 h-5 text-blue-600" />
+                        <h4 className="font-medium text-blue-900">Training Group</h4>
+                        <Badge variant="outline" className="ml-auto border-blue-200 text-blue-700">{trainingRatio}%</Badge>
                       </div>
                       <Slider
                         value={[trainingRatio]}
@@ -1202,12 +1417,12 @@ export default function ImageUploadDialog({
 
   const renderUploadingStep = () => (
     <motion.div key="uploading" initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}>
-      <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-900">
-        <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-emerald-200/60 blur-3xl" />
+      <div className="relative overflow-hidden bg-gradient-to-br from-blue-50 via-white to-amber-50 text-slate-900">
+        <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-blue-200/60 blur-3xl" />
         <div className="relative p-8">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-[0.2em] text-emerald-700 uppercase">Uploading</p>
+              <p className="text-xs font-semibold tracking-[0.2em] text-blue-700 uppercase">Uploading</p>
               <h2 className="mt-2 text-2xl font-semibold">
                 {isTrainingOnlyUpload ? "Uploading training images" : "Shipping your dataset"}
               </h2>
@@ -1218,8 +1433,8 @@ export default function ImageUploadDialog({
             </Badge>
           </div>
 
-          <div className="mt-8 rounded-2xl border border-emerald-100 bg-white/80 p-6 text-center shadow-lg shadow-emerald-100/60">
-            <Loader2 className="w-14 h-14 text-emerald-500 animate-spin mx-auto mb-4" />
+          <div className="mt-8 rounded-2xl border border-blue-100 bg-white/80 p-6 text-center shadow-lg shadow-blue-100/60">
+            <Loader2 className="w-14 h-14 text-blue-500 animate-spin mx-auto mb-4" />
             <div className="w-full max-w-md mx-auto">
               <Progress value={uploadProgress} className="mb-3" />
               <p className="text-sm text-slate-600">{uploadProgress}% complete</p>

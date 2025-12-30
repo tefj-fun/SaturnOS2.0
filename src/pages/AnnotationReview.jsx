@@ -395,7 +395,7 @@ const LogicRuleCard = ({ rule, imageLookup, totalImages }) => {
   
   return (
     <Card className={`border-l-4 ${
-      isGoodPerformance ? 'border-l-green-500 bg-green-50' : 
+      isGoodPerformance ? 'border-l-blue-500 bg-blue-50' : 
       isOkPerformance ? 'border-l-yellow-500 bg-yellow-50' : 
       passRate === null ? 'border-l-slate-400 bg-slate-50' : 'border-l-red-500 bg-red-50'
     }`}>
@@ -406,7 +406,7 @@ const LogicRuleCard = ({ rule, imageLookup, totalImages }) => {
             {passRate === null ? (
               <AlertTriangle className="w-5 h-5 text-slate-500" />
             ) : isGoodPerformance ? (
-              <CheckCircle2 className="w-5 h-5 text-green-600" />
+              <CheckCircle2 className="w-5 h-5 text-blue-600" />
             ) : (
               <XCircle className="w-5 h-5 text-red-600" />
             )}
@@ -420,7 +420,7 @@ const LogicRuleCard = ({ rule, imageLookup, totalImages }) => {
         <div className="space-y-3">
           <div className="flex justify-between text-sm">
             <span className="text-gray-600">Performance</span>
-            <span className={`font-medium ${isGoodPerformance ? 'text-green-700' : isOkPerformance ? 'text-yellow-700' : passRate === null ? 'text-slate-600' : 'text-red-700'}`}>
+            <span className={`font-medium ${isGoodPerformance ? 'text-blue-700' : isOkPerformance ? 'text-yellow-700' : passRate === null ? 'text-slate-600' : 'text-red-700'}`}>
               {passRate === null ? "Not evaluated" : `${failedImages.length}/${totalCount} images failed`}
             </span>
           </div>
@@ -428,7 +428,7 @@ const LogicRuleCard = ({ rule, imageLookup, totalImages }) => {
             <Progress 
               value={passRate} 
               className={`h-2 ${
-                isGoodPerformance ? '[&>div]:bg-green-600' : 
+                isGoodPerformance ? '[&>div]:bg-blue-600' : 
                 isOkPerformance ? '[&>div]:bg-yellow-600' : 
                 '[&>div]:bg-red-600'
               }`} 
@@ -863,7 +863,7 @@ export default function AnnotationReviewPage() {
               overallLogicPassRate === null
                 ? 'bg-slate-100 text-slate-700'
                 : overallLogicPassRate >= 80
-                  ? 'bg-green-100 text-green-800'
+                  ? 'bg-blue-100 text-blue-800'
                   : overallLogicPassRate >= 60
                     ? 'bg-yellow-100 text-yellow-800'
                     : 'bg-red-100 text-red-800'
@@ -1015,7 +1015,7 @@ export default function AnnotationReviewPage() {
                     <BoundingBox
                       key={gt.id}
                       box={gt.bounding_box}
-                      color="border-green-500"
+                      color="border-blue-500"
                       label={`GT: ${gt.class}`}
                       scaleX={scaleX}
                       scaleY={scaleY}
@@ -1084,8 +1084,8 @@ export default function AnnotationReviewPage() {
                 </Card>
                 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between p-2 bg-green-50 rounded">
-                    <span className="font-medium text-green-800">Correct Detections</span>
+                  <div className="flex items-center justify-between p-2 bg-blue-50 rounded">
+                    <span className="font-medium text-blue-800">Correct Detections</span>
                     <Badge variant="secondary">{imageStats.truePositives}</Badge>
                   </div>
                   <div className="flex items-center justify-between p-2 bg-red-50 rounded">

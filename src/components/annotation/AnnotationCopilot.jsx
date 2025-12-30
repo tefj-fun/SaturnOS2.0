@@ -26,7 +26,7 @@ export default function AnnotationCopilot({
     const guidance = {
       button: {
         icon: Target,
-        color: "text-blue-600",
+        color: "text-indigo-600",
         tips: [
           "Look for clickable elements like buttons or links",
           "Consider hover states and active states",
@@ -35,7 +35,7 @@ export default function AnnotationCopilot({
       },
       form: {
         icon: Square,
-        color: "text-green-600", 
+        color: "text-indigo-600", 
         tips: [
           "Identify input fields, labels, and validation messages",
           "Look for form submission buttons",
@@ -44,7 +44,7 @@ export default function AnnotationCopilot({
       },
       menu: {
         icon: MousePointer2,
-        color: "text-purple-600",
+        color: "text-indigo-600",
         tips: [
           "Find dropdown menus, navigation bars",
           "Look for menu items and submenus",
@@ -84,7 +84,7 @@ export default function AnnotationCopilot({
       {/* Header */}
       <div className="p-6 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-teal-600 rounded-lg flex items-center justify-center">
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center">
             <Bot className="w-4 h-4 text-white" />
           </div>
           <h2 className="font-bold text-gray-900">AI Copilot</h2>
@@ -113,18 +113,18 @@ export default function AnnotationCopilot({
                 <p className="text-sm text-gray-600">{currentStep.description}</p>
               </div>
               
-              <div className="p-3 bg-teal-50 rounded-lg border border-teal-100">
+              <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
                 <div className="flex items-center gap-2 mb-2">
-                  <Lightbulb className="w-4 h-4 text-teal-600" />
-                  <span className="text-sm font-medium text-teal-800">AI Guidance</span>
+                  <Lightbulb className="w-4 h-4 text-indigo-600" />
+                  <span className="text-sm font-medium text-indigo-800">AI Guidance</span>
                 </div>
-                <p className="text-sm text-teal-700">
+                <p className="text-sm text-indigo-700">
                   Focus on the item: 
-                  <code className="bg-teal-100 px-1 rounded text-xs mx-1">
+                  <code className="bg-indigo-100 px-1 rounded text-xs mx-1">
                     {currentStep.class}
                   </code>
                    and label it with status:
-                   <code className="bg-teal-100 px-1 rounded text-xs ml-1">
+                   <code className="bg-indigo-100 px-1 rounded text-xs ml-1">
                     {currentStep.status}
                   </code>
                 </p>
@@ -147,7 +147,7 @@ export default function AnnotationCopilot({
                   onClick={() => onAnnotationModeChange(mode.id)}
                   className={`w-full justify-start h-auto p-3 ${
                     annotationMode === mode.id 
-                      ? "bg-teal-600 hover:bg-teal-700" 
+                      ? "bg-indigo-600 hover:bg-indigo-700" 
                       : "hover:bg-gray-50"
                   }`}
                 >
@@ -175,7 +175,7 @@ export default function AnnotationCopilot({
               <ul className="space-y-2">
                 {productGuidance.tips.map((tip, index) => (
                   <li key={index} className="flex items-start gap-2">
-                    <ArrowRight className="w-3 h-3 text-teal-600 mt-0.5 flex-shrink-0" />
+                    <ArrowRight className="w-3 h-3 text-indigo-600 mt-0.5 flex-shrink-0" />
                     <span className="text-sm text-gray-600">{tip}</span>
                   </li>
                 ))}
@@ -226,7 +226,7 @@ export default function AnnotationCopilot({
 
       {/* Footer Actions */}
       <div className="p-6 border-t border-gray-200 bg-white">
-        <Button className="w-full bg-teal-600 hover:bg-teal-700" disabled>
+        <Button className="w-full bg-indigo-600 hover:bg-indigo-700" disabled>
           <Sparkles className="w-4 h-4 mr-2" />
           AI Auto-Detect (Coming Soon)
         </Button>

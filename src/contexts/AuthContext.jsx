@@ -17,17 +17,24 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
+  const profileRef = useRef(null);
   const inFlightRef = useRef(null);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const loadProfile = useCallback(
     async (userId, options = {}) => {
       if (!userId) {
+        profileRef.current = null;
         setProfile(null);
         return null;
       }
       const { force = false } = options;
-      if (!force && profile && profile.id === userId) {
-        return profile;
+      const currentProfile = profileRef.current;
+      if (!force && currentProfile && currentProfile.id === userId) {
+        return currentProfile;
       }
       if (!force && inFlightRef.current) {
         return inFlightRef.current;
@@ -35,11 +42,13 @@ export function AuthProvider({ children }) {
       setProfileLoading(true);
       const promise = getProfile(userId)
         .then((data) => {
+          profileRef.current = data || null;
           setProfile(data || null);
           return data || null;
         })
         .catch((error) => {
           console.error("Failed to load profile:", error);
+          profileRef.current = null;
           setProfile(null);
           return null;
         })
@@ -50,7 +59,7 @@ export function AuthProvider({ children }) {
       inFlightRef.current = promise;
       return promise;
     },
-    [profile]
+    []
   );
 
   useEffect(() => {
@@ -67,11 +76,13 @@ export function AuthProvider({ children }) {
         if (sessionUser) {
           await loadProfile(sessionUser.id);
         } else if (isMounted) {
+          profileRef.current = null;
           setProfile(null);
         }
       } catch {
         if (isMounted) {
           setUser(null);
+          profileRef.current = null;
           setProfile(null);
         }
       } finally {
@@ -88,6 +99,7 @@ export function AuthProvider({ children }) {
         const sessionUser = session?.user || null;
         setUser(sessionUser);
         if (!sessionUser) {
+          profileRef.current = null;
           setProfile(null);
         } else {
           loadProfile(sessionUser.id, { force: true });

@@ -63,12 +63,15 @@ import {
 
 import ImageUploadDialog from "./ImageUploadDialog";
 
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
 export default function ImagePortal({
   currentStep,
   stepImages,
   currentImageIndex,
   onImageIndexChange,
   onImagesUpdate,
+  onRequestImageSign,
   projectId // Added projectId prop as per outline
 }) {
   const [showPreview, setShowPreview] = useState(false);
@@ -101,10 +104,18 @@ export default function ImagePortal({
 
   // Selection state additions
   const [selectedGroups, setSelectedGroups] = useState(new Set()); // Track selected groups
+  const signRequestedRef = React.useRef(new Set());
 
 
   const currentImage = stepImages[currentImageIndex];
   const currentImageId = currentImage?.id ?? null;
+  React.useEffect(() => {
+    if (!previewImage?.id) return;
+    const latest = stepImages.find((image) => image.id === previewImage.id);
+    if (latest && latest !== previewImage) {
+      setPreviewImage(latest);
+    }
+  }, [stepImages, previewImage]);
   const stepImageIndexById = React.useMemo(() => {
     const map = new Map();
     stepImages.forEach((image, index) => {
@@ -423,9 +434,25 @@ export default function ImagePortal({
   };
 
   const openPreview = (image) => {
+    if (onRequestImageSign) {
+      onRequestImageSign(image, { full: true });
+    }
     setPreviewImage(image);
     setShowPreview(true);
   };
+
+  const handleThumbnailError = useCallback(
+    (image, event) => {
+      if (!onRequestImageSign || !image) return;
+      const target = event?.currentTarget;
+      if (target?.dataset?.signRequested === "true") return;
+      if (target?.dataset) {
+        target.dataset.signRequested = "true";
+      }
+      onRequestImageSign(image, { thumbnail: true });
+    },
+    [onRequestImageSign]
+  );
 
   // Utility functions
   const isSupabaseSignedUrl = (url) => {
@@ -456,6 +483,58 @@ export default function ImagePortal({
       return false;
     }
   };
+
+  const encodeStoragePath = (path) => {
+    if (!path) return "";
+    return String(path)
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+  };
+
+  const extractBucketFromUrl = (url) => {
+    if (!url) return null;
+    try {
+      const path = new URL(url).pathname;
+      const match = path.match(
+        /\/storage\/v1\/(?:object|render\/image)\/(?:public|sign)?\/([^/]+)\//
+      );
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getSupabaseOriginFromUrl = (url) => {
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      if (parsed.pathname.includes("/storage/v1/")) {
+        return parsed.origin;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const getSupabaseOriginForImage = (image) => {
+    const candidates = [
+      image?.source_thumbnail_url,
+      image?.source_display_url,
+      image?.source_image_url,
+      image?.thumbnail_url,
+      image?.display_url,
+      image?.image_url,
+    ];
+    for (const candidate of candidates) {
+      const origin = getSupabaseOriginFromUrl(candidate);
+      if (origin) return origin;
+    }
+    return null;
+  };
+
+  const buildPublicThumbnailUrl = () => null;
 
   const normalizeStorageUrl = (url) => {
     if (!url) return url;
@@ -488,26 +567,38 @@ export default function ImagePortal({
     return isSupabasePublicUrl(url);
   };
 
-  const pickImageUrl = (image, url) => {
+  const pickImageUrl = (image, url, options = {}) => {
     if (!url) return null;
-    if (shouldBlockPublicUrl(image, url)) return null;
+    const { allowPublic = false, requestSign = false } = options;
+    if (!allowPublic && shouldBlockPublicUrl(image, url)) return null;
+    if (allowPublic && requestSign && shouldBlockPublicUrl(image, url)) {
+      if (onRequestImageSign && image?.id && !signRequestedRef.current.has(image.id)) {
+        signRequestedRef.current.add(image.id);
+        onRequestImageSign(image, { thumbnail: true });
+      }
+      return null;
+    }
     return normalizeStorageUrl(url);
   };
 
   const getImageUrl = (image, context = 'full') => {
     switch (context) {
-      case 'thumbnail':
-        if (image?.thumbnail_url) return pickImageUrl(image, image.thumbnail_url);
-        if (!image?.storage_path) {
-          return pickImageUrl(
-            image,
-            image?.display_url ||
-              image?.image_url ||
-              image?.source_display_url ||
-              image?.source_image_url
-          );
+      case 'thumbnail': {
+        const publicThumb = buildPublicThumbnailUrl(image);
+        const candidates = [
+          image?.thumbnail_url,
+          image?.source_thumbnail_url,
+          image?.display_url,
+          image?.source_display_url,
+          image?.image_url,
+          image?.source_image_url,
+        ];
+        for (const candidate of candidates) {
+          const picked = pickImageUrl(image, candidate, { allowPublic: true, requestSign: true });
+          if (picked) return picked;
         }
         return null;
+      }
       case 'display':
         return pickImageUrl(
           image,
@@ -581,7 +672,7 @@ export default function ImagePortal({
   const getStatusIcon = (status) => {
     switch (status) {
       case 'completed':
-        return <CheckCircle className="w-4 h-4 text-green-600" />;
+        return <CheckCircle className="w-4 h-4 text-blue-600" />;
       case 'skipped':
         return <MinusCircle className="w-4 h-4 text-slate-500" />;
       case 'pending':
@@ -594,7 +685,7 @@ export default function ImagePortal({
   const getStatusBadge = (status) => {
     switch (status) {
       case 'completed':
-        return <Badge className="bg-green-100 text-green-800 border-green-200">Annotated</Badge>;
+        return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Annotated</Badge>;
       case 'skipped':
         return <Badge className="bg-slate-100 text-slate-700 border-slate-200">No annotations</Badge>;
       case 'pending':
@@ -882,12 +973,12 @@ export default function ImagePortal({
               {stepImages.length} total
             </Badge>
             {currentImage && (
-              <div className="flex items-center gap-2 px-3 py-1 bg-teal-50 rounded-lg border border-teal-200">
-                <Target className="w-4 h-4 text-teal-600" />
-                <span className="text-sm font-medium text-teal-900">
+              <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-lg border border-blue-200">
+                <Target className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-900">
                   Currently viewing: {getImageName(currentImage)}
                 </span>
-                <Badge className="bg-teal-600 text-white text-xs">
+                <Badge className="bg-blue-600 text-white text-xs">
                   {currentImage.image_group || 'Untagged'}
                 </Badge>
               </div>
@@ -1126,7 +1217,7 @@ export default function ImagePortal({
                   <p className="text-gray-600 mb-6">Upload images to start annotating this step</p>
                   <Button
                     onClick={() => setShowUploadDialog(true)}
-                    className="bg-teal-600 hover:bg-teal-700"
+                    className="bg-blue-600 hover:bg-blue-700"
                   >
                     <Upload className="w-4 h-4 mr-2" />
                     Upload Images
@@ -1195,7 +1286,7 @@ export default function ImagePortal({
                       {currentImage ? (
                         isImageProcessing(currentImage) ? (
                           <div className="w-full h-full bg-gray-100 rounded-lg flex items-center justify-center flex-col">
-                            <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
                             <p className="text-lg text-gray-500">Processing image...</p>
                             <p className="text-sm text-gray-400">Please wait</p>
                           </div>
@@ -1368,7 +1459,7 @@ export default function ImagePortal({
                                             isSelectionMode && selectedImages.has(image.id)
                                               ? 'border-blue-500 bg-blue-50/70 shadow-md ring-2 ring-blue-400'
                                               : image.id === currentImageId
-                                                ? 'border-teal-500 shadow-md ring-2 ring-teal-200 bg-teal-50'
+                                                ? 'border-blue-500 shadow-md ring-2 ring-blue-200 bg-blue-50'
                                                 : 'border-gray-200 hover:border-gray-300'
                                           }`}
                                           onClick={(e) => handleImageClick(image.id, e)}
@@ -1377,7 +1468,7 @@ export default function ImagePortal({
                                           {/* Current image indicator */}
                                           {image.id === currentImageId && (
                                             <div className="absolute -top-1 -right-1 z-10">
-                                              <div className="w-3 h-3 bg-teal-600 rounded-full border-2 border-white shadow-sm"></div>
+                                              <div className="w-3 h-3 bg-blue-600 rounded-full border-2 border-white shadow-sm"></div>
                                             </div>
                                           )}
 
@@ -1385,7 +1476,7 @@ export default function ImagePortal({
                                           <div className="aspect-square overflow-hidden rounded-t">
                                             {isImageProcessing(image) ? (
                                               <div className="w-full h-full bg-gray-100 flex items-center justify-center">
-                                                <div className="w-3 h-3 border border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+                                                <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                                               </div>
                                             ) : (
                                               (() => {
@@ -1401,6 +1492,7 @@ export default function ImagePortal({
                                                   <img
                                                     src={thumbnailSrc}
                                                     alt={getImageName(image)}
+                                                    onError={(event) => handleThumbnailError(image, event)}
                                                     className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-110"
                                                     loading="lazy"
                                                     decoding="async"
@@ -1520,7 +1612,7 @@ export default function ImagePortal({
                                         isSelectionMode && selectedImages.has(image.id)
                                           ? 'bg-blue-50 border-l-4 border-blue-500 ring-1 ring-blue-200'
                                           : image.id === currentImageId
-                                            ? 'bg-teal-50 border-l-4 border-teal-500'
+                                            ? 'bg-blue-50 border-l-4 border-blue-500'
                                             : ''
                                       }`}
                                       onClick={(e) => handleImageClick(image.id, e)}
@@ -1537,7 +1629,7 @@ export default function ImagePortal({
                                       <div className="w-16 h-16 flex-shrink-0">
                                         {isImageProcessing(image) ? (
                                           <div className="w-full h-full bg-gray-100 rounded-lg flex items-center justify-center">
-                                            <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+                                            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                                           </div>
                                         ) : (
                                           (() => {
@@ -1553,6 +1645,7 @@ export default function ImagePortal({
                                               <img
                                                 src={thumbnailSrc}
                                                 alt={getImageName(image)}
+                                                onError={(event) => handleThumbnailError(image, event)}
                                                 className="w-full h-full object-cover rounded-lg"
                                                 loading="lazy"
                                                 decoding="async"

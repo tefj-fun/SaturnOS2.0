@@ -310,7 +310,7 @@ export default function StepManagementPage() {
 
   const getStatusColor = useCallback((status) => {
     const colors = {
-      good: "bg-green-100 text-green-800",
+      good: "bg-blue-100 text-blue-800",
       bad: "bg-red-100 text-red-800",
       neutral: "bg-gray-100 text-gray-800",
       error: "bg-red-100 text-red-800",
@@ -392,7 +392,7 @@ export default function StepManagementPage() {
           <Card className="glass-effect border-0">
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
-                <Eye className="w-8 h-8 text-green-600" />
+                <Eye className="w-8 h-8 text-blue-600" />
                 <div>
                   <p className="text-sm text-gray-600">Enabled</p>
                   <p className="text-2xl font-bold text-gray-900">
@@ -765,7 +765,7 @@ function StepCard({
                 {step.is_enabled === false ? (
                   <EyeOff className="w-4 h-4 text-gray-400" />
                 ) : (
-                  <Eye className="w-4 h-4 text-green-600" />
+                  <Eye className="w-4 h-4 text-blue-600" />
                 )}
                 <Button
                   size="sm"
@@ -905,7 +905,7 @@ function StepCard({
                   Clarity: {step.clarity_score}/10
                 </Badge>
                 {step.is_annotated && (
-                  <Badge className="bg-green-100 text-green-800 border-0">
+                  <Badge className="bg-blue-100 text-blue-800 border-0">
                     <CheckCircle className="w-3 h-3 mr-1" />
                     Annotated
                   </Badge>

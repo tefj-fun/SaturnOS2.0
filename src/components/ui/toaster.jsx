@@ -13,8 +13,16 @@ export function Toaster() {
 
   return (
     <ToastProvider>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
-        if (!props.open) {
+      {toasts.map(function ({
+        id,
+        title,
+        description,
+        action,
+        open,
+        onOpenChange,
+        ...props
+      }) {
+        if (!open) {
           return null;
         }
 

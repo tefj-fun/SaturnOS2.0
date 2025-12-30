@@ -343,14 +343,14 @@ export default function BuildVariantsPage() {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className={`p-4 rounded-lg border transition-all ${
-                          config ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200"
+                          config ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200"
                         }`}
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-2">
                               {config ? (
-                                <CheckCircle className="w-4 h-4 text-green-600" />
+                                <CheckCircle className="w-4 h-4 text-blue-600" />
                               ) : (
                                 <Circle className="w-4 h-4 text-gray-400" />
                               )}
@@ -377,25 +377,25 @@ export default function BuildVariantsPage() {
 
                             {config && (
                               <div className="mt-3 p-3 bg-white rounded border">
-                                <h5 className="font-medium text-sm text-green-800 mb-2">Active Overrides:</h5>
+                                <h5 className="font-medium text-sm text-blue-800 mb-2">Active Overrides:</h5>
                                 <div className="flex flex-wrap gap-2 text-xs">
                                   {config.active_classes?.length > 0 && (
-                                    <Badge className="bg-green-100 text-green-800">
+                                    <Badge className="bg-blue-100 text-blue-800">
                                       Classes: {config.active_classes.join(", ")}
                                     </Badge>
                                   )}
                                   {config.status_options && (
-                                    <Badge className="bg-green-100 text-green-800">
+                                    <Badge className="bg-blue-100 text-blue-800">
                                       Status: {config.status_options}
                                     </Badge>
                                   )}
                                   {config.active_logic_rule_ids?.length > 0 && (
-                                    <Badge className="bg-green-100 text-green-800">
+                                    <Badge className="bg-blue-100 text-blue-800">
                                       Logic Rules: {config.active_logic_rule_ids.length}
                                     </Badge>
                                   )}
                                   {config.inference_model_id && (
-                                    <Badge className="bg-green-100 text-green-800">
+                                    <Badge className="bg-blue-100 text-blue-800">
                                       <Cpu className="w-3 h-3 mr-1" />
                                       AI Model
                                     </Badge>

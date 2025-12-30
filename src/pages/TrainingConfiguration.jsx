@@ -423,7 +423,7 @@ export default function TrainingConfigurationPage() {
     const trainerStatusConfig = {
         checking: { label: 'Checking trainer...', color: 'bg-gray-100 text-gray-700', icon: <Loader2 className="w-3 h-3 mr-1 animate-spin" /> },
         busy: { label: 'Trainer busy', color: 'bg-amber-100 text-amber-800', icon: <Cpu className="w-3 h-3 mr-1" /> },
-        queued: { label: 'Trainer queued', color: 'bg-blue-100 text-blue-800', icon: <Clock className="w-3 h-3 mr-1" /> },
+        queued: { label: 'Trainer queued', color: 'bg-amber-100 text-amber-800', icon: <Clock className="w-3 h-3 mr-1" /> },
         idle: { label: 'Trainer available', color: 'bg-green-100 text-green-800', icon: <CheckCircle className="w-3 h-3 mr-1" /> },
         offline: { label: 'Trainer offline', color: 'bg-red-100 text-red-800', icon: <WifiOff className="w-3 h-3 mr-1" /> },
         unknown: { label: 'Trainer status unknown', color: 'bg-red-100 text-red-800', icon: <Info className="w-3 h-3 mr-1" /> },
@@ -438,11 +438,11 @@ export default function TrainingConfigurationPage() {
     };
     const currentTrainerStatus = trainerStatusConfig[trainerStatus.state] || trainerStatusConfig.unknown;
     const isTrainerOffline = trainerStatus.state === 'offline' || trainerStatus.state === 'unknown';
-    const startButtonClass = isTrainerOffline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700';
+    const startButtonClass = isTrainerOffline ? 'bg-amber-500 hover:bg-amber-600' : 'bg-amber-600 hover:bg-amber-700';
     const datasetReady = datasetSummary ? datasetSummary.ready : true;
     const datasetStatusLabel = datasetSummary ? (datasetReady ? 'Ready' : 'Needs attention') : 'Not checked';
     const datasetStatusClass = datasetSummary
-        ? (datasetReady ? 'bg-emerald-100 text-emerald-800 border-0' : 'bg-amber-100 text-amber-800 border-0')
+        ? (datasetReady ? 'bg-green-100 text-green-800 border-0' : 'bg-amber-100 text-amber-800 border-0')
         : 'bg-gray-100 text-gray-700 border-0';
     const labelTypes = datasetSummary?.labelTypes || { boxes: 0, segments: 0 };
     const hasMixedLabels = labelTypes.boxes > 0 && labelTypes.segments > 0;
@@ -475,7 +475,7 @@ export default function TrainingConfigurationPage() {
                                 <h1 className="text-3xl font-bold text-gray-900">Training Overview</h1>
                                 <p className="text-gray-600 mt-1">
                                     {selectedProject?.name}
-                                    {selectedStep && <span className="text-blue-600 font-medium"> / Step: {selectedStep.title}</span>}
+                                    {selectedStep && <span className="text-amber-600 font-medium"> / Step: {selectedStep.title}</span>}
                                 </p>
                             </div>
                         </div>
@@ -484,7 +484,7 @@ export default function TrainingConfigurationPage() {
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
                                 <Popover onOpenChange={(open) => { if (!open) setShowTrainerAdvanced(false); }}>
                                     <PopoverTrigger
-                                        className="appearance-none border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded-md"
+                                        className="appearance-none border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 rounded-md"
                                         type="button"
                                     >
                                         <Badge className={`${currentTrainerStatus.color} border-0 font-medium`}>
@@ -525,7 +525,7 @@ export default function TrainingConfigurationPage() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setShowTrainerAdvanced((prev) => !prev)}
-                                                    className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                                    className="text-xs text-amber-600 hover:text-amber-700 flex items-center gap-1"
                                                 >
                                                     Advanced details
                                                     <ChevronDown className={`w-3 h-3 transition-transform ${showTrainerAdvanced ? 'rotate-180' : ''}`} />
@@ -716,7 +716,7 @@ export default function TrainingConfigurationPage() {
 
                             <div className="space-y-8">
                                 {groupedRuns.running.length > 0 && (
-                                    <Section title="Live training" icon={<Rocket className="w-5 h-5 text-blue-600" />} count={groupedRuns.running.length}>
+                                    <Section title="Live training" icon={<Rocket className="w-5 h-5 text-amber-600" />} count={groupedRuns.running.length}>
                                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                                             {groupedRuns.running.map(run => (
                                                 <TrainingRunCard

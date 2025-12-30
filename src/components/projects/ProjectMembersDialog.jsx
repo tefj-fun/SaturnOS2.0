@@ -316,7 +316,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
                   {members.map((member) => {
                     const roleConfig = ROLE_CONFIGS[member.role];
                     const statusConfig = {
-                      active: { icon: <CheckCircle className="w-3 h-3" />, color: 'bg-green-100 text-green-800' },
+                      active: { icon: <CheckCircle className="w-3 h-3" />, color: 'bg-blue-100 text-blue-800' },
                       pending: { icon: <Clock className="w-3 h-3" />, color: 'bg-yellow-100 text-yellow-800' },
                       inactive: { icon: <AlertTriangle className="w-3 h-3" />, color: 'bg-gray-100 text-gray-800' }
                     };
@@ -417,7 +417,7 @@ export default function ProjectMembersDialog({ open, onOpenChange, project }) {
                     <ul className="text-sm space-y-1">
                       {config.permissions.map(permission => (
                         <li key={permission} className="flex items-center gap-1 text-gray-600">
-                          <CheckCircle className="w-3 h-3 text-green-500" />
+                          <CheckCircle className="w-3 h-3 text-blue-500" />
                           {PERMISSION_LABELS[permission]}
                         </li>
                       ))}

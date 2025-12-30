@@ -176,7 +176,7 @@ export default function DatasetUpload({ projectId, onComplete }) {
             Dataset Upload Progress
           </h3>
           <Badge className={`${
-            canProceed ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
+            canProceed ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-800"
           } border-0`}>
             {completedSteps.size} of {stepsData.length} completed
           </Badge>
@@ -225,7 +225,7 @@ export default function DatasetUpload({ projectId, onComplete }) {
         <Button 
           onClick={onComplete}
           disabled={!canProceed}
-          className="bg-teal-600 hover:bg-teal-700 shadow-lg"
+          className="bg-blue-600 hover:bg-blue-700 shadow-lg"
           size="lg"
         >
           Start Annotation
@@ -265,19 +265,19 @@ function DatasetUploadCard({
       transition={{ duration: 0.2, delay: index * 0.1 }}
     >
       <Card className={`glass-effect border-0 shadow-sm ${
-        isCompleted ? "ring-2 ring-green-200" : ""
+        isCompleted ? "ring-2 ring-blue-200" : ""
       }`}>
         <CardContent className="p-6">
           <div className="flex items-start gap-4">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
               isCompleted 
-                ? "bg-green-100" 
+                ? "bg-blue-100" 
                 : isUploading 
                   ? "bg-blue-100" 
                   : "bg-gray-100"
             }`}>
               {isCompleted ? (
-                <CheckCircle className="w-5 h-5 text-green-600" />
+                <CheckCircle className="w-5 h-5 text-blue-600" />
               ) : isUploading ? (
                 <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
               ) : (
@@ -347,11 +347,11 @@ function DatasetUploadCard({
 
               {/* Completed State */}
               {isCompleted && (
-                <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-green-600" />
-                      <span className="text-sm font-medium text-green-700">
+                      <CheckCircle className="w-4 h-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-700">
                         Dataset uploaded: {step.dataset_filename}
                       </span>
                     </div>

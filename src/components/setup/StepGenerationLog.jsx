@@ -166,13 +166,13 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
       info: "bg-blue-100 text-blue-800",
       processing: "bg-purple-100 text-purple-800",
       thinking: "bg-amber-100 text-amber-800",
-      discovery: "bg-green-100 text-green-800",
+      discovery: "bg-blue-100 text-blue-800",
       expert: "bg-indigo-100 text-indigo-800",
       analysis: "bg-pink-100 text-pink-800",
-      generation: "bg-teal-100 text-teal-800",
+      generation: "bg-blue-100 text-blue-800",
       validation: "bg-orange-100 text-orange-800",
       completion: "bg-gray-100 text-gray-800",
-      success: "bg-emerald-100 text-emerald-800"
+      success: "bg-blue-100 text-blue-800"
     };
     return colors[type] || colors.info;
   };
@@ -185,10 +185,10 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
     <Card className="glass-effect border-0 shadow-sm">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Brain className="w-5 h-5 text-teal-600 animate-pulse" />
+          <Brain className="w-5 h-5 text-blue-600 animate-pulse" />
           AI Generation Log
           {isGenerating && (
-            <Badge className="bg-teal-100 text-teal-800 border-teal-200 animate-pulse">
+            <Badge className="bg-blue-100 text-blue-800 border-blue-200 animate-pulse">
               Processing...
             </Badge>
           )}
@@ -208,10 +208,10 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
                   className="flex items-start gap-3"
                 >
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    log.type === 'success' ? 'bg-emerald-100' : 'bg-gray-100'
+                    log.type === 'success' ? 'bg-blue-100' : 'bg-gray-100'
                   }`}>
                     <log.icon className={`w-4 h-4 ${
-                      log.type === 'success' ? 'text-emerald-600' : 'text-gray-600'
+                      log.type === 'success' ? 'text-blue-600' : 'text-gray-600'
                     }`} />
                   </div>
                   
@@ -241,14 +241,14 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex items-center gap-3 mt-4 p-3 bg-teal-50 rounded-lg border border-teal-200"
+                className="flex items-center gap-3 mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200"
               >
                 <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" />
-                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                  <div className="w-2 h-2 bg-teal-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                 </div>
-                <span className="text-sm text-teal-700 font-medium">
+                <span className="text-sm text-blue-700 font-medium">
                   AI is working...
                 </span>
               </motion.div>
@@ -260,10 +260,10 @@ export default function StepGenerationLog({ isGenerating, onComplete }) {
         </ScrollArea>
         
         {logs.length > 0 && !isGenerating && (
-          <div className="mt-4 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
             <div className="flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-emerald-600" />
-              <span className="text-sm font-medium text-emerald-800">
+              <CheckCircle className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-medium text-blue-800">
                 Generation completed successfully!
               </span>
             </div>

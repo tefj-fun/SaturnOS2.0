@@ -157,7 +157,7 @@ export default function DashboardPage() {
         type: 'training',
         message: `Model "${run.run_name}" ${statusMessage}`,
         date: run.updated_at || run.created_at,
-        icon: <Brain className="w-4 h-4 text-green-600" />,
+        icon: <Brain className="w-4 h-4 text-blue-600" />,
         color: 'green'
       });
     });
@@ -179,8 +179,8 @@ export default function DashboardPage() {
       created: { label: "Created", color: "bg-gray-100 text-gray-700", icon: Clock },
       sop_uploaded: { label: "SOP Uploaded", color: "bg-blue-100 text-blue-700", icon: FileText },
       steps_generated: { label: "Steps Ready", color: "bg-amber-100 text-amber-700", icon: Target },
-      annotation_in_progress: { label: "In Progress", color: "bg-teal-100 text-teal-700", icon: PenTool },
-      completed: { label: "Completed", color: "bg-green-100 text-green-700", icon: CheckCircle }
+      annotation_in_progress: { label: "In Progress", color: "bg-blue-100 text-blue-700", icon: PenTool },
+      completed: { label: "Completed", color: "bg-blue-100 text-blue-700", icon: CheckCircle }
     };
     return configs[status] || configs.created;
   };
@@ -289,11 +289,11 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Annotations</p>
-                  <p className="text-3xl font-bold text-teal-600">{stats.totalAnnotations}</p>
+                  <p className="text-3xl font-bold text-blue-600">{stats.totalAnnotations}</p>
                   <p className="text-xs text-gray-500 mt-1">Avg {stats.averageAnnotationsPerProject}/project</p>
                 </div>
-                <div className="w-12 h-12 bg-teal-100 rounded-lg flex items-center justify-center">
-                  <Target className="w-6 h-6 text-teal-600" />
+                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Target className="w-6 h-6 text-blue-600" />
                 </div>
               </div>
             </CardContent>
@@ -319,11 +319,11 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Models Trained</p>
-                  <p className="text-3xl font-bold text-green-600">{stats.modelsTrained}</p>
+                  <p className="text-3xl font-bold text-blue-600">{stats.modelsTrained}</p>
                   <p className="text-xs text-gray-500 mt-1">Successfully completed</p>
                 </div>
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Brain className="w-6 h-6 text-green-600" />
+                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Brain className="w-6 h-6 text-blue-600" />
                 </div>
               </div>
             </CardContent>
@@ -334,11 +334,11 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Avg Model Accuracy</p>
-                  <p className="text-3xl font-bold text-emerald-600">{stats.averageModelAccuracy}%</p>
+                  <p className="text-3xl font-bold text-blue-600">{stats.averageModelAccuracy}%</p>
                   <p className="text-xs text-gray-500 mt-1">Mean Average Precision</p>
                 </div>
-                <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
-                  <TrendingUp className="w-6 h-6 text-emerald-600" />
+                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6 text-blue-600" />
                 </div>
               </div>
             </CardContent>

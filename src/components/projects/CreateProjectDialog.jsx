@@ -48,7 +48,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.65),_transparent_55%)]" />
           <div className="relative grid md:grid-cols-[1.05fr_1fr]">
             <div className="relative p-8 md:p-10 text-white">
-              <div className="absolute inset-0 bg-gradient-to-br from-teal-600 via-emerald-500 to-teal-700" />
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-blue-500 to-blue-700" />
               <div className="absolute inset-0 opacity-30 bg-[radial-gradient(circle_at_20%_20%,_rgba(255,255,255,0.35),_transparent_45%),radial-gradient(circle_at_80%_10%,_rgba(255,255,255,0.2),_transparent_50%)]" />
               <div className="relative z-10 space-y-6">
                 <div className="flex items-center gap-3">
@@ -104,7 +104,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
                     value={formData.name}
                     onChange={(e) => handleInputChange("name", e.target.value)}
                     placeholder="e.g. Retail Checkout QA"
-                    className="border-slate-200 focus:border-teal-500 focus:ring-teal-500 bg-white/80"
+                    className="border-slate-200 focus:border-blue-500 focus:ring-blue-500 bg-white/80"
                     required
                   />
                   <p className="text-xs text-slate-500">Short, clear, and task-specific.</p>
@@ -119,7 +119,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
                     value={formData.description}
                     onChange={(e) => handleInputChange("description", e.target.value)}
                     placeholder="What is being annotated and why?"
-                    className="border-slate-200 focus:border-teal-500 focus:ring-teal-500 h-24 resize-none bg-white/80"
+                    className="border-slate-200 focus:border-blue-500 focus:ring-blue-500 h-24 resize-none bg-white/80"
                   />
                 </div>
 
@@ -135,7 +135,7 @@ export default function CreateProjectDialog({ open, onOpenChange, onCreateProjec
                   </Button>
                   <Button
                     type="submit"
-                    className="flex-1 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 shadow-lg"
+                    className="flex-1 bg-gradient-to-r from-blue-500 to-blue-500 hover:from-blue-600 hover:to-blue-600 shadow-lg"
                     disabled={isSubmitting || !formData.name.trim()}
                   >
                     {isSubmitting ? "Creating..." : "Create Project"}

@@ -45,7 +45,7 @@ import { createPageUrl } from '@/utils';
 
 const statusConfig = {
   running: { icon: <Rocket className="w-4 h-4 text-blue-500" />, color: "bg-blue-100 text-blue-800", label: "Running" },
-  completed: { icon: <CheckCircle className="w-4 h-4 text-green-500" />, color: "bg-green-100 text-green-800", label: "Completed" },
+  completed: { icon: <CheckCircle className="w-4 h-4 text-blue-500" />, color: "bg-blue-100 text-blue-800", label: "Completed" },
   failed: { icon: <AlertTriangle className="w-4 h-4 text-red-500" />, color: "bg-red-100 text-red-800", label: "Failed" }
 };
 
@@ -56,8 +56,10 @@ const INFERENCE_HEARTBEAT_TIMEOUT_MS = 60000;
 const THUMBNAIL_SIZE = 96;
 const THUMBNAIL_TRANSFORM = { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, resize: "cover" };
 const THUMBNAIL_PREFETCH_LIMIT = 80;
-const USE_THUMBNAIL_TRANSFORM = true;
+const USE_THUMBNAIL_TRANSFORM = false;
 const THUMBNAIL_FALLBACK_TO_FULL = false;
+const THUMBNAIL_SERIAL_LOAD = true;
+const THUMBNAIL_LOAD_INTERVAL_MS = 1000;
 
 const deriveImageName = (imageUrl) => {
   if (!imageUrl) return "Unknown image";
@@ -84,6 +86,20 @@ const isSupabaseSignedUrl = (url) => {
       parsed.pathname.includes("/storage/v1/object/sign/") ||
       parsed.pathname.includes("/storage/v1/render/image/sign/") ||
       parsed.searchParams.has("token")
+    );
+  } catch {
+    return false;
+  }
+};
+
+const isSupabasePublicUrl = (url) => {
+  if (!url) return false;
+  try {
+    const parsed = buildAbsoluteUrl(url);
+    if (!parsed) return false;
+    return (
+      parsed.pathname.includes("/storage/v1/object/public/") ||
+      parsed.pathname.includes("/storage/v1/render/image/public/")
     );
   } catch {
     return false;
@@ -152,8 +168,11 @@ const resolveSignedStorageUrl = async (url, { transform } = {}) => {
 function ImageLibraryItem({ image, selected, onSelect, onRequestSigned, onThumbnailError }) {
   const itemRef = useRef(null);
   const thumbnailSrc = image?.thumbnail || (THUMBNAIL_FALLBACK_TO_FULL ? image?.url : "");
+  const renderThumbnailSrc =
+    THUMBNAIL_SERIAL_LOAD && isSupabasePublicUrl(thumbnailSrc) ? "" : thumbnailSrc;
 
   useEffect(() => {
+    if (THUMBNAIL_SERIAL_LOAD) return undefined;
     if (!itemRef.current || !image?.id || image?.thumbnailFailed) return undefined;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -181,9 +200,9 @@ function ImageLibraryItem({ image, selected, onSelect, onRequestSigned, onThumbn
           <div className="w-12 h-12 rounded bg-gray-100 flex items-center justify-center text-gray-400">
             <ImageIcon className="w-5 h-5" />
           </div>
-        ) : thumbnailSrc ? (
+        ) : renderThumbnailSrc ? (
           <img
-            src={normalizeSupabaseSourceUrl(thumbnailSrc)}
+            src={normalizeSupabaseSourceUrl(renderThumbnailSrc)}
             alt={image.name}
             className="w-12 h-12 rounded object-cover"
             loading="lazy"
@@ -389,6 +408,7 @@ export default function ResultsAndAnalysisPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [historyFilter, setHistoryFilter] = useState('all');
   const [imagePage, setImagePage] = useState(1);
+  const [serialVisibleCount, setSerialVisibleCount] = useState(0);
   const fileInputRef = useRef(null);
   const imageContainerRef = useRef(null);
   const imageRef = useRef(null);
@@ -611,9 +631,15 @@ export default function ResultsAndAnalysisPage() {
     }
   };
 
-  const ensureSignedThumbnail = async (image) => {
+  const ensureSignedThumbnail = async (image, options = {}) => {
     if (!image) return null;
-    if (image.thumbnail || image.thumbnailFailed) return image;
+    const { force = false } = options;
+    if (image.thumbnailFailed) return image;
+    const hasThumbnail = Boolean(image.thumbnail);
+    const thumbnailIsSigned = isSupabaseSignedUrl(image.thumbnail);
+    const thumbnailIsPublic = isSupabasePublicUrl(image.thumbnail);
+    if (!force && hasThumbnail && !thumbnailIsPublic && !thumbnailIsSigned) return image;
+    if (!force && hasThumbnail && thumbnailIsSigned) return image;
     const rawThumbnail = image.rawThumbnail ? normalizeSupabaseSourceUrl(image.rawThumbnail) : null;
     const rawUrl = image.rawUrl ? normalizeSupabaseSourceUrl(image.rawUrl) : null;
     const thumbnailSource = rawThumbnail || (USE_THUMBNAIL_TRANSFORM ? rawUrl : null);
@@ -664,13 +690,28 @@ export default function ResultsAndAnalysisPage() {
 
   const requestSignedThumbnail = useCallback((image) => {
     if (!image?.id) return;
-    if (image.thumbnail || image.thumbnailFailed) return;
+    if (image.thumbnailFailed) return;
+    const hasThumbnail = Boolean(image.thumbnail);
+    const thumbnailIsSigned = isSupabaseSignedUrl(image.thumbnail);
+    const thumbnailIsPublic = isSupabasePublicUrl(image.thumbnail);
+    if (hasThumbnail && !thumbnailIsPublic && !thumbnailIsSigned) return;
+    if (hasThumbnail && thumbnailIsSigned) return;
     if (signedRequestRef.current.has(image.id)) return;
     signedRequestRef.current.add(image.id);
     Promise.resolve(ensureSignedThumbnail(image)).finally(() => {
       signedRequestRef.current.delete(image.id);
     });
   }, [ensureSignedThumbnail]);
+
+  const shouldRequestThumbnail = useCallback((image) => {
+    if (!image?.id || image.thumbnailFailed) return false;
+    const hasThumbnail = Boolean(image.thumbnail);
+    const thumbnailIsSigned = isSupabaseSignedUrl(image.thumbnail);
+    const thumbnailIsPublic = isSupabasePublicUrl(image.thumbnail);
+    if (hasThumbnail && !thumbnailIsPublic && !thumbnailIsSigned) return false;
+    if (hasThumbnail && thumbnailIsSigned) return false;
+    return true;
+  }, []);
 
   const requestSignedFullImage = useCallback((image) => {
     if (!image?.id) return;
@@ -694,7 +735,7 @@ export default function ResultsAndAnalysisPage() {
       return;
     }
     thumbnailRetryRef.current.set(image.id, retryCount + 1);
-    Promise.resolve(ensureSignedThumbnail(image)).finally(() => {
+    Promise.resolve(ensureSignedThumbnail(image, { force: true })).finally(() => {
       thumbnailRetryRef.current.delete(image.id);
     });
   }, [ensureSignedThumbnail]);
@@ -888,10 +929,43 @@ export default function ResultsAndAnalysisPage() {
     () => filteredImages.slice(0, pageEnd),
     [filteredImages, pageEnd]
   );
+  const serialImages = useMemo(
+    () => (THUMBNAIL_SERIAL_LOAD ? visibleImages.slice(0, serialVisibleCount) : visibleImages),
+    [visibleImages, serialVisibleCount]
+  );
+
+  useEffect(() => {
+    if (!THUMBNAIL_SERIAL_LOAD) return undefined;
+    const candidates = serialImages.filter(shouldRequestThumbnail);
+    if (candidates.length === 0) return undefined;
+    let index = 0;
+    const interval = setInterval(() => {
+      const next = candidates[index];
+      index += 1;
+      if (!next) {
+        clearInterval(interval);
+        return;
+      }
+      requestSignedThumbnail(next);
+    }, THUMBNAIL_LOAD_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [serialImages, requestSignedThumbnail, shouldRequestThumbnail]);
 
   useEffect(() => {
     setImagePage(1);
   }, [imageSearch, dbImages.length]);
+  useEffect(() => {
+    if (!THUMBNAIL_SERIAL_LOAD) return;
+    setSerialVisibleCount(0);
+  }, [imageSearch, dbImages.length]);
+  useEffect(() => {
+    if (!THUMBNAIL_SERIAL_LOAD) return undefined;
+    if (serialVisibleCount >= visibleImages.length) return undefined;
+    const timeout = setTimeout(() => {
+      setSerialVisibleCount((prev) => Math.min(prev + 1, visibleImages.length));
+    }, THUMBNAIL_LOAD_INTERVAL_MS);
+    return () => clearTimeout(timeout);
+  }, [serialVisibleCount, visibleImages.length]);
 
   const displayScale = imageMetrics ? imageMetrics.fitScale * zoomLevel : 1;
   const stageWidth = imageMetrics ? imageMetrics.naturalWidth * displayScale : 0;
@@ -909,7 +983,7 @@ export default function ResultsAndAnalysisPage() {
   const inferenceStatusConfig = {
     checking: { label: 'Checking inference...', color: 'bg-gray-100 text-gray-700', icon: <Loader2 className="w-3 h-3 mr-1 animate-spin" /> },
     busy: { label: 'Inference running', color: 'bg-amber-100 text-amber-800', icon: <Cpu className="w-3 h-3 mr-1" /> },
-    idle: { label: 'Inference available', color: 'bg-green-100 text-green-800', icon: <CheckCircle className="w-3 h-3 mr-1" /> },
+    idle: { label: 'Inference available', color: 'bg-blue-100 text-blue-800', icon: <CheckCircle className="w-3 h-3 mr-1" /> },
     offline: { label: 'Inference offline', color: 'bg-red-100 text-red-800', icon: <WifiOff className="w-3 h-3 mr-1" /> },
     unknown: { label: 'Inference status unknown', color: 'bg-red-100 text-red-800', icon: <Info className="w-3 h-3 mr-1" /> },
     unsupported: { label: 'Inference status unavailable', color: 'bg-gray-100 text-gray-700', icon: <Info className="w-3 h-3 mr-1" /> },
@@ -1116,7 +1190,7 @@ export default function ResultsAndAnalysisPage() {
                               No images found yet.
                             </div>
                           )}
-                          {visibleImages.map((image) => (
+                          {serialImages.map((image) => (
                             <ImageLibraryItem
                               key={image.id}
                               image={image}
@@ -1289,7 +1363,7 @@ export default function ResultsAndAnalysisPage() {
                         deployedModels.map((model) => (
                           <SelectItem key={model.id} value={model.id}>
                             <div className="flex items-center gap-2">
-                              <Badge className="bg-green-100 text-green-800 text-xs">
+                              <Badge className="bg-blue-100 text-blue-800 text-xs">
                                 <CheckCircle className="w-3 h-3 mr-1" />
                                 Deployed
                               </Badge>
@@ -1411,15 +1485,15 @@ export default function ResultsAndAnalysisPage() {
                       </div>
 
                       {inferenceResults.logic_evaluation && (
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 bg-green-50 rounded-lg text-xs">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 bg-blue-50 rounded-lg text-xs">
                           <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="font-medium text-green-800">
+                            <CheckCircle className="w-4 h-4 text-blue-600" />
+                            <span className="font-medium text-blue-800">
                               Logic Status: {inferenceResults.logic_evaluation.status}
                             </span>
                           </div>
                           {typeof inferenceResults.logic_evaluation.compliance_score === "number" && (
-                            <Badge className="bg-green-100 text-green-800">
+                            <Badge className="bg-blue-100 text-blue-800">
                               {(inferenceResults.logic_evaluation.compliance_score * 100).toFixed(0)}%
                             </Badge>
                           )}
@@ -1536,7 +1610,7 @@ export default function ResultsAndAnalysisPage() {
                         const logicStatus = item.results?.logic_status || "N/A";
                         const logicBadgeClass =
                           logicStatus === "PASS"
-                            ? "bg-green-100 text-green-800"
+                            ? "bg-blue-100 text-blue-800"
                             : logicStatus === "FAIL"
                               ? "bg-red-100 text-red-800"
                               : "bg-gray-100 text-gray-700";

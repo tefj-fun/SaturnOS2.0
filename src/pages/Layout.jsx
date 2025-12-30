@@ -5,14 +5,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  FolderPlus,
-  Spline,
-  Database,
-  BarChart3,
-  Settings,
-  Package,
-} from "lucide-react";
+import { defaultFeatureVisibility, navigationItems } from "@/navigation";
 import {
   Sidebar,
   SidebarContent,
@@ -27,61 +20,6 @@ import {
   SidebarProvider,
   SidebarTrigger } from
 "@/components/ui/sidebar";
-
-// Default feature visibility per page; admin sees all.
-const defaultFeatureVisibility = {
-  dashboard: true,
-  projects: true,
-  buildVariants: true,
-  training: true,
-  labelLibrary: true,
-  results: false,
-  settings: true,
-};
-
-const navigationItems = [
-{
-  title: "Dashboard",
-  url: createPageUrl("Dashboard"),
-  icon: BarChart3,
-  featureKey: "dashboard",
-},
-{
-  title: "Projects",
-  url: createPageUrl("Projects"),
-  icon: FolderPlus,
-  featureKey: "projects",
-},
-{
-  title: "Build Variants",
-  url: createPageUrl("BuildVariants"),
-  icon: Package,
-  featureKey: "buildVariants",
-},
-{
-  title: "Model Training",
-  url: createPageUrl("TrainingConfiguration"),
-  icon: Spline,
-  featureKey: "training",
-},
-{
-  title: "Label Library",
-  url: createPageUrl("LabelLibrary"),
-  icon: Database,
-  featureKey: "labelLibrary",
-},
-{
-  title: "Results & Analysis",
-  url: createPageUrl("ResultsAndAnalysis"),
-  icon: BarChart3,
-  featureKey: "results",
-},
-{
-  title: "Settings",
-  url: createPageUrl("Settings"),
-  icon: Settings,
-  featureKey: "settings",
-}];
 
 const SidebarNavigationMenu = memo(function SidebarNavigationMenu({ items, activePath }) {
   return (
@@ -238,11 +176,19 @@ export default function Layout({ children, currentPageName }) {
     ...defaultFeatureVisibility,
     ...(profile?.preferences?.features || {}),
   }), [profile?.preferences?.features]);
+  const navigationWithUrl = useMemo(
+    () =>
+      navigationItems.map((item) => ({
+        ...item,
+        url: createPageUrl(item.page),
+      })),
+    []
+  );
   const filteredNavigation = useMemo(() => (
     isAdmin
-      ? navigationItems
-      : navigationItems.filter((item) => featureFlags[item.featureKey])
-  ), [isAdmin, featureFlags]);
+      ? navigationWithUrl
+      : navigationWithUrl.filter((item) => featureFlags[item.featureKey])
+  ), [isAdmin, navigationWithUrl, featureFlags]);
 
   // Hide sidebar for Annotation Studio page
   const isAnnotationStudio = currentPageName === "AnnotationStudio" || location.pathname.includes("AnnotationStudio") || currentPageName === "AnnotationReview";
@@ -265,9 +211,9 @@ export default function Layout({ children, currentPageName }) {
             }
           `}
         </style>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(31,93,255,0.35),_transparent_55%),radial-gradient(circle_at_70%_80%,_rgba(16,185,129,0.25),_transparent_50%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(31,93,255,0.35),_transparent_55%),radial-gradient(circle_at_70%_80%,_rgba(59,130,246,0.25),_transparent_50%)]" />
         <div className="absolute -top-32 -left-24 w-72 h-72 bg-blue-600/30 blur-3xl rounded-full animate-[floatSlow_18s_ease-in-out_infinite]" />
-        <div className="absolute bottom-[-120px] right-[-60px] w-96 h-96 bg-emerald-500/20 blur-[140px] rounded-full animate-[floatSlow_22s_ease-in-out_infinite]" />
+        <div className="absolute bottom-[-120px] right-[-60px] w-96 h-96 bg-blue-500/20 blur-[140px] rounded-full animate-[floatSlow_22s_ease-in-out_infinite]" />
         <div className="absolute top-1/3 right-1/4 w-48 h-48 border border-white/10 rounded-3xl rotate-12 animate-[drift_16s_ease-in-out_infinite]" />
 
         <div className="relative z-10 w-full max-w-5xl mx-auto px-6 py-16 lg:py-24">
@@ -284,7 +230,7 @@ export default function Layout({ children, currentPageName }) {
               </p>
               <div className="flex items-center gap-4 text-sm text-white/60">
                 <span className="inline-flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="w-2 h-2 rounded-full bg-blue-400" />
                   Supabase + Postgres
                 </span>
                 <span className="inline-flex items-center gap-2">
@@ -374,7 +320,7 @@ export default function Layout({ children, currentPageName }) {
                   )}
                 </div>
                 {authError && <p className="text-sm text-red-600">{authError}</p>}
-                {authNotice && <p className="text-sm text-emerald-600">{authNotice}</p>}
+                {authNotice && <p className="text-sm text-blue-600">{authNotice}</p>}
                 <button
                   type="submit"
                   disabled={isSubmitting}
@@ -449,7 +395,7 @@ export default function Layout({ children, currentPageName }) {
             --border-blue: #CCE0FF;
             --accent-blue: #0162FE;
             --text-muted: #64748b;
-            --success-green: #10b981;
+            --success-green: #16a34a;
             --warning-amber: #f59e0b;
           }
           

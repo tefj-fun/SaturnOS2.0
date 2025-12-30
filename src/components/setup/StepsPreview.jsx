@@ -16,10 +16,10 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
   const getProductColor = (product) => {
     const colors = {
       button: "bg-blue-100 text-blue-800",
-      form: "bg-green-100 text-green-800",
+      form: "bg-blue-100 text-blue-800",
       menu: "bg-purple-100 text-purple-800",
       modal: "bg-orange-100 text-orange-800",
-      input: "bg-teal-100 text-teal-800",
+      input: "bg-blue-100 text-blue-800",
       link: "bg-pink-100 text-pink-800",
       default: "bg-gray-100 text-gray-800"
     };
@@ -29,7 +29,7 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
 
   const getStatusColor = (status) => {
     const colors = {
-        good: "bg-green-100 text-green-800",
+        good: "bg-blue-100 text-blue-800",
         bad: "bg-red-100 text-red-800",
         neutral: "bg-gray-100 text-gray-800",
         error: "bg-red-100 text-red-800",
@@ -55,8 +55,8 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
     if (step.clarity_score >= 8) {
       return {
         icon: CheckCircle,
-        color: "text-green-600",
-        bgColor: "bg-green-100",
+        color: "text-blue-600",
+        bgColor: "bg-blue-100",
         label: "Clear"
       };
     } else if (step.clarity_score >= 6) {
@@ -174,7 +174,7 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
                     <div className="flex items-center justify-between">
                       <h4 className="font-semibold text-gray-900">Edit Step {index + 1}</h4>
                       <div className="flex gap-2">
-                        <Button size="sm" onClick={saveEdit} className="bg-teal-600 hover:bg-teal-700">
+                        <Button size="sm" onClick={saveEdit} className="bg-blue-600 hover:bg-blue-700">
                           <Save className="w-3 h-3 mr-1" />
                           Save
                         </Button>
@@ -273,8 +273,8 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
                   </div>
                 ) : (
                   <div className="flex items-start gap-4">
-                    <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                      <span className="text-teal-600 font-semibold text-sm">{index + 1}</span>
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+                      <span className="text-blue-600 font-semibold text-sm">{index + 1}</span>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between mb-2">
@@ -377,7 +377,7 @@ export default function StepsPreview({ steps, onProceed, onUpdateSteps }) {
         </div>
         <Button 
           onClick={onProceed}
-          className="bg-teal-600 hover:bg-teal-700 shadow-lg"
+          className="bg-blue-600 hover:bg-blue-700 shadow-lg"
           size="lg"
         >
           <PenTool className="w-5 h-5 mr-2" />
