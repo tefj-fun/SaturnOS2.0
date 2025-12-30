@@ -25,6 +25,7 @@ const Dashboard = lazyWithPreload(() => import("./Dashboard"));
 const Welcome = lazyWithPreload(() => import("./Welcome"));
 const Pricing = lazyWithPreload(() => import("./Pricing"));
 const Billing = lazyWithPreload(() => import("./Billing"));
+const ResetPassword = lazyWithPreload(() => import("./ResetPassword"));
 
 function BuildVariantsComingSoon() {
     return (
@@ -149,7 +150,11 @@ function PagesContent() {
     }, [isAdmin, featureFlags]);
 
     useEffect(() => {
-        if (normalizedPath === "/welcome" || (normalizedPath.toLowerCase() === "/pricing" && !user)) {
+        if (
+            normalizedPath === "/welcome" ||
+            normalizedPath.toLowerCase() === "/reset-password" ||
+            (normalizedPath.toLowerCase() === "/pricing" && !user)
+        ) {
             return;
         }
         const navSignature = navigationOrder.join("|");
@@ -194,6 +199,13 @@ function PagesContent() {
         return (
             <Suspense fallback={<PageLoading />}>
                 <Welcome />
+            </Suspense>
+        );
+    }
+    if (normalizedPath.toLowerCase() === "/reset-password") {
+        return (
+            <Suspense fallback={<PageLoading />}>
+                <ResetPassword />
             </Suspense>
         );
     }

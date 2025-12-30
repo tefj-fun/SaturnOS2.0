@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { supabase } from "@/api/supabaseClient";
+import { supabase, supabaseUrl } from "@/api/supabaseClient";
 import { getProfile } from "@/api/profiles";
 
 const AuthContext = createContext(null);
@@ -61,6 +61,44 @@ export function AuthProvider({ children }) {
     },
     []
   );
+
+  const clearAuthStorage = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const { hostname } = new URL(supabaseUrl);
+      const projectRef = hostname.split(".")[0];
+      const prefix = `sb-${projectRef}-`;
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith(prefix)) {
+          localStorage.removeItem(key);
+        }
+      });
+      Object.keys(sessionStorage).forEach((key) => {
+        if (key.startsWith(prefix)) {
+          sessionStorage.removeItem(key);
+        }
+      });
+    } catch (error) {
+      console.error("Failed to clear Supabase auth storage:", error);
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) {
+        console.error("Supabase sign out failed:", error);
+      }
+    } finally {
+      clearAuthStorage();
+      setUser(null);
+      profileRef.current = null;
+      setProfile(null);
+      setAuthChecked(true);
+    }
+  }, [clearAuthStorage]);
 
   useEffect(() => {
     let isMounted = true;
@@ -119,11 +157,12 @@ export function AuthProvider({ children }) {
       user,
       profile,
       setProfile,
+      signOut,
       authChecked,
       loadProfile,
       profileLoading,
     }),
-    [user, profile, authChecked, loadProfile, profileLoading]
+    [user, profile, authChecked, loadProfile, profileLoading, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

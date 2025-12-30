@@ -58,8 +58,8 @@ const THUMBNAIL_TRANSFORM = { width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, res
 const THUMBNAIL_PREFETCH_LIMIT = 80;
 const USE_THUMBNAIL_TRANSFORM = false;
 const THUMBNAIL_FALLBACK_TO_FULL = false;
-const THUMBNAIL_SERIAL_LOAD = true;
-const THUMBNAIL_LOAD_INTERVAL_MS = 1000;
+const THUMBNAIL_SERIAL_LOAD = false;
+const THUMBNAIL_LOAD_INTERVAL_MS = 250;
 
 const deriveImageName = (imageUrl) => {
   if (!imageUrl) return "Unknown image";
@@ -123,6 +123,23 @@ const parseSupabaseRenderUrl = (url) => {
   }
 };
 
+const parseSupabaseObjectUrl = (url) => {
+  if (!url) return null;
+  try {
+    const parsed = buildAbsoluteUrl(url);
+    if (!parsed) return null;
+    const match = parsed.pathname.match(/\/storage\/v1\/object(?:\/(public|sign))?\/([^/]+)\/(.+)/);
+    if (!match) return null;
+    return {
+      access: match[1] || "object",
+      bucket: match[2],
+      path: decodeURIComponent(match[3]),
+    };
+  } catch {
+    return null;
+  }
+};
+
 const toPublicObjectUrl = (bucket, path) => {
   if (!SUPABASE_URL || !bucket || !path) return null;
   const base = SUPABASE_URL.replace(/\/+$/, "");
@@ -131,6 +148,16 @@ const toPublicObjectUrl = (bucket, path) => {
     .map((segment) => encodeURIComponent(segment))
     .join("/");
   return `${base}/storage/v1/object/public/${bucket}/${encodedPath}`;
+};
+
+const toAbsoluteStorageUrl = (url) => {
+  if (!url || !SUPABASE_URL || typeof url !== "string") return url;
+  if (/^(data|blob):/i.test(url)) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  const normalized = url.startsWith("/") ? url : `/${url}`;
+  if (!normalized.startsWith("/storage/v1/")) return url;
+  const base = SUPABASE_URL.replace(/\/+$/, "");
+  return `${base}${normalized}`;
 };
 
 const normalizeSupabaseSourceUrl = (url) => {
@@ -142,7 +169,7 @@ const normalizeSupabaseSourceUrl = (url) => {
     }
     return url;
   }
-  return url;
+  return toAbsoluteStorageUrl(url);
 };
 
 const resolveSignedStorageUrl = async (url, { transform } = {}) => {
@@ -151,6 +178,10 @@ const resolveSignedStorageUrl = async (url, { transform } = {}) => {
   const renderInfo = parseSupabaseRenderUrl(normalized);
   if (renderInfo) {
     return createSignedImageUrl(renderInfo.bucket, renderInfo.path, { expiresIn: 3600, transform });
+  }
+  const objectInfo = parseSupabaseObjectUrl(normalized);
+  if (objectInfo) {
+    return createSignedImageUrl(objectInfo.bucket, objectInfo.path, { expiresIn: 3600, transform });
   }
   const absolute = buildAbsoluteUrl(normalized);
   const storageUrl = absolute ? absolute.toString() : normalized;
@@ -413,6 +444,7 @@ export default function ResultsAndAnalysisPage() {
   const imageContainerRef = useRef(null);
   const imageRef = useRef(null);
   const thumbnailRetryRef = useRef(new Map());
+  const fullImageRetryRef = useRef(new Map());
   const signedRequestRef = useRef(new Set());
   const fullImageRequestRef = useRef(new Set());
 
@@ -548,13 +580,18 @@ export default function ResultsAndAnalysisPage() {
           image.thumbnail_url || image.display_url || image.image_url || ""
         );
         const effectiveThumbnail = thumbnailFallback === fallbackUrl ? "" : thumbnailFallback;
-        const hasStoragePath =
+        const hasUrlStoragePath =
           Boolean(getStoragePathFromUrl(fallbackUrl, DATASET_BUCKET)) ||
-          Boolean(getStoragePathFromUrl(fallbackUrl, STEP_IMAGES_BUCKET)) ||
+          Boolean(getStoragePathFromUrl(fallbackUrl, STEP_IMAGES_BUCKET));
+        const hasThumbnailStoragePath =
           Boolean(getStoragePathFromUrl(effectiveThumbnail, DATASET_BUCKET)) ||
           Boolean(getStoragePathFromUrl(effectiveThumbnail, STEP_IMAGES_BUCKET));
-        const shouldDeferUrl = hasStoragePath || isSupabaseSignedUrl(fallbackUrl);
-        const shouldDeferThumbnail = hasStoragePath || isSupabaseSignedUrl(effectiveThumbnail);
+        const isUrlPublic = isSupabasePublicUrl(fallbackUrl);
+        const isThumbnailPublic = isSupabasePublicUrl(effectiveThumbnail);
+        const shouldDeferUrl =
+          (hasUrlStoragePath && !isUrlPublic) || isSupabaseSignedUrl(fallbackUrl);
+        const shouldDeferThumbnail =
+          (hasThumbnailStoragePath && !isThumbnailPublic) || isSupabaseSignedUrl(effectiveThumbnail);
         return {
           id: image.id,
           name: image.image_name || deriveImageName(image.display_url || image.image_url),
@@ -639,7 +676,7 @@ export default function ResultsAndAnalysisPage() {
     const thumbnailIsSigned = isSupabaseSignedUrl(image.thumbnail);
     const thumbnailIsPublic = isSupabasePublicUrl(image.thumbnail);
     if (!force && hasThumbnail && !thumbnailIsPublic && !thumbnailIsSigned) return image;
-    if (!force && hasThumbnail && thumbnailIsSigned) return image;
+    if (!force && hasThumbnail && (thumbnailIsSigned || thumbnailIsPublic)) return image;
     const rawThumbnail = image.rawThumbnail ? normalizeSupabaseSourceUrl(image.rawThumbnail) : null;
     const rawUrl = image.rawUrl ? normalizeSupabaseSourceUrl(image.rawUrl) : null;
     const thumbnailSource = rawThumbnail || (USE_THUMBNAIL_TRANSFORM ? rawUrl : null);
@@ -664,9 +701,11 @@ export default function ResultsAndAnalysisPage() {
     }
   };
 
-  const ensureSignedFullImage = async (image) => {
+  const ensureSignedFullImage = async (image, options = {}) => {
     if (!image) return null;
-    if (image.isSigned && image.url) return image;
+    const { force = false } = options;
+    const urlIsSigned = isSupabaseSignedUrl(image.url);
+    if (!force && image.url && (image.isSigned || isSupabasePublicUrl(image.url) || urlIsSigned)) return image;
     const rawUrl = normalizeSupabaseSourceUrl(image.rawUrl || image.url);
     if (!rawUrl) return null;
     try {
@@ -695,7 +734,7 @@ export default function ResultsAndAnalysisPage() {
     const thumbnailIsSigned = isSupabaseSignedUrl(image.thumbnail);
     const thumbnailIsPublic = isSupabasePublicUrl(image.thumbnail);
     if (hasThumbnail && !thumbnailIsPublic && !thumbnailIsSigned) return;
-    if (hasThumbnail && thumbnailIsSigned) return;
+    if (hasThumbnail && (thumbnailIsSigned || thumbnailIsPublic)) return;
     if (signedRequestRef.current.has(image.id)) return;
     signedRequestRef.current.add(image.id);
     Promise.resolve(ensureSignedThumbnail(image)).finally(() => {
@@ -709,19 +748,30 @@ export default function ResultsAndAnalysisPage() {
     const thumbnailIsSigned = isSupabaseSignedUrl(image.thumbnail);
     const thumbnailIsPublic = isSupabasePublicUrl(image.thumbnail);
     if (hasThumbnail && !thumbnailIsPublic && !thumbnailIsSigned) return false;
-    if (hasThumbnail && thumbnailIsSigned) return false;
+    if (hasThumbnail && (thumbnailIsSigned || thumbnailIsPublic)) return false;
     return true;
   }, []);
 
-  const requestSignedFullImage = useCallback((image) => {
+  const requestSignedFullImage = useCallback((image, options = {}) => {
     if (!image?.id) return;
     if (image.url && image.isSigned) return;
     if (fullImageRequestRef.current.has(image.id)) return;
     fullImageRequestRef.current.add(image.id);
-    Promise.resolve(ensureSignedFullImage(image)).finally(() => {
+    Promise.resolve(ensureSignedFullImage(image, options)).finally(() => {
       fullImageRequestRef.current.delete(image.id);
     });
   }, [ensureSignedFullImage]);
+
+  const handlePreviewError = useCallback(() => {
+    const image = selectedImage;
+    if (!image?.id) return;
+    const retryCount = fullImageRetryRef.current.get(image.id) || 0;
+    if (retryCount >= 1) return;
+    fullImageRetryRef.current.set(image.id, retryCount + 1);
+    Promise.resolve(ensureSignedFullImage(image, { force: true })).finally(() => {
+      fullImageRetryRef.current.delete(image.id);
+    });
+  }, [selectedImage, ensureSignedFullImage]);
 
   const handleThumbnailError = useCallback((image) => {
     if (!image?.id) return;
@@ -1286,6 +1336,7 @@ export default function ResultsAndAnalysisPage() {
                               src={previewSrc}
                               alt={previewLabel}
                               onLoad={updateImageMetrics}
+                              onError={handlePreviewError}
                               className="w-full h-full object-contain"
                             />
 

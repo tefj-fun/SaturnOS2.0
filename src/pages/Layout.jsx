@@ -47,7 +47,7 @@ export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
   const locationRef = useRef(location.pathname);
-  const { user, profile, authChecked, setProfile } = useAuth();
+  const { user, profile, authChecked, signOut } = useAuth();
   const [authError, setAuthError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
   const [authMode, setAuthMode] = useState("signin");
@@ -126,6 +126,24 @@ export default function Layout({ children, currentPageName }) {
     setAuthNotice(null);
     setIsSubmitting(true);
 
+    if (authMode === "forgot") {
+      const redirectTo = typeof window !== "undefined"
+        ? `${window.location.origin}/reset-password`
+        : undefined;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+      if (error) {
+        setAuthError(error.message);
+      } else {
+        setAuthNotice(
+          "If an account exists for this email, a reset link is on the way."
+        );
+      }
+      setIsSubmitting(false);
+      return;
+    }
+
     if (authMode === "signup") {
       if (password !== confirmPassword) {
         setAuthError("Passwords do not match.");
@@ -159,7 +177,7 @@ export default function Layout({ children, currentPageName }) {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut();
     navigate("/", { replace: true });
     setEmail("");
     setPassword("");
@@ -167,7 +185,6 @@ export default function Layout({ children, currentPageName }) {
     setFirstName("");
     setLastName("");
     setAuthMode("signin");
-    setProfile(null);
   };
 
   const effectiveRole = profile?.role || cachedRole || lastRoleRef.current;
@@ -194,6 +211,16 @@ export default function Layout({ children, currentPageName }) {
   const isAnnotationStudio = currentPageName === "AnnotationStudio" || location.pathname.includes("AnnotationStudio") || currentPageName === "AnnotationReview";
 
   if (!authChecked || !user) {
+    const authHeading = authMode === "signup"
+      ? "Create your account"
+      : authMode === "forgot"
+        ? "Reset your password"
+        : "Welcome back";
+    const authSubheading = authMode === "signup"
+      ? "Sign up to get started"
+      : authMode === "forgot"
+        ? "We will email you a reset link"
+        : "Sign in to continue";
     return (
       <div className="min-h-screen relative overflow-hidden bg-[#0b0f1a] text-white font-[Space_Grotesk]">
         <style>
@@ -251,10 +278,10 @@ export default function Layout({ children, currentPageName }) {
                 </div>
                 <div>
                   <h2 className="font-bold text-gray-900 text-lg">
-                    {authMode === "signup" ? "Create your account" : "Welcome back"}
+                    {authHeading}
                   </h2>
                   <p className="text-xs text-gray-500 font-medium">
-                    {authMode === "signup" ? "Sign up to get started" : "Sign in to continue"}
+                    {authSubheading}
                   </p>
                 </div>
               </div>
@@ -294,31 +321,49 @@ export default function Layout({ children, currentPageName }) {
                     required
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                  {authMode === "signup" && (
-                    <>
-                      <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
-                      <div className="mt-3">
-                        <label className="text-sm font-medium text-gray-700">Confirm password</label>
-                        <input
-                          type="password"
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          required
-                        />
+                {authMode !== "forgot" && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Password</label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                    {authMode === "signup" && (
+                      <>
+                        <p className="mt-1 text-xs text-gray-500">Use at least 8 characters.</p>
+                        <div className="mt-3">
+                          <label className="text-sm font-medium text-gray-700">Confirm password</label>
+                          <input
+                            type="password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            required
+                          />
+                        </div>
+                      </>
+                    )}
+                    {authMode === "signin" && (
+                      <div className="mt-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthMode("forgot");
+                            setAuthError(null);
+                            setAuthNotice(null);
+                            setPassword("");
+                          }}
+                          className="text-xs text-blue-600 font-semibold hover:text-blue-700"
+                        >
+                          Forgot password?
+                        </button>
                       </div>
-                    </>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
                 {authError && <p className="text-sm text-red-600">{authError}</p>}
                 {authNotice && <p className="text-sm text-blue-600">{authNotice}</p>}
                 <button
@@ -326,12 +371,33 @@ export default function Layout({ children, currentPageName }) {
                   disabled={isSubmitting}
                   className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60"
                 >
-                  {isSubmitting ? "Please wait..." : authMode === "signup" ? "Create account" : "Sign In"}
+                  {isSubmitting
+                    ? "Please wait..."
+                    : authMode === "signup"
+                      ? "Create account"
+                      : authMode === "forgot"
+                        ? "Send reset link"
+                        : "Sign In"}
                 </button>
               </form>
 
               <div className="mt-6 text-xs text-gray-500 text-center">
-                {authMode === "signup" ? (
+                {authMode === "forgot" ? (
+                  <>
+                    Remembered your password?{" "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode("signin");
+                        setAuthError(null);
+                        setAuthNotice(null);
+                      }}
+                      className="text-blue-600 font-semibold hover:text-blue-700"
+                    >
+                      Return to sign in
+                    </button>
+                  </>
+                ) : authMode === "signup" ? (
                   <>
                     Already have an account?{" "}
                     <button
@@ -443,30 +509,36 @@ export default function Layout({ children, currentPageName }) {
           </SidebarContent>
 
           <SidebarFooter className="border-t border-blue-200/60 p-0">
-            <Link to={createPageUrl("Settings")} className="block hover:bg-blue-50/50 p-6 transition-colors duration-200">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
-                    <span className="text-blue-600 font-semibold text-sm">
-                      {user ? (user.email?.charAt(0).toUpperCase() || 'U') : 'U'}
-                    </span>
+            <div className="flex flex-col">
+              <button
+                type="button"
+                onClick={() => navigate(createPageUrl("Settings"))}
+                className="block text-left hover:bg-blue-50/50 p-6 transition-colors duration-200"
+              >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
+                      <span className="text-blue-600 font-semibold text-sm">
+                        {user ? (user.email?.charAt(0).toUpperCase() || 'U') : 'U'}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-900 text-sm truncate">
+                        {user ? user.email : 'Loading...'}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate capitalize">
+                        {effectiveRole || "member"}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 text-sm truncate">
-                      {user ? user.email : 'Loading...'}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate capitalize">
-                      {effectiveRole || "member"}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="text-xs text-red-600 mt-2"
-                >
-                  Log out
-                </button>
-            </Link>
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="text-xs text-red-600 px-6 pb-6 text-left hover:text-red-700 transition-colors"
+              >
+                Log out
+              </button>
+            </div>
           </SidebarFooter>
         </Sidebar>
 
