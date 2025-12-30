@@ -209,7 +209,7 @@ export default function SettingsPage() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen p-6 md:p-8">
+      <div className="min-h-screen p-4 sm:p-6 md:p-8 overflow-x-hidden">
         <div className="max-w-6xl mx-auto">
           <Card className="glass-effect border-0 shadow-lg">
             <CardContent className="py-12 text-center text-gray-600">
@@ -222,31 +222,31 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen p-6 md:p-8">
+    <div className="min-h-screen p-4 sm:p-6 md:p-8 overflow-x-hidden">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center mb-8">
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
-            <SettingsIcon className="w-6 h-6 text-white" />
+        <div className="flex items-center gap-3 mb-6 sm:gap-4 sm:mb-8">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shrink-0">
+            <SettingsIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-            <p className="text-gray-600">Manage your account, preferences, and team access</p>
+          <div className="flex flex-col justify-center">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 leading-tight">Settings</h1>
+            <p className="text-gray-600 text-sm sm:text-base leading-snug">Manage your account, preferences, and team access</p>
           </div>
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2 sm:grid-cols-3">
-            <TabsTrigger value="profile" className="flex items-center gap-2">
+          <TabsList className="w-full flex-col gap-1 !h-auto sm:grid sm:max-w-md sm:auto-cols-fr sm:grid-flow-col">
+            <TabsTrigger value="profile" className="flex w-full items-center justify-start gap-2 !whitespace-normal text-left leading-tight sm:justify-center sm:text-center">
               <UserIcon className="w-4 h-4" />
               Profile
             </TabsTrigger>
-            <TabsTrigger value="preferences" className="flex items-center gap-2">
+            <TabsTrigger value="preferences" className="flex w-full items-center justify-start gap-2 !whitespace-normal text-left leading-tight sm:justify-center sm:text-center">
               <Bell className="w-4 h-4" />
               Preferences
             </TabsTrigger>
             {isAdmin && (
-              <TabsTrigger value="team" className="flex items-center gap-2">
+              <TabsTrigger value="team" className="flex w-full items-center justify-start gap-2 !whitespace-normal text-left leading-tight sm:justify-center sm:text-center">
                 <Shield className="w-4 h-4" />
                 Team & RBAC
               </TabsTrigger>
@@ -270,9 +270,9 @@ export default function SettingsPage() {
                   <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
                     <UserIcon className="w-8 h-8 text-blue-600" />
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900">{currentUser.full_name}</h3>
-                    <p className="text-gray-600">{currentUser.email}</p>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 break-words">{currentUser.full_name}</h3>
+                    <p className="text-gray-600 break-words">{currentUser.email}</p>
                     <Badge className={`mt-2 ${roleConfig[currentUser.role]?.color} border-0`}>
                       {roleConfig[currentUser.role]?.icon}
                       <span className="ml-1">{roleConfig[currentUser.role]?.label}</span>
@@ -521,7 +521,7 @@ export default function SettingsPage() {
                 </CardHeader>
                 <CardContent>
                   {/* Role Permissions Overview */}
-                  <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+                  <div className="mb-6 p-4 glass-effect border-0 rounded-lg shadow-sm">
                     <h4 className="font-medium text-blue-900 mb-3">Role Permissions</h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                       <div className="space-y-2">
@@ -563,7 +563,72 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Team Members Table */}
-                  <div className="overflow-x-auto">
+                  <div className="space-y-4 sm:hidden">
+                    {teamMembers.map((member) => (
+                      <div key={member.id} className="rounded-lg glass-effect border-0 p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
+                            <UserIcon className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 break-words">{member.full_name}</p>
+                            <p className="text-sm text-gray-600 break-words">{member.email}</p>
+                          </div>
+                        </div>
+                          <Badge variant={member.status === 'active' ? 'default' : 'secondary'} className="shrink-0">
+                            {member.status === 'active' ? (
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                            ) : (
+                              <AlertTriangle className="w-3 h-3 mr-1" />
+                            )}
+                            {member.status}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Badge className={`${roleConfig[member.role]?.color} border-0`}>
+                            {roleConfig[member.role]?.icon}
+                            <span className="ml-1">{roleConfig[member.role]?.label}</span>
+                          </Badge>
+                          <span className="text-xs text-gray-500">
+                            Last login: {member.last_login ? new Date(member.last_login).toLocaleDateString() : 'Never'}
+                          </span>
+                        </div>
+                        <div className="mt-4 space-y-2">
+                          <p className="text-xs font-medium text-gray-500">Role</p>
+                          <div className="flex flex-col gap-2">
+                            <Select 
+                              value={member.role} 
+                              onValueChange={(value) => handleUpdateUserRole(member.id, value)}
+                              disabled={member.id === currentUser.id}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="viewer">Viewer</SelectItem>
+                                <SelectItem value="annotator">Annotator</SelectItem>
+                                <SelectItem value="admin">Admin</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {member.id !== currentUser.id && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleRemoveUser(member.id)}
+                                className="w-full text-red-600 hover:text-red-700"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Remove User
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="hidden overflow-x-auto sm:block">
                     <Table className="min-w-[720px]">
                       <TableHeader>
                         <TableRow>

@@ -542,7 +542,7 @@ export default function Layout({ children, currentPageName }) {
           </SidebarFooter>
         </Sidebar>
 
-        <main className="flex-1 flex flex-col">
+        <main className="flex-1 flex min-w-0 flex-col overflow-x-hidden">
           <header className="bg-white/70 backdrop-blur-sm border-b border-blue-200/60 px-6 py-4 md:hidden">
             <div className="flex items-center gap-4">
               <SidebarTrigger className="hover:bg-blue-100 p-2 rounded-lg transition-colors duration-200" />
