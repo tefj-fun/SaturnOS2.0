@@ -16,7 +16,7 @@ export const defaultFeatureVisibility = {
   buildVariants: true,
   training: true,
   labelLibrary: true,
-  results: false,
+  results: true,
   settings: true,
   pricing: true,
   billing: true,
