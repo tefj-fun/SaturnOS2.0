@@ -4,12 +4,22 @@ import { createPageUrl } from "@/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Cpu, CreditCard, Database, Zap } from "lucide-react";
+import { fetchBillingSettings, upsertBillingSettings } from "@/api/billingSettings";
 import { createPortalSession } from "@/api/stripe";
 import { fetchMonthlyUsageSummary } from "@/api/usage";
 import { toast } from "@/components/ui/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+
+const DEFAULT_MONTHLY_SPEND_CAP = Number(import.meta.env.VITE_MONTHLY_SPEND_CAP);
+const FALLBACK_MONTHLY_CAP =
+  Number.isFinite(DEFAULT_MONTHLY_SPEND_CAP) && DEFAULT_MONTHLY_SPEND_CAP > 0
+    ? DEFAULT_MONTHLY_SPEND_CAP
+    : null;
 
 const plan = {
   name: "Team",
@@ -58,10 +68,17 @@ const usageCatalog = [
 const formatNumber = (value) => Number(value).toLocaleString("en-US");
 
 export default function Billing() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [portalLoading, setPortalLoading] = useState(false);
   const [usageMetrics, setUsageMetrics] = useState({ training: 0, inference: 0, storage: 0 });
   const [usageLoading, setUsageLoading] = useState(true);
   const [usageError, setUsageError] = useState(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsError, setSettingsError] = useState(null);
+  const [billingSettings, setBillingSettings] = useState({ monthly_spend_cap: null });
+  const [capInput, setCapInput] = useState("");
+  const [capSaving, setCapSaving] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -92,6 +109,88 @@ export default function Billing() {
       isActive = false;
     };
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadBillingSettings = async () => {
+      setSettingsLoading(true);
+      setSettingsError(null);
+      try {
+        const settings = await fetchBillingSettings();
+        if (isActive) {
+          setBillingSettings(settings);
+          const rawCap = Number(settings?.monthly_spend_cap);
+          const resolvedCap = Number.isFinite(rawCap) && rawCap > 0 ? rawCap : FALLBACK_MONTHLY_CAP;
+          setCapInput(resolvedCap ? String(resolvedCap) : "");
+        }
+      } catch (error) {
+        console.error("Failed to load billing settings:", error);
+        if (isActive) {
+          setSettingsError(error?.message || "Unable to load billing settings.");
+          setCapInput(FALLBACK_MONTHLY_CAP ? String(FALLBACK_MONTHLY_CAP) : "");
+        }
+      } finally {
+        if (isActive) {
+          setSettingsLoading(false);
+        }
+      }
+    };
+
+    loadBillingSettings();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const resolvedMonthlyCap = useMemo(() => {
+    const rawCap = Number(billingSettings?.monthly_spend_cap);
+    if (Number.isFinite(rawCap) && rawCap > 0) {
+      return rawCap;
+    }
+    return FALLBACK_MONTHLY_CAP;
+  }, [billingSettings]);
+
+  const monthlyCapLabel = useMemo(() => {
+    if (settingsLoading) return "Loading...";
+    if (settingsError) return "Unavailable";
+    if (resolvedMonthlyCap) return `$${formatNumber(resolvedMonthlyCap)}`;
+    return "Not set";
+  }, [resolvedMonthlyCap, settingsError, settingsLoading]);
+
+  const handleSaveMonthlyCap = async () => {
+    if (capSaving) return;
+    const trimmed = capInput.trim();
+    const parsed = trimmed ? Number(trimmed) : null;
+    if (trimmed && (!Number.isFinite(parsed) || parsed <= 0)) {
+      toast({
+        title: "Invalid monthly cap",
+        description: "Enter a number greater than 0 or leave blank to clear.",
+      });
+      return;
+    }
+
+    setCapSaving(true);
+    try {
+      const updated = await upsertBillingSettings({
+        monthlySpendCap: parsed,
+      });
+      setBillingSettings(updated);
+      toast({
+        title: "Monthly cap updated",
+        description: parsed ? "Billing cap saved." : "Monthly cap cleared.",
+      });
+    } catch (error) {
+      console.error("Failed to save billing settings:", error);
+      toast({
+        title: "Unable to save monthly cap",
+        description: error?.message || "Please try again.",
+      });
+    } finally {
+      setCapSaving(false);
+    }
+  };
 
   const usageItems = useMemo(
     () =>
@@ -201,8 +300,36 @@ export default function Billing() {
               </div>
               <div className="flex items-center justify-between text-sm text-gray-600">
                 <span>Monthly cap</span>
-                <span className="font-semibold text-gray-900">$750</span>
+                <span className="font-semibold text-gray-900">
+                  {monthlyCapLabel}
+                </span>
               </div>
+              {isAdmin && (
+                <div className="space-y-2">
+                  <Label htmlFor="monthlyCap">Set monthly cap</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Input
+                      id="monthlyCap"
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="decimal"
+                      placeholder="Not set"
+                      value={capInput}
+                      onChange={(event) => setCapInput(event.target.value)}
+                      disabled={settingsLoading || capSaving}
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleSaveMonthlyCap}
+                      disabled={settingsLoading || capSaving}
+                    >
+                      {capSaving ? "Saving..." : "Save cap"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-gray-500">Admins only. Applies to all users.</p>
+                </div>
+              )}
               <Button
                 className="w-full bg-blue-600 hover:bg-blue-700"
                 onClick={async () => {

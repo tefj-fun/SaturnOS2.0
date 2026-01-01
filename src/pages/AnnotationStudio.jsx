@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getProjectById, listStepsByProject, listStepImages, updateProject, updateStep } from "@/api/db";
-import { BuildVariant, StepVariantConfig } from "@/api/entities";
+import { BuildVariant, LogicRule, StepVariantConfig } from "@/api/entities";
 import { createSignedImageUrl, getStoragePathFromUrl } from "@/api/storage";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +52,7 @@ import AnnotationChat from "../components/annotation/AnnotationChat";
 import LogicBuilder from "../components/annotation/LogicBuilder";
 import ImagePortal from "../components/annotation/ImagePortal";
 import AnnotationInsights from "../components/annotation/AnnotationInsights";
+import OnboardingChecklist from "@/components/onboarding/OnboardingChecklist";
 
 const isSupabaseSignedUrl = (url) => {
   if (!url) return false;
@@ -122,6 +123,7 @@ export default function AnnotationStudioPage() {
   const [isSopLoading, setIsSopLoading] = useState(false);
   const [sopSignedUrl, setSopSignedUrl] = useState(null);
   const [showCopilot, setShowCopilot] = useState(true);
+  const [copilotUsed, setCopilotUsed] = useState(false);
   const [activeTab, setActiveTab] = useState('canvas');
   const [annotationMode, setAnnotationMode] = useState('draw');
   const [activeClass, setActiveClass] = useState(null);
@@ -148,6 +150,7 @@ export default function AnnotationStudioPage() {
   const [currentStepConfig, setCurrentStepConfig] = useState(null);
   const STEP_IMAGES_BUCKET = import.meta.env.VITE_STEP_IMAGES_BUCKET || "step-images";
   const DATASET_BUCKET = import.meta.env.VITE_DATASET_BUCKET || "datasets";
+  const copilotStorageKey = projectId ? `saturnos_onboarding_copilot_used_${projectId}` : null;
   const isCopilotAllowed = activeTab !== 'images' && activeTab !== 'insights';
   const sopFilename = useMemo(() => {
     if (!project?.sop_file_url) return "sop.pdf";
@@ -217,6 +220,11 @@ export default function AnnotationStudioPage() {
       isComplete: total > 0 && completed === total,
       groupSummary,
     };
+  }, [stepImages, isImageAnnotated]);
+
+  const annotatedImagesCount = useMemo(() => {
+    if (!stepImages.length) return 0;
+    return stepImages.filter((image) => isImageAnnotated(image)).length;
   }, [stepImages, isImageAnnotated]);
 
   const updateStepImageById = useCallback((imageId, updates, requestId = null) => {
@@ -345,6 +353,14 @@ export default function AnnotationStudioPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!copilotStorageKey) return;
+    const stored = localStorage.getItem(copilotStorageKey);
+    if (stored === "true") {
+      setCopilotUsed(true);
+    }
+  }, [copilotStorageKey]);
+
   const currentStep = steps[currentStepIndex];
 
   // Get effective step configuration (with build variant overrides applied)
@@ -354,7 +370,8 @@ export default function AnnotationStudioPage() {
     const baseConfig = {
       ...currentStep,
       classes: currentStep.classes || [],
-      status: currentStep.status || "Pass,Fail"
+      status: currentStep.status || "Pass,Fail",
+      inference_model_id: currentStep.inference_model_id || null,
     };
     
     if (!currentStepConfig) return baseConfig;
@@ -362,7 +379,8 @@ export default function AnnotationStudioPage() {
     return {
       ...baseConfig,
       classes: currentStepConfig.active_classes?.length > 0 ? currentStepConfig.active_classes : baseConfig.classes,
-      status: currentStepConfig.status_options || baseConfig.status
+      status: currentStepConfig.status_options || baseConfig.status,
+      inference_model_id: currentStepConfig.inference_model_id || baseConfig.inference_model_id,
     };
   }, [currentStep, currentStepConfig]);
 
@@ -437,8 +455,17 @@ export default function AnnotationStudioPage() {
   }, [currentStep, selectedBuildVariant]);
 
   const loadLogicRules = useCallback(async () => {
-    if (!currentStep) return;
-    setLogicRules([]);
+    if (!currentStep) {
+      setLogicRules([]);
+      return;
+    }
+    try {
+      const rules = await LogicRule.filter({ step_id: currentStep.id });
+      setLogicRules(rules || []);
+    } catch (error) {
+      console.error("Error loading logic rules:", error);
+      setLogicRules([]);
+    }
   }, [currentStep]);
 
   const loadStepImages = useCallback(async (options = {}) => {
@@ -503,52 +530,6 @@ export default function AnnotationStudioPage() {
         return;
       }
 
-      const getImageNameForSort = (image) => {
-        if (!image) return "Untitled";
-        const rawName = image.image_name || image.name || image.filename;
-        if (rawName) return String(rawName);
-        const url =
-          image.image_url ||
-          image.display_url ||
-          image.thumbnail_url ||
-          image.source_image_url ||
-          image.source_display_url ||
-          image.source_thumbnail_url;
-        if (!url && image.storage_path) {
-          const parts = String(image.storage_path).split("/");
-          return parts[parts.length - 1] || "Untitled";
-        }
-        if (!url) return "Untitled";
-        try {
-          const parsed = new URL(url);
-          const parts = parsed.pathname.split("/");
-          const last = parts[parts.length - 1];
-          return last ? decodeURIComponent(last) : "Untitled";
-        } catch {
-          const parts = String(url).split("/");
-          return parts[parts.length - 1] || "Untitled";
-        }
-      };
-
-      const entriesWithIndex = resolvedImages.map((entry, index) => ({ entry, index }));
-      const groupOrder = Array.from(
-        new Set(entriesWithIndex.map(({ entry }) => entry.image.image_group || "Untagged"))
-      ).sort((a, b) => a.localeCompare(b));
-      const groupIndex = new Map(groupOrder.map((group, index) => [group, index]));
-      const orderedEntries = entriesWithIndex
-        .sort((a, b) => {
-          const groupA = a.entry.image.image_group || "Untagged";
-          const groupB = b.entry.image.image_group || "Untagged";
-          const groupComparison = (groupIndex.get(groupA) ?? 0) - (groupIndex.get(groupB) ?? 0);
-          if (groupComparison !== 0) return groupComparison;
-          const nameComparison = getImageNameForSort(a.entry.image).localeCompare(
-            getImageNameForSort(b.entry.image)
-          );
-          if (nameComparison !== 0) return nameComparison;
-          return a.index - b.index;
-        })
-        .map(({ entry }) => entry);
-
       const primaryEntry = resolvedImages[initialIndex];
       if (primaryEntry?.path) {
         try {
@@ -574,7 +555,7 @@ export default function AnnotationStudioPage() {
       setHasLoadedImages(true);
       setIsInitialImageReady(true);
     }
-  }, [currentStep, DATASET_BUCKET, STEP_IMAGES_BUCKET]);
+  }, [currentStep, DATASET_BUCKET, STEP_IMAGES_BUCKET, signImageUrls, updateStepImageById]);
 
   useEffect(() => {
     currentImageIndexRef.current = currentImageIndex;
@@ -840,8 +821,16 @@ export default function AnnotationStudioPage() {
     }
   }, [effectiveStepConfig, initializeAIGuidance]);
 
+  const markCopilotUsed = useCallback(() => {
+    if (copilotUsed) return;
+    setCopilotUsed(true);
+    if (copilotStorageKey) {
+      localStorage.setItem(copilotStorageKey, "true");
+    }
+  }, [copilotStorageKey, copilotUsed]);
 
   const handleChatMessage = async (message) => {
+    markCopilotUsed();
     const userMessage = {
       id: Date.now(),
       type: 'user',
@@ -896,8 +885,7 @@ export default function AnnotationStudioPage() {
     setIsAIThinking(false);
   };
 
-  const handleLogicRulesUpdate = async (updatedRules) => {
-    setLogicRules(updatedRules);
+  const handleLogicRulesUpdate = async () => {
     await loadLogicRules();
   };
 
@@ -1008,9 +996,9 @@ export default function AnnotationStudioPage() {
     <>
     <Tabs value={activeTab} onValueChange={setActiveTab} className="h-screen w-full flex flex-col bg-gray-50">
       {/* Full-width Header */}
-      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 w-full">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
+      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-3 w-full">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
             <Button
               variant="outline"
               size="icon"
@@ -1020,10 +1008,10 @@ export default function AnnotationStudioPage() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900">
                 {project?.name} - Annotation Studio
               </h1>
-              <div className="flex flex-wrap items-center gap-3 mt-1">
+              <div className="flex flex-wrap items-center gap-2 mt-0.5">
                  <div className="flex items-center gap-2">
                     <Button variant="outline" size="icon" className="h-7 w-7" onClick={goToPrevStep} disabled={currentStepIndex === 0}>
                         <ChevronLeft className="w-4 h-4" />
@@ -1031,7 +1019,7 @@ export default function AnnotationStudioPage() {
                     <Button
                       variant="ghost"
                       onClick={() => setShowStepsPopup(true)}
-                      className="p-1 h-auto text-sm text-gray-600 hover:text-blue-600 hover:bg-gray-100"
+                      className="p-1 h-auto text-xs text-gray-600 hover:text-blue-600 hover:bg-gray-100"
                     >
                       <List className="w-3 h-3 mr-1.5" />
                       Step {currentStepIndex + 1} of {steps.length}
@@ -1053,26 +1041,26 @@ export default function AnnotationStudioPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-8">
-             <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-xl">
-                <TabsTrigger value="canvas" className="flex items-center gap-2">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
+             <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-xl h-8">
+                <TabsTrigger value="canvas" className="flex items-center gap-2 px-2 text-xs sm:text-sm">
                   <PenTool className="w-4 h-4" />
                   Canvas
                 </TabsTrigger>
-                <TabsTrigger value="logic" className="flex items-center gap-2">
+                <TabsTrigger value="logic" className="flex items-center gap-2 px-2 text-xs sm:text-sm">
                   <Cog className="w-4 h-4" />
                   Logic
                 </TabsTrigger>
-                <TabsTrigger value="images" className="flex items-center gap-2">
+                <TabsTrigger value="images" className="flex items-center gap-2 px-2 text-xs sm:text-sm">
                   <ImageIcon className="w-4 h-4" />
                   Images
                 </TabsTrigger>
-                <TabsTrigger value="insights" className="flex items-center gap-2">
+                <TabsTrigger value="insights" className="flex items-center gap-2 px-2 text-xs sm:text-sm">
                   <BarChart3 className="w-4 h-4" />
                   Insights
                 </TabsTrigger>
             </TabsList>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               {project?.sop_file_url && (
                 <>
                   <Button
@@ -1097,41 +1085,57 @@ export default function AnnotationStudioPage() {
                   </Button>
                 </>
               )}
-              <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigate(createPageUrl(`StepManagement?projectId=${projectId}`))}
-                  className="text-xs"
-              >
-                  <Layers3 className="w-3 h-3 mr-1.5" />
-                  Manage Steps
-              </Button>
-
-              <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => navigate(createPageUrl(`TrainingConfiguration?projectId=${projectId}`))}
-                  className="text-xs bg-blue-600 hover:bg-blue-700"
-              >
-                  <Spline className="w-3 h-3 mr-1.5" />
-                  Train Model
-              </Button>
-              
-              {isCopilotAllowed && (
+              <div className="flex items-center gap-2 flex-nowrap min-w-max">
                 <Button
-                  variant={showCopilot ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setShowCopilot(!showCopilot)}
-                  className={showCopilot ? "bg-blue-600 hover:bg-blue-700" : ""}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(createPageUrl(`StepManagement?projectId=${projectId}`))}
+                    className="text-xs"
                 >
-                  <Bot className="w-4 h-4 mr-2" />
-                  AI Copilot
+                    <Layers3 className="w-3 h-3 mr-1.5" />
+                    Manage Steps
                 </Button>
-              )}
+
+                <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => navigate(createPageUrl(`TrainingConfiguration?projectId=${projectId}`))}
+                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                    <Spline className="w-3 h-3 mr-1.5" />
+                    Train Model
+                </Button>
+                
+                {isCopilotAllowed && (
+                  <Button
+                    variant={showCopilot ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setShowCopilot(!showCopilot)}
+                    className={showCopilot ? "bg-blue-600 hover:bg-blue-700" : ""}
+                  >
+                    <Bot className="w-4 h-4 mr-2" />
+                    AI Copilot
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </header>
+
+      <OnboardingChecklist
+        projectId={projectId}
+        projectName={project?.name}
+        stepsCount={steps.length}
+        imagesCount={stepImages.length}
+        annotationsCount={annotatedImagesCount}
+        copilotUsed={copilotUsed}
+        logicRulesCount={logicRules.length}
+        trainingRunsCount={null}
+        compact
+        hideProgress
+        className="fixed bottom-4 left-4 z-40 w-[320px] hidden lg:block"
+      />
 
       {/* Full-width Content Area */}
       <div className="flex-1 flex w-full" style={{ overflow: 'hidden' }}>
@@ -1164,6 +1168,7 @@ export default function AnnotationStudioPage() {
                         logicRules={logicRules}
                         onRulesUpdate={handleLogicRulesUpdate}
                         buildVariantConfig={currentStepConfig} // Passed build variant config
+                        onOpenImagesTab={() => setActiveTab('images')}
                     />
                 </TabsContent>
                 <TabsContent value="images" className="h-full m-0">

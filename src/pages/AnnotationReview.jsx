@@ -843,9 +843,9 @@ export default function AnnotationReviewPage() {
   return (
     <div className="h-screen w-full flex flex-col bg-gray-100">
       {/* Header */}
-      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 w-full">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
+      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-3 w-full">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
             <Button
               variant="outline"
               size="icon"
@@ -854,11 +854,11 @@ export default function AnnotationReviewPage() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">Model Validation Review</h1>
-              <p className="text-sm text-gray-600">Reviewing predictions for model: <span className="font-semibold">{trainingRun.run_name}</span></p>
+              <h1 className="text-lg sm:text-xl font-bold text-gray-900">Model Validation Review</h1>
+              <p className="text-xs sm:text-sm text-gray-600">Reviewing predictions for model: <span className="font-semibold">{trainingRun.run_name}</span></p>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full lg:w-auto">
             <Badge className={`${
               overallLogicPassRate === null
                 ? 'bg-slate-100 text-slate-700'
@@ -871,6 +871,7 @@ export default function AnnotationReviewPage() {
               Logic Compliance: {overallLogicPassRate === null ? 'N/A' : `${overallLogicPassRate}%`}
             </Badge>
             <Button
+              size="sm"
               onClick={() => navigate(createPageUrl(`AnnotationStudio?projectId=${trainingRun.project_id}`))}
               className="bg-blue-600 hover:bg-blue-700"
             >

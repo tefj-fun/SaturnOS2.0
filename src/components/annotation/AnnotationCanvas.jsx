@@ -609,9 +609,10 @@ export default forwardRef(function AnnotationCanvas({
 
   const totalInGroup = imageGroups[currentImageGroup]?.length || 0;
   const activeImageUrl = currentImage?.display_url || currentImage?.image_url;
+  const currentImageId = currentImage?.id ?? null;
 
   useEffect(() => {
-    if (!currentImage) {
+    if (!currentImageId) {
       setIsImageLoading(false);
       setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
       return;
@@ -635,7 +636,7 @@ export default forwardRef(function AnnotationCanvas({
 
     setIsImageLoading(true);
     setEffectiveImageProps({ naturalWidth: 0, naturalHeight: 0 });
-  }, [currentImage?.id, activeImageUrl, onImageLoaded]);
+  }, [currentImageId, activeImageUrl, onImageLoaded]);
 
   // MODIFIED EFFECT: Load annotations FROM currentImage's data
   useEffect(() => {
@@ -1976,8 +1977,10 @@ export default forwardRef(function AnnotationCanvas({
   const renderAnnotation = (annotation, key) => { // key is annotation.id or -1 for currentAnnotation
     const isPrimarySelected = selectedAnnotationId === annotation.id;
     const isSelected = isAnnotationSelected(annotation.id);
+    const isDraft = key === -1;
+    const isActiveDrawing = isDrawing && isDraft;
     let isVisible = true;
-    if (key !== -1) { // -1 is for currentAnnotation which should always be visible regardless of filters
+    if (!isDraft) { // -1 is for currentAnnotation which should always be visible regardless of filters
       isVisible = shouldShowAnnotation(annotation);
     }
     
@@ -1985,7 +1988,7 @@ export default forwardRef(function AnnotationCanvas({
     const annotationClassName = isUnlabeled ? UNLABELED_CLASS_KEY : annotation.class;
 
     // Only return if visible or specifically selected (for pulse effect)
-    if (!isVisible && !isSelected && key !== -1) return null; // Only render current drawing annotation if not visible/selected
+    if (!isVisible && !isSelected && !isDraft) return null; // Only render current drawing annotation if not visible/selected
 
     // Use classColors as primary source, fallback to default getClassColor
     const baseColor = getResolvedClassColor(annotationClassName);
@@ -2076,7 +2079,7 @@ export default forwardRef(function AnnotationCanvas({
         border: `2px ${isUnlabeled ? 'dashed' : 'solid'} ${borderColor}`,
         backgroundColor: hexToRgba(baseColor, fillOpacity), // Less opaque for unlabeled
         zIndex: isPrimarySelected ? 20 : isSelected ? 15 : 10,
-        opacity: (isVisible || isDrawing) ? 1 : 0.3 // Dim non-selected/non-drawing if annotations hidden
+        opacity: (isVisible || isDraft) ? 1 : 0.3 // Dim non-selected/non-drawing if annotations hidden
       };
       return (
         <motion.div
@@ -2157,7 +2160,7 @@ export default forwardRef(function AnnotationCanvas({
       
       let previewLine = null;
       // For polygon in drawing mode, render a line from last point to current cursor (previewPoint)
-      if (annotation.type === 'polygon' && isDrawing && annotation.previewPoint && annotation.points.length > 0) {
+      if (annotation.type === 'polygon' && isActiveDrawing && annotation.previewPoint && annotation.points.length > 0) {
         const lastPoint = annotation.points[annotation.points.length - 1];
         previewLine = <line 
           x1={lastPoint.x - minX} y1={lastPoint.y - minY} 
@@ -2166,7 +2169,7 @@ export default forwardRef(function AnnotationCanvas({
         />;
       }
       
-      const isBrushCompleted = annotation.type === 'brush' && !isDrawing && annotation.points.length > 5;
+      const isBrushCompleted = annotation.type === 'brush' && !isActiveDrawing && annotation.points.length > 5;
 
       return (
         <motion.div
@@ -2178,7 +2181,7 @@ export default forwardRef(function AnnotationCanvas({
             width: maxX - minX,
             height: maxY - minY,
             zIndex: isSelected ? 20 : 10,
-            opacity: (isVisible || isDrawing) ? 1 : 0.3,
+            opacity: (isVisible || isDraft) ? 1 : 0.3,
             pointerEvents: 'none', // The containing div does not intercept pointer events
             transformOrigin: 'center',
           }}
@@ -2187,7 +2190,7 @@ export default forwardRef(function AnnotationCanvas({
           transition={pulseTransition}
           // REMOVED onClick handler that was causing the conflict
         >
-          {showLabels && !isDrawing && (
+          {showLabels && !isActiveDrawing && (
             <Badge
               className="text-white text-xs"
               style={{
@@ -2213,8 +2216,8 @@ export default forwardRef(function AnnotationCanvas({
             {annotation.type === 'polygon' ? (
               <polygon
                 points={pointsString}
-                fill={isDrawing ? 'none' : baseColor}
-                fillOpacity={isDrawing ? undefined : fillOpacity}
+                fill={isActiveDrawing ? 'none' : baseColor}
+                fillOpacity={isActiveDrawing ? undefined : fillOpacity}
                 stroke={borderColor}
                 strokeWidth={2 / zoom}
                 strokeDasharray={isUnlabeled ? `${4/zoom} ${4/zoom}` : 'none'}
@@ -2233,7 +2236,7 @@ export default forwardRef(function AnnotationCanvas({
             {previewLine}
             
             {/* Render vertices for polygon drawing */}
-            {isDrawing && annotation.type === 'polygon' && annotation.points.map((p, index) => (
+            {isActiveDrawing && annotation.type === 'polygon' && annotation.points.map((p, index) => (
               <circle
                 key={index}
                 cx={p.x - minX}
@@ -2246,7 +2249,7 @@ export default forwardRef(function AnnotationCanvas({
             ))}
 
             {/* NEW: Render vertices for polygon adjustment */}
-            {isSelected && !isDrawing && annotationMode === 'move' && annotation.type === 'polygon' && annotation.points.map((p, index) => (
+            {isSelected && !isActiveDrawing && annotationMode === 'move' && annotation.type === 'polygon' && annotation.points.map((p, index) => (
               <circle
                 key={`vertex-handle-${index}`}
                 cx={p.x - minX}
@@ -2259,7 +2262,7 @@ export default forwardRef(function AnnotationCanvas({
               />
             ))}
           </svg>
-          {annotation.status !== 'neutral' && !isDrawing && (
+          {annotation.status !== 'neutral' && !isActiveDrawing && (
             <Badge
               className="text-white text-xs"
               style={{

@@ -42,7 +42,7 @@ const initialNewRuleState = {
   iou_value: 0.95
 };
 
-export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate }) {
+export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate, onOpenImagesTab }) {
   const [rules, setRules] = useState(logicRules || []);
   const [editingRuleId, setEditingRuleId] = useState(null);
   const [showAddRule, setShowAddRule] = useState(false);
@@ -292,6 +292,17 @@ export default function LogicBuilder({ currentStep, logicRules, onRulesUpdate })
           </div>
 
           <div className="flex items-center gap-2">
+            {onOpenImagesTab && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenImagesTab}
+                className="text-xs"
+              >
+                <Target className="w-3 h-3 mr-1" />
+                Test on images
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

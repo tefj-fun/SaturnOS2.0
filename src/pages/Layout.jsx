@@ -5,7 +5,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { supabase } from "@/api/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
+import { updateProfile } from "@/api/profiles";
 import { defaultFeatureVisibility, navigationItems } from "@/navigation";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { onboardingFeatureEnabled } from "@/lib/onboarding";
 import {
   Sidebar,
   SidebarContent,
@@ -18,8 +23,9 @@ import {
   SidebarHeader,
   SidebarFooter,
   SidebarProvider,
-  SidebarTrigger } from
-"@/components/ui/sidebar";
+  SidebarTrigger
+} from "@/components/ui/sidebar";
+import { Sparkles } from "lucide-react";
 
 const SidebarNavigationMenu = memo(function SidebarNavigationMenu({ items, activePath }) {
   return (
@@ -29,11 +35,15 @@ const SidebarNavigationMenu = memo(function SidebarNavigationMenu({ items, activ
           <SidebarMenuButton
             asChild
             isActive={activePath === item.url}
+            tooltip={item.title}
             className="mb-1 border border-transparent rounded-xl !transition-colors duration-150 hover:bg-blue-50 hover:text-blue-700 data-[active=true]:bg-blue-50 data-[active=true]:text-blue-700 data-[active=true]:shadow-sm data-[active=true]:border-blue-100"
           >
-            <Link to={item.url} className="flex items-center gap-3 px-4 py-3 text-gray-600">
+            <Link
+              to={item.url}
+              className="flex items-center gap-3 px-4 py-3 text-gray-600 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:py-0"
+            >
               <item.icon className="w-4 h-4" />
-              <span className="font-medium">{item.title}</span>
+              <span className="font-medium group-data-[collapsible=icon]:hidden">{item.title}</span>
             </Link>
           </SidebarMenuButton>
         </SidebarMenuItem>
@@ -47,7 +57,7 @@ export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
   const locationRef = useRef(location.pathname);
-  const { user, profile, authChecked, signOut } = useAuth();
+  const { user, profile, authChecked, signOut, setProfile } = useAuth();
   const [authError, setAuthError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
   const [authMode, setAuthMode] = useState("signin");
@@ -57,6 +67,9 @@ export default function Layout({ children, currentPageName }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
+  const [dontShowOnboardingPrompt, setDontShowOnboardingPrompt] = useState(false);
+  const [isUpdatingOnboardingPrompt, setIsUpdatingOnboardingPrompt] = useState(false);
   const lastRoleRef = useRef(null);
   const roleStorageKeyRef = useRef(null);
   const [cachedRole, setCachedRole] = useState(() => {
@@ -119,6 +132,69 @@ export default function Layout({ children, currentPageName }) {
       setCachedRole(storedRole);
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!authChecked || !user?.id) {
+      setShowOnboardingPrompt(false);
+      return;
+    }
+    if (!onboardingFeatureEnabled) {
+      setShowOnboardingPrompt(false);
+      return;
+    }
+    const onboardingPrefs = profile?.preferences?.onboarding || {};
+    const onboardingEnabled = onboardingFeatureEnabled && (onboardingPrefs.enabled ?? true);
+    const onboardingCompleted = onboardingPrefs.completed === true;
+    const promptDisabled = onboardingPrefs.prompt_disabled === true;
+    const isOnboardingRoute = location.pathname.toLowerCase().includes("/onboarding");
+    if (!onboardingEnabled || onboardingCompleted || promptDisabled || isOnboardingRoute) {
+      setShowOnboardingPrompt(false);
+      return;
+    }
+    const storageKey = `saturnos_onboarding_prompt_seen_${user.id}`;
+    let shouldShow = true;
+    try {
+      if (sessionStorage.getItem(storageKey)) {
+        shouldShow = false;
+      } else {
+        sessionStorage.setItem(storageKey, "1");
+      }
+    } catch (error) {
+      console.warn("Failed to access session storage:", error);
+    }
+    if (shouldShow) {
+      setDontShowOnboardingPrompt(false);
+      setShowOnboardingPrompt(true);
+    }
+  }, [authChecked, location.pathname, profile?.preferences, user?.id]);
+
+  const persistOnboardingPromptPreference = async () => {
+    if (!dontShowOnboardingPrompt || !user?.id) return;
+    setIsUpdatingOnboardingPrompt(true);
+    try {
+      const nextPreferences = {
+        ...(profile?.preferences || {}),
+        onboarding: {
+          ...(profile?.preferences?.onboarding || {}),
+          prompt_disabled: true,
+        },
+      };
+      const updated = await updateProfile(user.id, { preferences: nextPreferences });
+      setProfile(updated);
+    } catch (error) {
+      console.error("Failed to update onboarding preferences:", error);
+    } finally {
+      setIsUpdatingOnboardingPrompt(false);
+    }
+  };
+
+  const handleOnboardingPromptClose = async (action) => {
+    await persistOnboardingPromptPreference();
+    setShowOnboardingPrompt(false);
+    if (action === "start") {
+      navigate(createPageUrl("Onboarding"));
+    }
+  };
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -207,8 +283,13 @@ export default function Layout({ children, currentPageName }) {
       : navigationWithUrl.filter((item) => featureFlags[item.featureKey])
   ), [isAdmin, navigationWithUrl, featureFlags]);
 
-  // Hide sidebar for Annotation Studio page
-  const isAnnotationStudio = currentPageName === "AnnotationStudio" || location.pathname.includes("AnnotationStudio") || currentPageName === "AnnotationReview";
+  // Hide sidebar for focused, full-bleed experiences.
+  const isAnnotationStudio = currentPageName === "AnnotationStudio"
+    || location.pathname.includes("AnnotationStudio")
+    || currentPageName === "AnnotationReview";
+  const isOnboarding = currentPageName === "Onboarding"
+    || location.pathname.toLowerCase().includes("/onboarding");
+  const isFullBleedPage = isAnnotationStudio || isOnboarding;
 
   if (!authChecked || !user) {
     const authHeading = authMode === "signup"
@@ -226,22 +307,126 @@ export default function Layout({ children, currentPageName }) {
         <style>
           {`
             @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
-            @keyframes floatSlow {
-              0% { transform: translate3d(0, 0, 0) scale(1); }
-              50% { transform: translate3d(30px, -20px, 0) scale(1.05); }
-              100% { transform: translate3d(0, 0, 0) scale(1); }
+            @keyframes dvdBounceX {
+              0% { transform: translateX(0); }
+              100% { transform: translateX(var(--x-range)); }
             }
-            @keyframes drift {
-              0% { transform: translate3d(0, 0, 0) rotate(0deg); }
-              50% { transform: translate3d(-20px, 18px, 0) rotate(2deg); }
-              100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+            @keyframes dvdBounceY {
+              0% { transform: translateY(0); }
+              100% { transform: translateY(var(--y-range)); }
+            }
+            .auth-base {
+              background: radial-gradient(circle at top, rgba(30, 64, 175, 0.4), rgba(10, 14, 26, 0.95) 65%);
+            }
+            .auth-blur-cover {
+              backdrop-filter: blur(18px);
+              background: rgba(6, 10, 20, 0.28);
+            }
+            .dvd-orb-x {
+              position: absolute;
+              left: 0;
+              top: 0;
+              width: var(--size);
+              height: var(--size);
+              --x-range: max(0px, calc(100vw - var(--size)));
+              animation: dvdBounceX var(--x-duration) linear infinite alternate;
+              animation-delay: var(--x-delay);
+              pointer-events: none;
+              will-change: transform;
+            }
+            .dvd-orb-y {
+              width: 100%;
+              height: 100%;
+              --y-range: max(0px, calc(100vh - var(--size)));
+              animation: dvdBounceY var(--y-duration) linear infinite alternate;
+              animation-delay: var(--y-delay);
+              will-change: transform;
+            }
+            .dvd-orb {
+              width: 100%;
+              height: 100%;
+              border-radius: 9999px;
+              background: radial-gradient(circle at 30% 30%, var(--orb-core, rgba(59, 130, 246, 0.9)), var(--orb-edge, rgba(30, 64, 175, 0.12)));
+              filter: blur(var(--blur));
+              opacity: var(--alpha);
+              mix-blend-mode: screen;
             }
           `}
         </style>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(31,93,255,0.35),_transparent_55%),radial-gradient(circle_at_70%_80%,_rgba(59,130,246,0.25),_transparent_50%)]" />
-        <div className="absolute -top-32 -left-24 w-72 h-72 bg-blue-600/30 blur-3xl rounded-full animate-[floatSlow_18s_ease-in-out_infinite]" />
-        <div className="absolute bottom-[-120px] right-[-60px] w-96 h-96 bg-blue-500/20 blur-[140px] rounded-full animate-[floatSlow_22s_ease-in-out_infinite]" />
-        <div className="absolute top-1/3 right-1/4 w-48 h-48 border border-white/10 rounded-3xl rotate-12 animate-[drift_16s_ease-in-out_infinite]" />
+        <div className="absolute inset-0 auth-base" />
+        <div
+          className="dvd-orb-x"
+          style={{
+            "--size": "clamp(180px, 24vw, 280px)",
+            "--blur": "14px",
+            "--alpha": "0.9",
+            "--x-duration": "19s",
+            "--y-duration": "14s",
+            "--x-delay": "-7s",
+            "--y-delay": "-3s",
+            "--orb-core": "rgba(59, 130, 246, 0.95)",
+            "--orb-edge": "rgba(37, 99, 235, 0.18)",
+          }}
+        >
+          <div className="dvd-orb-y">
+            <div className="dvd-orb" />
+          </div>
+        </div>
+        <div
+          className="dvd-orb-x"
+          style={{
+            "--size": "clamp(220px, 30vw, 360px)",
+            "--blur": "18px",
+            "--alpha": "0.7",
+            "--x-duration": "24s",
+            "--y-duration": "17s",
+            "--x-delay": "-11s",
+            "--y-delay": "-5s",
+            "--orb-core": "rgba(14, 165, 233, 0.85)",
+            "--orb-edge": "rgba(37, 99, 235, 0.12)",
+          }}
+        >
+          <div className="dvd-orb-y">
+            <div className="dvd-orb" />
+          </div>
+        </div>
+        <div
+          className="dvd-orb-x"
+          style={{
+            "--size": "clamp(170px, 22vw, 260px)",
+            "--blur": "12px",
+            "--alpha": "0.85",
+            "--x-duration": "16s",
+            "--y-duration": "20s",
+            "--x-delay": "-4s",
+            "--y-delay": "-9s",
+            "--orb-core": "rgba(96, 165, 250, 0.9)",
+            "--orb-edge": "rgba(30, 64, 175, 0.14)",
+          }}
+        >
+          <div className="dvd-orb-y">
+            <div className="dvd-orb" />
+          </div>
+        </div>
+        <div
+          className="dvd-orb-x"
+          style={{
+            "--size": "clamp(210px, 28vw, 330px)",
+            "--blur": "20px",
+            "--alpha": "0.6",
+            "--x-duration": "27s",
+            "--y-duration": "21s",
+            "--x-delay": "-13s",
+            "--y-delay": "-6s",
+            "--orb-core": "rgba(59, 130, 246, 0.7)",
+            "--orb-edge": "rgba(30, 58, 138, 0.12)",
+          }}
+        >
+          <div className="dvd-orb-y">
+            <div className="dvd-orb" />
+          </div>
+        </div>
+        <div className="absolute inset-0 auth-blur-cover" />
 
         <div className="relative z-10 w-full max-w-5xl mx-auto px-6 py-16 lg:py-24">
           <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] items-center">
@@ -440,7 +625,7 @@ export default function Layout({ children, currentPageName }) {
     );
   }
 
-  if (isAnnotationStudio) {
+  if (isFullBleedPage) {
     return (
       <div className="min-h-screen w-full">
         {children}
@@ -476,26 +661,93 @@ export default function Layout({ children, currentPageName }) {
           }
         `}
       </style>
+
+      <Dialog
+        open={showOnboardingPrompt}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleOnboardingPromptClose("dismiss");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg p-0 overflow-hidden gap-0">
+          <div className="bg-gradient-to-br from-amber-50 via-white to-slate-50 px-6 py-4 border-b border-amber-100">
+            <DialogHeader className="space-y-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-amber-700">
+                <Sparkles className="h-4 w-4" />
+                New here
+              </div>
+              <DialogTitle className="text-2xl text-gray-900">Guided setup in 3 steps</DialogTitle>
+              <DialogDescription className="text-gray-600">
+                A short, guided flow to get your first training run started.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div className="px-6 py-4 space-y-3">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+              <p className="text-sm font-semibold text-gray-900">What you will do</p>
+              <ul className="mt-1.5 space-y-1 text-xs text-gray-600">
+                <li>1. Create a project</li>
+                <li>2. Upload images</li>
+                <li>3. Launch your first training run</li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="onboarding-prompt-dismiss"
+                  checked={dontShowOnboardingPrompt}
+                  onCheckedChange={(checked) => setDontShowOnboardingPrompt(Boolean(checked))}
+                />
+                <label htmlFor="onboarding-prompt-dismiss" className="text-sm text-gray-600">
+                  Don&apos;t show this again
+                </label>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => handleOnboardingPromptClose("dismiss")}
+                  disabled={isUpdatingOnboardingPrompt}
+                >
+                  Not now
+                </Button>
+                <Button
+                  className="bg-amber-600 text-white hover:bg-amber-700"
+                  onClick={() => handleOnboardingPromptClose("start")}
+                  disabled={isUpdatingOnboardingPrompt}
+                >
+                  Start onboarding
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       
       <div className="min-h-screen flex w-full gradient-bg">
-        <Sidebar className="border-r border-blue-200/60 glass-effect flex flex-col">
-          <SidebarHeader className="border-b border-blue-200/60 p-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg bg-white">
+        <Sidebar className="border-r border-blue-200/60 glass-effect flex flex-col" collapsible="icon">
+          <SidebarHeader className="border-b border-blue-200/60 p-6 group-data-[collapsible=icon]:p-2">
+            <div className="flex items-center justify-between gap-3 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-2">
+              <div className="flex items-center gap-3 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg bg-white group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:h-8">
                 <img 
                   src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/067a9f53a_Android.png" 
                   alt="SaturnOS Logo"
-                  className="w-8 h-8 object-contain"
+                  className="w-8 h-8 object-contain group-data-[collapsible=icon]:w-6 group-data-[collapsible=icon]:h-6"
                 />
+                </div>
+                <div className="group-data-[collapsible=icon]:hidden">
+                  <h2 className="font-bold text-gray-900 text-lg">SaturnOS 2.0</h2>
+                  <p className="text-xs text-gray-500 font-medium">Guided LLM Annotation</p>
+                </div>
               </div>
-              <div>
-                <h2 className="font-bold text-gray-900 text-lg">SaturnOS 2.0</h2>
-                <p className="text-xs text-gray-500 font-medium">Guided LLM Annotation</p>
-              </div>
+              <SidebarTrigger className="hover:bg-blue-100 rounded-lg transition-colors duration-200" />
             </div>
           </SidebarHeader>
           
-          <SidebarContent className="p-4 flex-1 overflow-y-auto">
+          <SidebarContent className="p-4 flex-1 overflow-y-auto group-data-[collapsible=icon]:p-2">
             <SidebarGroup>
               <SidebarGroupLabel className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2 py-3">
                 Workspace
@@ -513,15 +765,15 @@ export default function Layout({ children, currentPageName }) {
               <button
                 type="button"
                 onClick={() => navigate(createPageUrl("Settings"))}
-                className="block text-left hover:bg-blue-50/50 p-6 transition-colors duration-200"
+                className="block text-left hover:bg-blue-50/50 p-6 transition-colors duration-200 group-data-[collapsible=icon]:p-3"
               >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center">
+                  <div className="flex items-center gap-3 group-data-[collapsible=icon]:justify-center">
+                    <div className="w-9 h-9 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:h-8">
                       <span className="text-blue-600 font-semibold text-sm">
                         {user ? (user.email?.charAt(0).toUpperCase() || 'U') : 'U'}
                       </span>
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                       <p className="font-semibold text-gray-900 text-sm truncate">
                         {user ? user.email : 'Loading...'}
                       </p>
@@ -534,7 +786,7 @@ export default function Layout({ children, currentPageName }) {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="text-xs text-red-600 px-6 pb-6 text-left hover:text-red-700 transition-colors"
+                className="text-xs text-red-600 px-6 pb-6 text-left hover:text-red-700 transition-colors group-data-[collapsible=icon]:hidden"
               >
                 Log out
               </button>

@@ -47,12 +47,18 @@ VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
 VITE_OPENAI_PROXY_URL=http://localhost:8888/.netlify/functions/openai
 VITE_INVITE_USER_URL=http://localhost:8888/.netlify/functions/invite-user
+VITE_SIGN_STORAGE_URL=http://localhost:8888/.netlify/functions/sign-storage
 VITE_STRIPE_CHECKOUT_URL=/.netlify/functions/stripe-checkout
 VITE_STRIPE_PORTAL_URL=/.netlify/functions/stripe-portal
 VITE_STEP_IMAGES_BUCKET=step-images
 VITE_DATASET_BUCKET=datasets
 VITE_SUPABASE_REQUIRE_AUTH=false
 VITE_BYPASS_PERMISSIONS=false
+VITE_MONTHLY_SPEND_CAP=0
+VITE_UPLOAD_CONCURRENCY=6
+VITE_UPLOAD_INSERT_BATCH=25
+VITE_DATASET_EXPORT_CONCURRENCY=4
+VITE_USE_MOCK_LABEL_LIBRARY=false
 ```
 
 Set `VITE_SUPABASE_REQUIRE_AUTH=true` to enforce auth for project creation and permission checks. Set `VITE_BYPASS_PERMISSIONS=true` to bypass project-level RBAC in local demos.
@@ -125,6 +131,9 @@ RLS is enabled across core tables. Most app tables currently allow anon + authen
 ## Serverless helpers
 - `netlify/functions/openai.js` proxies chat completions (default model `gpt-4o-mini`) and supports JSON response mode.
 - `netlify/functions/invite-user.js` creates Supabase invites using a service role key, restricted to admins or project owners.
+- `netlify/functions/sign-storage.js` signs Supabase Storage URLs for authenticated users (supports image transforms).
+- `netlify/functions/stripe-checkout.js` creates Stripe Checkout sessions for subscriptions.
+- `netlify/functions/stripe-portal.js` creates Stripe customer portal sessions.
 
 ## Scripts
 - `npm run dev` - Vite dev server.

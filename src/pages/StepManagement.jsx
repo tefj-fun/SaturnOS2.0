@@ -28,6 +28,7 @@ import {
 import { createPageUrl } from "@/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
+import OnboardingChecklist from "@/components/onboarding/OnboardingChecklist";
 
 export default function StepManagementPage() {
   const navigate = useNavigate();
@@ -323,6 +324,8 @@ export default function StepManagementPage() {
     return colors[firstStatus] || colors.neutral;
   }, []);
 
+  const annotatedSteps = steps.filter(step => step.is_annotated).length;
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -375,6 +378,18 @@ export default function StepManagementPage() {
             </Button>
           </div>
         </div>
+
+        <OnboardingChecklist
+          projectId={projectId}
+          projectName={project?.name}
+          stepsCount={steps.length}
+          imagesCount={null}
+          annotationsCount={annotatedSteps}
+          copilotUsed={null}
+          logicRulesCount={null}
+          trainingRunsCount={null}
+          className="mb-6"
+        />
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -793,140 +808,160 @@ function StepCard({
         
         {/* Main content area */}
         <CardContent className="p-4">
-          {isEditing ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Labels to annotate (comma-separated)</label>
-                  <Input
-                    value={(editedStep.classes || []).join(', ')}
-                    onChange={(e) => onEditChange('classes', e.target.value)}
-                    className="mt-1"
-                    placeholder="e.g., Scratch, Dent, Misalignment"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Use defect-focused labels the annotator should tag.
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Status (comma-separated)</label>
-                  <Input
-                    value={editedStep.status}
-                    onChange={(e) => onEditChange('status', e.target.value)}
-                    className="mt-1"
-                    placeholder="e.g., Pass,Fail,Compliant"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Clarity Score (0-10)</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
-                    value={editedStep.clarity_score}
-                    onChange={(e) => onEditChange('clarity_score', e.target.value)}
-                    className="mt-1"
-                  />
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={`needs-clarification-${step.id}`}
-                      checked={editedStep.needs_clarification}
-                      onCheckedChange={(checked) => onEditChange('needs_clarification', checked)}
+          <AnimatePresence mode="wait" initial={false}>
+            {isEditing ? (
+              <motion.div
+                key="edit"
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Labels to annotate (comma-separated)</label>
+                      <Input
+                        value={(editedStep.classes || []).join(', ')}
+                        onChange={(e) => onEditChange('classes', e.target.value)}
+                        className="mt-1"
+                        placeholder="e.g., Scratch, Dent, Misalignment"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Use defect-focused labels the annotator should tag.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Status (comma-separated)</label>
+                      <Input
+                        value={editedStep.status}
+                        onChange={(e) => onEditChange('status', e.target.value)}
+                        className="mt-1"
+                        placeholder="e.g., Pass,Fail,Compliant"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Clarity Score (0-10)</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="10"
+                        step="0.1"
+                        value={editedStep.clarity_score}
+                        onChange={(e) => onEditChange('clarity_score', e.target.value)}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={`needs-clarification-${step.id}`}
+                          checked={editedStep.needs_clarification}
+                          onCheckedChange={(checked) => onEditChange('needs_clarification', checked)}
+                        />
+                        <label htmlFor={`needs-clarification-${step.id}`} className="text-sm font-medium text-gray-700">
+                          Needs Clarification
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Description</label>
+                    <Textarea
+                      value={editedStep.description}
+                      onChange={(e) => onEditChange('description', e.target.value)}
+                      className="mt-1"
+                      rows={2}
                     />
-                    <label htmlFor={`needs-clarification-${step.id}`} className="text-sm font-medium text-gray-700">
-                      Needs Clarification
-                    </label>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Condition</label>
+                    <Textarea
+                      value={editedStep.condition}
+                      onChange={(e) => onEditChange('condition', e.target.value)}
+                      className="mt-1"
+                      rows={2}
+                    />
                   </div>
                 </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">Description</label>
-                <Textarea
-                  value={editedStep.description}
-                  onChange={(e) => onEditChange('description', e.target.value)}
-                  className="mt-1"
-                  rows={2}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">Condition</label>
-                <Textarea
-                  value={editedStep.condition}
-                  onChange={(e) => onEditChange('condition', e.target.value)}
-                  className="mt-1"
-                  rows={2}
-                />
-              </div>
-            </div>
-          ) : (
-            <>
-              <p className="text-gray-600 text-sm mb-3">{step.description}</p>
-              
-              {step.needs_clarification && (
-                <div className="mb-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs font-medium text-amber-800">
-                      ⚠️ This step needs clarification
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onMarkClarified(step.id)}
-                      className="h-6 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-2"
-                      disabled={isAnyStepSelected || isEditingGlobal} 
-                    >
-                      <CheckCircle className="w-3 h-3 mr-1" />
-                      Mark as Clarified
-                    </Button>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="view"
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="overflow-hidden"
+              >
+                <p className="text-gray-600 text-sm mb-3">{step.description}</p>
+                
+                {step.needs_clarification && (
+                  <div className="mb-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs font-medium text-amber-800">
+                        ⚠️ This step needs clarification
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onMarkClarified(step.id)}
+                        className="h-6 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-2"
+                        disabled={isAnyStepSelected || isEditingGlobal} 
+                      >
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        Mark as Clarified
+                      </Button>
+                    </div>
+                    {step.clarification_questions && step.clarification_questions.length > 0 && (
+                      <ul className="text-xs text-amber-700 space-y-1 mt-2">
+                        {step.clarification_questions.map((question, qIndex) => (
+                          <li key={qIndex}>• {question}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  {step.clarification_questions && step.clarification_questions.length > 0 && (
-                    <ul className="text-xs text-amber-700 space-y-1 mt-2">
-                      {step.clarification_questions.map((question, qIndex) => (
-                        <li key={qIndex}>• {question}</li>
-                      ))}
-                    </ul>
+                )}
+                
+                <div className="flex flex-wrap gap-2 text-xs mb-3">
+                  <Badge className={`${getStatusColor(step.status)} border-0`}>
+                    {step.status}
+                  </Badge>
+                  <Badge variant="secondary">
+                    Labels: {(step.classes || []).join(', ')}
+                  </Badge>
+                  <Badge variant="outline">
+                    Clarity: {step.clarity_score}/10
+                  </Badge>
+                  {step.is_annotated && (
+                    <Badge className="bg-blue-100 text-blue-800 border-0">
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      Annotated
+                    </Badge>
                   )}
                 </div>
-              )}
-              
-              <div className="flex flex-wrap gap-2 text-xs mb-3">
-                <Badge className={`${getStatusColor(step.status)} border-0`}>
-                  {step.status}
-                </Badge>
-                <Badge variant="secondary">
-                  Labels: {(step.classes || []).join(', ')}
-                </Badge>
-                <Badge variant="outline">
-                  Clarity: {step.clarity_score}/10
-                </Badge>
-                {step.is_annotated && (
-                  <Badge className="bg-blue-100 text-blue-800 border-0">
-                    <CheckCircle className="w-3 h-3 mr-1" />
-                    Annotated
-                  </Badge>
-                )}
-              </div>
 
-              {/* Smart insertion button */}
-              <div className="flex justify-center mt-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onAddAfter(index)}
-                  className="text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
-                  disabled={isAnyStepSelected || isEditingGlobal} 
-                >
-                  <Plus className="w-3 h-3 mr-1" />
-                  Insert Step After This
-                </Button>
-              </div>
-            </>
-          )}
+                {/* Smart insertion button */}
+                <div className="flex justify-center mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onAddAfter(index)}
+                    className="text-xs bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                    disabled={isAnyStepSelected || isEditingGlobal} 
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Insert Step After This
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </CardContent>
       </Card>
     </motion.div>

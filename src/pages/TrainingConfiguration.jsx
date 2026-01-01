@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   ArrowLeft,
   PlayCircle,
@@ -25,7 +27,8 @@ import {
   WifiOff,
   RefreshCw,
   Rocket,
-  ChevronDown
+  ChevronDown,
+  Trash2
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 import LoadingOverlay from '@/components/projects/LoadingOverlay';
@@ -40,6 +43,15 @@ const Section = ({ title, icon, children, count }) => (
         </h2>
         {children}
     </div>
+);
+
+const TabLabel = ({ label, count }) => (
+    <span className="flex items-center gap-2">
+        <span>{label}</span>
+        <span className="min-w-[1.5rem] rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-700">
+            {count}
+        </span>
+    </span>
 );
 
 const DATASET_SUMMARY_TIMEOUT_MS = 15000;
@@ -65,6 +77,15 @@ export default function TrainingConfigurationPage() {
     const [trainingRuns, setTrainingRuns] = useState([]);
     const [datasetSummary, setDatasetSummary] = useState(null);
     const [isDatasetLoading, setIsDatasetLoading] = useState(false);
+    const [allSteps, setAllSteps] = useState([]);
+    const [activeTab, setActiveTab] = useState("training");
+    const [queuedRuns, setQueuedRuns] = useState([]);
+    const [isQueueLoading, setIsQueueLoading] = useState(false);
+    const [queueError, setQueueError] = useState("");
+    const [deployedModels, setDeployedModels] = useState([]);
+    const [isDeployedLoading, setIsDeployedLoading] = useState(false);
+    const [deployedError, setDeployedError] = useState("");
+    const [deploymentAction, setDeploymentAction] = useState({ id: null, type: "" });
     const [trainerStatus, setTrainerStatus] = useState({
         state: "checking",
         running: 0,
@@ -123,11 +144,71 @@ export default function TrainingConfigurationPage() {
         }
     }, []);
 
+    const loadAllSteps = useCallback(async () => {
+        try {
+            const steps = await SOPStep.list('step_number');
+            setAllSteps(steps);
+        } catch (error) {
+            console.error('Error loading steps:', error);
+        }
+    }, []);
+
+    const loadDeployedModels = useCallback(async () => {
+        setIsDeployedLoading(true);
+        setDeployedError("");
+        try {
+            const runs = await TrainingRun.list('-deployment_date');
+            const deployed = runs.filter((run) => (
+                run.is_deployed
+                || run.deployment_status === 'deployed'
+                || run.deployment_status === 'disabled'
+            ));
+            setDeployedModels(deployed);
+        } catch (error) {
+            console.error('Error loading deployed models:', error);
+            setDeployedError('Failed to load deployed models.');
+        } finally {
+            setIsDeployedLoading(false);
+        }
+    }, []);
+
+    const loadQueuedRuns = useCallback(async () => {
+        setIsQueueLoading(true);
+        setQueueError("");
+        try {
+            const runs = await TrainingRun.filter({ status: ['queued'] }, '-created_date');
+            setQueuedRuns(runs);
+        } catch (error) {
+            console.error('Error loading queued runs:', error);
+            setQueueError('Failed to load queued runs.');
+        } finally {
+            setIsQueueLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         loadTrainerStatus();
         const interval = setInterval(loadTrainerStatus, 15000);
         return () => clearInterval(interval);
     }, [loadTrainerStatus]);
+
+    useEffect(() => {
+        loadAllSteps();
+    }, [loadAllSteps]);
+
+    useEffect(() => {
+        loadDeployedModels();
+    }, [loadDeployedModels]);
+
+    useEffect(() => {
+        if (activeTab !== "deployments") return;
+        loadDeployedModels();
+    }, [activeTab, loadDeployedModels]);
+
+    useEffect(() => {
+        if (activeTab !== "queue") return;
+        loadQueuedRuns();
+    }, [activeTab, loadQueuedRuns]);
 
     const groupedRuns = useMemo(() => {
         const groups = { running: [], queued: [], completed: [], history: [] };
@@ -146,6 +227,14 @@ export default function TrainingConfigurationPage() {
     }, [trainingRuns]);
 
     const recentRuns = useMemo(() => trainingRuns.slice(0, 5), [trainingRuns]);
+    const projectById = useMemo(
+        () => new Map(allProjects.map(project => [project.id, project])),
+        [allProjects]
+    );
+    const stepById = useMemo(
+        () => new Map(allSteps.map(step => [step.id, step])),
+        [allSteps]
+    );
 
     const getSplitName = useCallback((groupName) => {
         if (!groupName) return "train";
@@ -415,9 +504,82 @@ export default function TrainingConfigurationPage() {
         loadStepData(selectedStepId);
     };
 
+    const handleCancelQueued = async (runId) => {
+        try {
+            await TrainingRun.update(runId, {
+                status: 'canceled',
+                cancel_requested: true,
+                canceled_at: new Date().toISOString(),
+                completed_at: new Date().toISOString(),
+                error_message: 'Canceled by user.',
+            });
+            await loadQueuedRuns();
+            refreshTrainingRuns();
+        } catch (error) {
+            console.error('Failed to cancel queued run:', error);
+            setQueueError('Failed to cancel queued run.');
+        }
+    };
+
     const handleDeleteTraining = async (runId) => {
         await TrainingRun.delete(runId);
         loadStepData(selectedStepId);
+    };
+
+    const handleEnableModel = async (run) => {
+        if (!run?.id) return;
+        setDeploymentAction({ id: run.id, type: "enable" });
+        setDeployedError("");
+        try {
+            const deploymentUrl = run.deployment_url || `https://api.saturos.ai/models/${run.id}/predict`;
+            await TrainingRun.update(run.id, {
+                is_deployed: true,
+                deployment_status: 'deployed',
+                deployment_date: new Date().toISOString(),
+                deployment_url: deploymentUrl,
+            });
+            loadDeployedModels();
+        } catch (error) {
+            console.error('Failed to enable model:', error);
+            setDeployedError('Failed to enable model.');
+        } finally {
+            setDeploymentAction({ id: null, type: "" });
+        }
+    };
+
+    const handleDisableModel = async (run) => {
+        if (!run?.id) return;
+        setDeploymentAction({ id: run.id, type: "disable" });
+        setDeployedError("");
+        try {
+            await TrainingRun.update(run.id, {
+                is_deployed: false,
+                deployment_status: 'disabled',
+            });
+            loadDeployedModels();
+        } catch (error) {
+            console.error('Failed to disable model:', error);
+            setDeployedError('Failed to disable model.');
+        } finally {
+            setDeploymentAction({ id: null, type: "" });
+        }
+    };
+
+    const handleDeleteModel = async (run) => {
+        if (!run?.id) return;
+        const confirmed = window.confirm(`Delete "${run.run_name}"? This removes the model and its training run.`);
+        if (!confirmed) return;
+        setDeploymentAction({ id: run.id, type: "delete" });
+        setDeployedError("");
+        try {
+            await TrainingRun.delete(run.id);
+            loadDeployedModels();
+        } catch (error) {
+            console.error('Failed to delete model:', error);
+            setDeployedError('Failed to delete model.');
+        } finally {
+            setDeploymentAction({ id: null, type: "" });
+        }
     };
 
     const trainerStatusConfig = {
@@ -451,12 +613,19 @@ export default function TrainingConfigurationPage() {
             ? "Mixed (boxes + polygons)"
             : labelTypes.segments > 0
                 ? "Polygons only"
-                : labelTypes.boxes > 0
-                    ? "Boxes only"
-                    : "None")
+                    : labelTypes.boxes > 0
+                        ? "Boxes only"
+                        : "None")
         : "n/a";
     const activeWorkers = trainerStatus.activeWorkers || [];
     const trainerStatusDescription = trainerStatusDescriptions[trainerStatus.state] || trainerStatusDescriptions.unknown;
+    const deploymentStatusConfig = {
+        deployed: { label: "Deployed", className: "bg-green-100 text-green-800" },
+        disabled: { label: "Disabled", className: "bg-gray-100 text-gray-700" },
+        deploying: { label: "Deploying", className: "bg-amber-100 text-amber-800" },
+        deployment_failed: { label: "Failed", className: "bg-red-100 text-red-800" },
+        unknown: { label: "Unknown", className: "bg-gray-100 text-gray-700" },
+    };
 
     if (isLoading && !allProjects.length) {
         return <LoadingOverlay isLoading={true} text="Loading projects..." />;
@@ -468,7 +637,12 @@ export default function TrainingConfigurationPage() {
                 <div className="w-full max-w-none">
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8">
                         <div className="flex items-center gap-4">
-                            <Button variant="outline" size="icon" onClick={() => navigate(-1)} className="border-0">
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => navigate(createPageUrl('Projects'))}
+                                className="border-0"
+                            >
                                 <ArrowLeft className="w-4 h-4" />
                             </Button>
                             <div>
@@ -602,7 +776,33 @@ export default function TrainingConfigurationPage() {
 
             <div className="flex-1 overflow-y-auto p-6 pt-0">
                 <div className="w-full max-w-none">
-                    {selectedStep ? (
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <TabsList className="w-full sm:w-auto">
+                                <TabsTrigger value="training">
+                                    <TabLabel label="Training Runs" count={trainingRuns.length} />
+                                </TabsTrigger>
+                                <TabsTrigger value="queue">
+                                    <TabLabel label="Queue" count={trainerStatus.queued} />
+                                </TabsTrigger>
+                                <TabsTrigger value="deployments">
+                                    <TabLabel label="Deployed Models" count={deployedModels.length} />
+                                </TabsTrigger>
+                            </TabsList>
+                            {(activeTab === "deployments" || activeTab === "queue") && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={activeTab === "deployments" ? loadDeployedModels : loadQueuedRuns}
+                                    disabled={activeTab === "deployments" ? isDeployedLoading : isQueueLoading}
+                                >
+                                    <RefreshCw className="w-4 h-4 mr-2" />
+                                    Refresh
+                                </Button>
+                            )}
+                        </div>
+                        <TabsContent value="training" className="mt-6">
+                            {selectedStep ? (
                         <div className="space-y-8">
                             <div className="grid gap-6 lg:grid-cols-3">
                                 <Card className="border-0 shadow-sm">
@@ -799,6 +999,204 @@ export default function TrainingConfigurationPage() {
                             </CardContent>
                         </Card>
                     )}
+                        </TabsContent>
+
+                        <TabsContent value="queue" className="mt-6">
+                            <Card className="border-0 shadow-sm">
+                                <CardHeader>
+                                    <CardTitle>Queued runs</CardTitle>
+                                    <CardDescription>Runs waiting for a trainer to pick them up.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {queueError && (
+                                        <Alert className="mb-4 border-red-200 bg-red-50">
+                                            <AlertTitle className="text-red-900">Action failed</AlertTitle>
+                                            <AlertDescription className="text-red-800">{queueError}</AlertDescription>
+                                        </Alert>
+                                    )}
+                                    {isQueueLoading ? (
+                                        <div className="text-sm text-gray-500">Loading queued runs...</div>
+                                    ) : queuedRuns.length === 0 ? (
+                                        <div className="text-center py-12 text-sm text-gray-500">
+                                            No queued runs right now.
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <Table className="min-w-[860px]">
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>Run</TableHead>
+                                                        <TableHead>Project</TableHead>
+                                                        <TableHead>Step</TableHead>
+                                                        <TableHead>Queued at</TableHead>
+                                                        <TableHead className="text-right">Actions</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {queuedRuns.map((run) => {
+                                                        const project = projectById.get(run.project_id);
+                                                        const step = stepById.get(run.step_id);
+                                                        const projectLabel = project?.name || "Unknown project";
+                                                        const stepLabel = step
+                                                            ? `Step ${step.step_number}: ${step.title}`
+                                                            : "Unknown step";
+                                                        const queuedAt = run.created_date
+                                                            ? new Date(run.created_date).toLocaleString()
+                                                            : "Unknown";
+                                                        return (
+                                                            <TableRow key={run.id}>
+                                                                <TableCell>
+                                                                    <div className="font-medium text-gray-900">{run.run_name}</div>
+                                                                    <div className="text-xs text-gray-500">{run.base_model || "Unknown base model"}</div>
+                                                                </TableCell>
+                                                                <TableCell className="text-gray-700">{projectLabel}</TableCell>
+                                                                <TableCell className="text-gray-700">{stepLabel}</TableCell>
+                                                                <TableCell className="text-gray-700">{queuedAt}</TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="flex justify-end gap-2">
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            onClick={() => navigate(createPageUrl(`TrainingStatus?runId=${run.id}`))}
+                                                                        >
+                                                                            View
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                                            onClick={() => handleCancelQueued(run.id)}
+                                                                        >
+                                                                            Cancel
+                                                                        </Button>
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        );
+                                                    })}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </TabsContent>
+
+                        <TabsContent value="deployments" className="mt-6">
+                            <Card className="border-0 shadow-sm">
+                                <CardHeader>
+                                    <CardTitle>Deployed models</CardTitle>
+                                    <CardDescription>Manage deployed models across all projects and steps.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {deployedError && (
+                                        <Alert className="mb-4 border-red-200 bg-red-50">
+                                            <AlertTitle className="text-red-900">Action failed</AlertTitle>
+                                            <AlertDescription className="text-red-800">{deployedError}</AlertDescription>
+                                        </Alert>
+                                    )}
+                                    {isDeployedLoading ? (
+                                        <div className="text-sm text-gray-500">Loading deployed models...</div>
+                                    ) : deployedModels.length === 0 ? (
+                                        <div className="text-center py-12 text-sm text-gray-500">
+                                            No deployed models yet. Deploy a completed run to see it here.
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <Table className="min-w-[860px]">
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>Model</TableHead>
+                                                        <TableHead>Project</TableHead>
+                                                        <TableHead>Step</TableHead>
+                                                        <TableHead>Status</TableHead>
+                                                        <TableHead>Endpoint</TableHead>
+                                                        <TableHead className="text-right">Actions</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {deployedModels.map((run) => {
+                                                        const project = projectById.get(run.project_id);
+                                                        const step = stepById.get(run.step_id);
+                                                        const projectLabel = project?.name || "Unknown project";
+                                                        const stepLabel = step
+                                                            ? `Step ${step.step_number}: ${step.title}`
+                                                            : "Unknown step";
+                                                        const statusKey = run.deployment_status || (run.is_deployed ? "deployed" : "unknown");
+                                                        const statusConfig = deploymentStatusConfig[statusKey] || deploymentStatusConfig.unknown;
+                                                        const actionBusy = deploymentAction.id === run.id;
+                                                        const isEnabled = run.is_deployed && run.deployment_status === 'deployed';
+                                                        return (
+                                                            <TableRow key={run.id}>
+                                                                <TableCell>
+                                                                    <div className="font-medium text-gray-900">{run.run_name}</div>
+                                                                    <div className="text-xs text-gray-500">{run.base_model || "Unknown base model"}</div>
+                                                                </TableCell>
+                                                                <TableCell className="text-gray-700">{projectLabel}</TableCell>
+                                                                <TableCell className="text-gray-700">{stepLabel}</TableCell>
+                                                                <TableCell>
+                                                                    <Badge className={`border-0 ${statusConfig.className}`}>
+                                                                        {statusConfig.label}
+                                                                    </Badge>
+                                                                </TableCell>
+                                                                <TableCell className="text-xs">
+                                                                    {run.deployment_url ? (
+                                                                        <a
+                                                                            href={run.deployment_url}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            className="text-amber-600 hover:underline"
+                                                                        >
+                                                                            {run.deployment_url}
+                                                                        </a>
+                                                                    ) : (
+                                                                        <span className="text-gray-400">Not available</span>
+                                                                    )}
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="flex justify-end gap-2">
+                                                                        {isEnabled ? (
+                                                                            <Button
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() => handleDisableModel(run)}
+                                                                                disabled={actionBusy}
+                                                                            >
+                                                                                {actionBusy && deploymentAction.type === "disable" ? "Disabling..." : "Disable"}
+                                                                            </Button>
+                                                                        ) : (
+                                                                            <Button
+                                                                                size="sm"
+                                                                                className="bg-amber-600 text-white hover:bg-amber-700"
+                                                                                onClick={() => handleEnableModel(run)}
+                                                                                disabled={actionBusy}
+                                                                            >
+                                                                                {actionBusy && deploymentAction.type === "enable" ? "Enabling..." : "Enable"}
+                                                                            </Button>
+                                                                        )}
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                                            onClick={() => handleDeleteModel(run)}
+                                                                            disabled={actionBusy}
+                                                                        >
+                                                                            <Trash2 className="w-3 h-3 mr-1" />
+                                                                            {actionBusy && deploymentAction.type === "delete" ? "Deleting..." : "Delete"}
+                                                                        </Button>
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        );
+                                                    })}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </TabsContent>
+                    </Tabs>
                 </div>
             </div>
             

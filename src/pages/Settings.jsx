@@ -49,7 +49,10 @@ const DEFAULT_PREFERENCES = {
   },
   language: 'en',
   timezone: 'UTC-8',
-  auto_save: true
+  auto_save: true,
+  onboarding: {
+    enabled: true
+  }
 };
 
 const roleConfig = {
@@ -79,6 +82,7 @@ export default function SettingsPage() {
   const [teamMembers, setTeamMembers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddUserDialog, setShowAddUserDialog] = useState(false);
+  const disabledPreferenceControls = true;
   
   const [newUser, setNewUser] = useState({
     email: '',
@@ -322,6 +326,7 @@ export default function SettingsPage() {
                     <Palette className="w-5 h-5 text-purple-600" />
                     Appearance
                   </CardTitle>
+                  <CardDescription>Coming soon.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -329,7 +334,11 @@ export default function SettingsPage() {
                       <Label>Theme</Label>
                       <p className="text-sm text-gray-600">Choose your preferred theme</p>
                     </div>
-                    <Select value={userSettings.theme} onValueChange={(value) => handleSettingChange('theme', null, value)}>
+                    <Select
+                      value={userSettings.theme}
+                      onValueChange={(value) => handleSettingChange('theme', null, value)}
+                      disabled={disabledPreferenceControls}
+                    >
                       <SelectTrigger className="w-full sm:w-32">
                         <SelectValue />
                       </SelectTrigger>
@@ -350,6 +359,7 @@ export default function SettingsPage() {
                     <Bell className="w-5 h-5 text-blue-600" />
                     Notifications
                   </CardTitle>
+                  <CardDescription>Coming soon.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -360,6 +370,7 @@ export default function SettingsPage() {
                     <Switch 
                       checked={userSettings.notifications?.email}
                       onCheckedChange={(checked) => handleSettingChange('notifications', 'email', checked)}
+                      disabled={disabledPreferenceControls}
                     />
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -370,6 +381,7 @@ export default function SettingsPage() {
                     <Switch 
                       checked={userSettings.notifications?.training_complete}
                       onCheckedChange={(checked) => handleSettingChange('notifications', 'training_complete', checked)}
+                      disabled={disabledPreferenceControls}
                     />
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -380,6 +392,7 @@ export default function SettingsPage() {
                     <Switch 
                       checked={userSettings.notifications?.weekly_summary}
                       onCheckedChange={(checked) => handleSettingChange('notifications', 'weekly_summary', checked)}
+                      disabled={disabledPreferenceControls}
                     />
                   </div>
                 </CardContent>
@@ -392,12 +405,17 @@ export default function SettingsPage() {
                     <Globe className="w-5 h-5 text-blue-600" />
                     General Settings
                   </CardTitle>
+                  <CardDescription>Coming soon.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="space-y-2">
                       <Label>Language</Label>
-                      <Select value={userSettings.language} onValueChange={(value) => handleSettingChange('language', null, value)}>
+                      <Select
+                        value={userSettings.language}
+                        onValueChange={(value) => handleSettingChange('language', null, value)}
+                        disabled={disabledPreferenceControls}
+                      >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -411,7 +429,11 @@ export default function SettingsPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>Timezone</Label>
-                      <Select value={userSettings.timezone} onValueChange={(value) => handleSettingChange('timezone', null, value)}>
+                      <Select
+                        value={userSettings.timezone}
+                        onValueChange={(value) => handleSettingChange('timezone', null, value)}
+                        disabled={disabledPreferenceControls}
+                      >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -431,8 +453,19 @@ export default function SettingsPage() {
                       <Switch 
                         checked={userSettings.auto_save}
                         onCheckedChange={(checked) => handleSettingChange('auto_save', null, checked)}
+                        disabled={disabledPreferenceControls}
                       />
                     </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <Label>Onboarding tutorial</Label>
+                      <p className="text-sm text-gray-600">Show the guided setup checklist</p>
+                    </div>
+                    <Switch
+                      checked={userSettings.onboarding?.enabled ?? true}
+                      onCheckedChange={(checked) => handleSettingChange('onboarding', 'enabled', checked)}
+                    />
                   </div>
                 </CardContent>
               </Card>

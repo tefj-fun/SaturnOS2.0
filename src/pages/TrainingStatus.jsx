@@ -40,7 +40,8 @@ import {
   Eye,
   Loader2,
   XCircle,
-  Clock
+  Clock,
+  PenTool
 } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 
@@ -908,24 +909,37 @@ export default function TrainingStatusPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Eye className="w-5 h-5 text-gray-600" />
-                    Review Model Predictions
+                    Validate on the Validation Set
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-gray-600 mb-4">
-                    Dive deeper into your model&apos;s performance by visually inspecting its predictions on the validation dataset. This is the best way to understand where your model excels and where it needs improvement.
+                    Review the validation folder to confirm pass/fail logic and spot missed detections before deploying. If results need work, jump back into the annotation studio to refine labels and retrain.
                   </p>
-                  <Button
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <Button
+                        asChild
+                        variant="default"
+                        size="lg"
+                        className="w-full bg-amber-600 hover:bg-amber-700 shadow-lg"
+                    >
+                        <Link to={createPageUrl(`AnnotationReview?runId=${trainingRun.id}`)}>
+                            <Target className="w-5 h-5 mr-2" />
+                            Validate Model Performance
+                        </Link>
+                    </Button>
+                    <Button
                       asChild
-                      variant="default"
+                      variant="outline"
                       size="lg"
-                      className="w-full bg-amber-600 hover:bg-amber-700 shadow-lg"
-                  >
-                      <Link to={createPageUrl(`AnnotationReview?runId=${trainingRun.id}`)}>
-                          <Target className="w-5 h-5 mr-2" />
-                          Validate Model Performance
+                      className="w-full"
+                    >
+                      <Link to={createPageUrl(`AnnotationStudio?projectId=${trainingRun.project_id}`)}>
+                        <PenTool className="w-5 h-5 mr-2" />
+                        Back to Annotation Studio
                       </Link>
-                  </Button>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -947,6 +961,9 @@ export default function TrainingStatusPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
+                    <p className="text-sm text-gray-600 mb-4">
+                      After validation, deploy to enable inference on new images. You can always return to the annotation studio if the validation set needs more work.
+                    </p>
                     {deploymentMessage && (
                       <Alert className={`mb-4 ${deploymentMessage.includes('failed') ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
                         <AlertDescription className={deploymentMessage.includes('failed') ? 'text-red-700' : 'text-green-700'}>
@@ -998,7 +1015,7 @@ export default function TrainingStatusPage() {
                         <Link to={createPageUrl(`ResultsAndAnalysis?modelId=${trainingRun.id}`)}>
                           <Button variant="outline" className="border-amber-200 text-amber-700 hover:bg-amber-50">
                             <Target className="w-4 h-4 mr-2" />
-                            Test Model
+                            Run Inference on New Images
                           </Button>
                         </Link>
                       )}

@@ -19,7 +19,6 @@ export function Toaster() {
         description,
         action,
         open,
-        onOpenChange,
         ...props
       }) {
         if (!open) {

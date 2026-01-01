@@ -75,7 +75,18 @@ export async function updateProject(projectId, updates) {
   if (error) throw error;
 }
 
+async function deletePendingTrainingRuns(projectIds) {
+  if (!Array.isArray(projectIds) || projectIds.length === 0) return;
+  const { error } = await supabase
+    .from("training_runs")
+    .delete()
+    .in("project_id", projectIds)
+    .in("status", ["queued"]);
+  if (error) throw error;
+}
+
 export async function deleteProject(projectId) {
+  await deletePendingTrainingRuns([projectId]);
   const { error } = await supabase
     .from("projects")
     .delete()
@@ -85,6 +96,7 @@ export async function deleteProject(projectId) {
 
 export async function deleteProjects(projectIds) {
   if (!Array.isArray(projectIds) || projectIds.length === 0) return;
+  await deletePendingTrainingRuns(projectIds);
   const { error } = await supabase
     .from("projects")
     .delete()

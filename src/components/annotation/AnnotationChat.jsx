@@ -148,7 +148,7 @@ export default function AnnotationChat({
                 transition={{ duration: 0.2, ease: "easeOut" }}
                 className="overflow-hidden"
               >
-                <div className="mt-3">
+                <div className="mt-3 pb-3">
                   <label className="font-semibold text-sm text-gray-900 mb-2 block">Brush Size: <span className="text-indigo-700">{brushSize}px</span></label>
                   <Slider
                     value={[brushSize]}
@@ -163,7 +163,7 @@ export default function AnnotationChat({
           </AnimatePresence>
 
           {/* Quick Responses */}
-          <div className="space-y-2">
+          <div className="space-y-2 mt-2">
             <div className="flex items-center gap-2 mb-2">
                 <Lightbulb className="w-4 h-4 text-indigo-700" />
                 <span className="font-semibold text-sm text-gray-900">2. Ask for Help</span>

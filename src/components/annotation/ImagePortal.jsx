@@ -1,6 +1,8 @@
 
 import React, { useState, useCallback } from "react";
 import { deleteStepImage, deleteStepImages, updateStepImage } from "@/api/db";
+import { TrainingRun } from "@/api/entities";
+import { createSignedImageUrl } from "@/api/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,7 +45,9 @@ import {
   Move,
   Expand,
   Minimize2,
-  Target // New import
+  Target, // New import
+  Play,
+  Loader2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -63,8 +67,6 @@ import {
 
 import ImageUploadDialog from "./ImageUploadDialog";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-
 export default function ImagePortal({
   currentStep,
   stepImages,
@@ -80,6 +82,7 @@ export default function ImagePortal({
   const [sortBy, setSortBy] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [minClassCount, setMinClassCount] = useState('any');
   const [filterGroup, setFilterGroup] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -94,6 +97,15 @@ export default function ImagePortal({
 
   // New state for upload dialog
   const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [showInferenceDialog, setShowInferenceDialog] = useState(false);
+  const [inferenceScope, setInferenceScope] = useState("folder");
+  const [inferenceModel, setInferenceModel] = useState(null);
+  const [inferenceModelSource, setInferenceModelSource] = useState("auto");
+  const [isInferenceLoading, setIsInferenceLoading] = useState(false);
+  const [isInferenceRunning, setIsInferenceRunning] = useState(false);
+  const [inferenceProgress, setInferenceProgress] = useState({ total: 0, completed: 0 });
+  const [inferenceSummary, setInferenceSummary] = useState(null);
+  const [inferenceError, setInferenceError] = useState("");
 
   // New state for group management
   const [showGroupDialog, setShowGroupDialog] = useState(false);
@@ -421,6 +433,18 @@ export default function ImagePortal({
     }
   };
 
+  const buildInferenceUrl = (endpoint) => {
+    if (!endpoint) return "";
+    try {
+      const url = new URL(endpoint, window.location.origin);
+      url.searchParams.set("save", "1");
+      return url.toString();
+    } catch {
+      const separator = endpoint.includes("?") ? "&" : "?";
+      return `${endpoint}${separator}save=1`;
+    }
+  };
+
   const navigateToPrevImage = () => {
     if (groupedAndFilteredImages.length === 0) return;
 
@@ -484,14 +508,6 @@ export default function ImagePortal({
     }
   };
 
-  const encodeStoragePath = (path) => {
-    if (!path) return "";
-    return String(path)
-      .split("/")
-      .map((segment) => encodeURIComponent(segment))
-      .join("/");
-  };
-
   const extractBucketFromUrl = (url) => {
     if (!url) return null;
     try {
@@ -504,37 +520,6 @@ export default function ImagePortal({
       return null;
     }
   };
-
-  const getSupabaseOriginFromUrl = (url) => {
-    if (!url) return null;
-    try {
-      const parsed = new URL(url);
-      if (parsed.pathname.includes("/storage/v1/")) {
-        return parsed.origin;
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  };
-
-  const getSupabaseOriginForImage = (image) => {
-    const candidates = [
-      image?.source_thumbnail_url,
-      image?.source_display_url,
-      image?.source_image_url,
-      image?.thumbnail_url,
-      image?.display_url,
-      image?.image_url,
-    ];
-    for (const candidate of candidates) {
-      const origin = getSupabaseOriginFromUrl(candidate);
-      if (origin) return origin;
-    }
-    return null;
-  };
-
-  const buildPublicThumbnailUrl = () => null;
 
   const normalizeStorageUrl = (url) => {
     if (!url) return url;
@@ -584,7 +569,6 @@ export default function ImagePortal({
   const getImageUrl = (image, context = 'full') => {
     switch (context) {
       case 'thumbnail': {
-        const publicThumb = buildPublicThumbnailUrl(image);
         const candidates = [
           image?.thumbnail_url,
           image?.source_thumbnail_url,
@@ -619,6 +603,24 @@ export default function ImagePortal({
             image?.source_thumbnail_url
         );
     }
+  };
+
+  const resolveInferenceImageUrl = async (image) => {
+    if (!image) return null;
+    const currentUrl = getImageUrl(image, "full");
+    if (currentUrl && (!isSupabasePublicUrl(currentUrl) || isSupabaseSignedUrl(currentUrl))) {
+      return currentUrl;
+    }
+    const bucket = image?.storage_bucket || extractBucketFromUrl(currentUrl);
+    const path = image?.storage_path;
+    if (bucket && path) {
+      try {
+        return await createSignedImageUrl(bucket, path, { expiresIn: 3600 });
+      } catch (error) {
+        console.error("Failed to sign image for inference:", error);
+      }
+    }
+    return currentUrl;
   };
 
   const isImageProcessing = (image) => {
@@ -659,14 +661,39 @@ export default function ImagePortal({
     }
   }, []);
 
+  const getInferenceFolderName = useCallback(() => {
+    if (filterGroup && filterGroup !== "all") return filterGroup;
+    if (currentImage?.image_group) return currentImage.image_group;
+    return "Untagged";
+  }, [currentImage, filterGroup]);
+
+  const getImageAnnotations = useCallback((image) => {
+    if (!image) return [];
+    return Array.isArray(image?.annotations)
+      ? image.annotations
+      : (image?.annotations?.annotations || []);
+  }, []);
+
+  const getImageClassCount = useCallback((image) => {
+    const annotations = getImageAnnotations(image);
+    const classes = new Set();
+    annotations.forEach((annotation) => {
+      if (!annotation || typeof annotation !== "object") return;
+      const rawName = annotation.class || annotation.label || annotation.class_name || annotation.name;
+      const name = typeof rawName === "string" ? rawName.trim() : "";
+      if (name) {
+        classes.add(name);
+      }
+    });
+    return classes.size;
+  }, [getImageAnnotations]);
+
   const getImageAnnotationStatus = useCallback((image) => {
     if (isImageProcessing(image)) return 'pending';
     if (image?.no_annotations_needed) return 'skipped';
-    const imageAnnotations = Array.isArray(image?.annotations)
-      ? image.annotations
-      : (image?.annotations?.annotations || []);
+    const imageAnnotations = getImageAnnotations(image);
     return imageAnnotations.length > 0 ? 'completed' : 'pending';
-  }, []);
+  }, [getImageAnnotations]);
 
 
   const getStatusIcon = (status) => {
@@ -721,6 +748,15 @@ export default function ImagePortal({
         if (filterStatus === 'pending' && status !== 'pending') return false;
       }
 
+      // Min class filter
+      if (minClassCount !== 'any') {
+        const minCount = Number(minClassCount);
+        if (!Number.isNaN(minCount)) {
+          const classCount = getImageClassCount(image);
+          if (classCount < minCount) return false;
+        }
+      }
+
       // Group filter
       if (filterGroup !== 'all') {
         const imageGroup = image.image_group || 'Untagged';
@@ -752,7 +788,18 @@ export default function ImagePortal({
     });
 
     return filtered;
-  }, [stepImages, searchTerm, filterStatus, filterGroup, sortBy, sortOrder, getImageAnnotationStatus, getImageName]);
+  }, [
+    stepImages,
+    searchTerm,
+    filterStatus,
+    minClassCount,
+    filterGroup,
+    sortBy,
+    sortOrder,
+    getImageAnnotationStatus,
+    getImageClassCount,
+    getImageName
+  ]);
 
   // Group the filtered images - include empty groups
   const groupedImages = React.useMemo(() => {
@@ -793,6 +840,163 @@ export default function ImagePortal({
   // Selection state derived values
   const areAllSelected = selectedImages.size > 0 && selectedImages.size === groupedAndFilteredImages.length;
   const areSomeSelected = selectedImages.size > 0 && selectedImages.size < groupedAndFilteredImages.length;
+
+  const inferenceImages = React.useMemo(() => {
+    if (!stepImages.length) return [];
+    if (inferenceScope === "selected") {
+      return stepImages.filter((image) => selectedImages.has(image.id));
+    }
+    if (inferenceScope === "folder") {
+      const groupName = getInferenceFolderName();
+      return stepImages.filter((image) => (image.image_group || "Untagged") === groupName);
+    }
+    return stepImages;
+  }, [getInferenceFolderName, inferenceScope, selectedImages, stepImages]);
+  const selectedInferenceCount = React.useMemo(
+    () => stepImages.filter((image) => selectedImages.has(image.id)).length,
+    [selectedImages, stepImages]
+  );
+  const folderInferenceCount = React.useMemo(() => {
+    const groupName = getInferenceFolderName();
+    return stepImages.filter((image) => (image.image_group || "Untagged") === groupName).length;
+  }, [getInferenceFolderName, stepImages]);
+  const allInferenceCount = stepImages.length;
+
+  const inferenceModelLabel = inferenceModel
+    ? `${inferenceModel.run_name || inferenceModel.base_model || "Deployed model"}`
+    : "No model selected";
+  const inferenceModelSourceLabel = inferenceModelSource === "configured"
+    ? "Configured model"
+    : inferenceModelSource === "latest"
+      ? "Latest deployed model"
+      : "Model";
+  const isInferenceReady =
+    Boolean(inferenceModel?.deployment_url) &&
+    inferenceModel?.is_deployed === true &&
+    inferenceModel?.deployment_status === "deployed";
+  const inferenceDisabledReason = React.useMemo(() => {
+    if (!stepImages.length) return "Upload images to enable inference.";
+    if (isInferenceLoading) return "Loading model status...";
+    if (!inferenceModel) {
+      return currentStep?.inference_model_id
+        ? "Selected model not found."
+        : "No deployed model for this step.";
+    }
+    if (!isInferenceReady) return "Deploy the selected model to enable inference.";
+    return "Run inference on images.";
+  }, [currentStep?.inference_model_id, inferenceModel, isInferenceLoading, isInferenceReady, stepImages.length]);
+
+  React.useEffect(() => {
+    let isActive = true;
+
+    const loadInferenceModel = async () => {
+      if (!currentStep?.id) {
+        setInferenceModel(null);
+        setInferenceModelSource("auto");
+        return;
+      }
+      setIsInferenceLoading(true);
+      try {
+        let nextModel = null;
+        let source = "auto";
+        if (currentStep?.inference_model_id) {
+          const runs = await TrainingRun.filter({ id: currentStep.inference_model_id });
+          nextModel = runs[0] || null;
+          source = "configured";
+        } else {
+          const deployedRuns = await TrainingRun.filter(
+            { step_id: currentStep.id, is_deployed: true, deployment_status: "deployed" },
+            "-created_date"
+          );
+          nextModel = deployedRuns[0] || null;
+          source = "latest";
+        }
+        if (!isActive) return;
+        setInferenceModel(nextModel);
+        setInferenceModelSource(source);
+      } catch (error) {
+        if (isActive) {
+          console.error("Error loading inference model:", error);
+          setInferenceModel(null);
+          setInferenceModelSource("auto");
+        }
+      } finally {
+        if (isActive) {
+          setIsInferenceLoading(false);
+        }
+      }
+    };
+
+    loadInferenceModel();
+    return () => {
+      isActive = false;
+    };
+  }, [currentStep?.id, currentStep?.inference_model_id]);
+
+  const handleRunInference = async () => {
+    if (!isInferenceReady || !inferenceModel?.deployment_url) {
+      setInferenceError("Deploy a model for this step to enable inference.");
+      return;
+    }
+
+    if (!inferenceImages.length) {
+      setInferenceError("Select a scope that contains at least one image.");
+      return;
+    }
+
+    setInferenceError("");
+    setInferenceSummary(null);
+    setIsInferenceRunning(true);
+    setInferenceProgress({ total: inferenceImages.length, completed: 0 });
+
+    const requestUrl = buildInferenceUrl(inferenceModel.deployment_url);
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const image of inferenceImages) {
+      try {
+        const imageUrl = await resolveInferenceImageUrl(image);
+        if (!imageUrl) {
+          throw new Error("Missing image URL for inference.");
+        }
+        const response = await fetch(requestUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_url: imageUrl,
+            url: imageUrl,
+            step_image_id: image.id,
+          }),
+        });
+
+        if (!response.ok) {
+          let message = `Inference failed (${response.status}).`;
+          try {
+            const contentType = response.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+              const payload = await response.json();
+              message = payload?.error || payload?.message || message;
+            }
+          } catch {
+            // Ignore response parsing errors for inference failures.
+          }
+          throw new Error(message);
+        }
+        successCount += 1;
+      } catch (error) {
+        console.error("Inference error for image:", image?.id, error);
+        failureCount += 1;
+      } finally {
+        setInferenceProgress((prev) => ({
+          total: prev.total,
+          completed: Math.min(prev.completed + 1, prev.total),
+        }));
+      }
+    }
+
+    setInferenceSummary({ successCount, failureCount, total: inferenceImages.length });
+    setIsInferenceRunning(false);
+  };
 
   // Context menu component for images
   const ImageContextMenu = ({ image, children }) => (
@@ -1008,6 +1212,30 @@ export default function ImagePortal({
 
             <Separator orientation="vertical" className="h-6" />
 
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setInferenceError("");
+                setInferenceSummary(null);
+                setShowInferenceDialog(true);
+              }}
+              disabled={isInferenceLoading || !isInferenceReady || stepImages.length === 0 || isInferenceRunning}
+              title={inferenceDisabledReason}
+            >
+              {isInferenceRunning ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 mr-2" />
+                  Run detection
+                </>
+              )}
+            </Button>
+
             {/* Selection mode toggle */}
             <Button
               variant={isSelectionMode ? "default" : "outline"}
@@ -1165,7 +1393,20 @@ export default function ImagePortal({
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="annotated">Annotated</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="pending">Not annotated</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={minClassCount} onValueChange={setMinClassCount}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any classes</SelectItem>
+                  <SelectItem value="1">1+ classes</SelectItem>
+                  <SelectItem value="2">2+ classes</SelectItem>
+                  <SelectItem value="3">3+ classes</SelectItem>
+                  <SelectItem value="4">4+ classes</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1756,6 +1997,115 @@ export default function ImagePortal({
               })()}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showInferenceDialog}
+        onOpenChange={(open) => {
+          if (!open && !isInferenceRunning) {
+            setInferenceError("");
+            setInferenceSummary(null);
+          }
+          setShowInferenceDialog(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Run detection</DialogTitle>
+            <DialogDescription>
+              Run the deployed model and store predictions for this step.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">{inferenceModelSourceLabel}</span>
+                <Badge variant="outline" className="text-xs">
+                  {isInferenceReady ? "Deployed" : "Not deployed"}
+                </Badge>
+              </div>
+              <div className="mt-1 text-xs text-gray-500">{inferenceModelLabel}</div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-medium text-gray-700">Scope</span>
+              <Select
+                value={inferenceScope}
+                onValueChange={(value) => {
+                  setInferenceError("");
+                  setInferenceSummary(null);
+                  setInferenceScope(value);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="selected">
+                    Selected images ({selectedInferenceCount})
+                  </SelectItem>
+                  <SelectItem value="folder">
+                    Folder: {getInferenceFolderName()} ({folderInferenceCount})
+                  </SelectItem>
+                  <SelectItem value="all">
+                    All images ({allInferenceCount})
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                {inferenceImages.length} image{inferenceImages.length === 1 ? "" : "s"} in scope.
+              </p>
+            </div>
+
+            {isInferenceRunning && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+                Running inference: {inferenceProgress.completed}/{inferenceProgress.total}
+              </div>
+            )}
+
+            {inferenceSummary && !isInferenceRunning && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                Completed. {inferenceSummary.successCount} succeeded, {inferenceSummary.failureCount} failed.
+              </div>
+            )}
+
+            {inferenceError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {inferenceError}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowInferenceDialog(false)}
+              disabled={isInferenceRunning}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={handleRunInference}
+              disabled={
+                !isInferenceReady ||
+                isInferenceRunning ||
+                inferenceImages.length === 0
+              }
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isInferenceRunning ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 mr-2" />
+                  Run detection
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -26,6 +26,7 @@ const Welcome = lazyWithPreload(() => import("./Welcome"));
 const Pricing = lazyWithPreload(() => import("./Pricing"));
 const Billing = lazyWithPreload(() => import("./Billing"));
 const ResetPassword = lazyWithPreload(() => import("./ResetPassword"));
+const Onboarding = lazyWithPreload(() => import("./Onboarding"));
 
 function BuildVariantsComingSoon() {
     return (
@@ -59,6 +60,7 @@ const SECONDARY_PRELOAD_ORDER = [
     "Welcome",
     "Pricing",
     "Billing",
+    "Onboarding",
 ];
 
 const PAGES = {
@@ -86,6 +88,8 @@ const PAGES = {
     Settings: Settings,
     
     Dashboard: Dashboard,
+
+    Onboarding: Onboarding,
 
     Pricing: Pricing,
 
@@ -121,6 +125,7 @@ function PagesContent() {
     });
     const normalizedPath = location.pathname.replace(/\/+$/, "") || "/";
     const currentPage = _getCurrentPage(location.pathname);
+    const isAuthenticated = Boolean(user);
 
     useEffect(() => {
         if (!user?.id) {
@@ -153,7 +158,7 @@ function PagesContent() {
         if (
             normalizedPath === "/welcome" ||
             normalizedPath.toLowerCase() === "/reset-password" ||
-            (normalizedPath.toLowerCase() === "/pricing" && !user)
+            (normalizedPath.toLowerCase() === "/pricing" && !isAuthenticated)
         ) {
             return;
         }
@@ -193,7 +198,7 @@ function PagesContent() {
         return () => {
             cancelled = true;
         };
-    }, [currentPage, navigationOrder]);
+    }, [normalizedPath, navigationOrder, isAuthenticated]);
     
     if (normalizedPath === "/welcome") {
         return (
@@ -221,9 +226,7 @@ function PagesContent() {
         <Layout currentPageName={currentPage}>
             <Suspense fallback={<PageLoading />}>
                 <Routes>            
-                    
                         <Route path="/" element={<Projects />} />
-                    
                     
                     <Route path="/Projects" element={<Projects />} />
                     
@@ -248,6 +251,9 @@ function PagesContent() {
                     <Route path="/Settings" element={<Settings />} />
                     
                     <Route path="/Dashboard" element={<Dashboard />} />
+
+                    <Route path="/Onboarding" element={<Onboarding />} />
+                    <Route path="/onboarding" element={<Onboarding />} />
 
                     <Route path="/Pricing" element={<Pricing />} />
                     <Route path="/pricing" element={<Pricing />} />
